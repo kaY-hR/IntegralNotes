@@ -6,7 +6,7 @@ const { spawn } = require("node:child_process");
 const HOST = "127.0.0.1";
 const PORT = 5173;
 const APP_MARKER_PATH = "/src/renderer/App.tsx";
-const APP_MARKER_TEXT = "Research Notes Dock";
+const APP_MARKER_TEXT = "Open Folder";
 
 function canConnectTcp(host, port) {
   return new Promise((resolve) => {

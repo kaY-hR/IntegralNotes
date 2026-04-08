@@ -940,11 +940,6 @@ export function App(): JSX.Element {
       <aside className="sidebar" ref={sidebarRef}>
         <div className="sidebar__panel">
           <div className="sidebar__panel-header">
-            <div className="sidebar__panel-heading">
-              <p className="sidebar__section-title">Explorer</p>
-              <strong>{workspace?.rootName ?? "No folder selected"}</strong>
-              <span className="sidebar__root-path">{workspace?.rootPath ?? "Open a folder to begin"}</span>
-            </div>
             <div className="sidebar__panel-actions">
               <button
                 aria-label="New note"
@@ -1025,35 +1020,7 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="workspace">
-        <header className="workspace__header">
-          <div>
-            <p className="workspace__eyebrow">Editor</p>
-            <h2>{activeTab?.name ?? "No note selected"}</h2>
-            <p className="workspace__path">
-              {activeTab
-                ? `${activeTab.relativePath}${isDirty(activeTab) ? "  |  unsaved changes" : ""}`
-                : "左のツリーから Markdown ノートを開いてください。"}
-            </p>
-          </div>
-
-          <div className="workspace__controls">
-            <button
-              className="button button--primary"
-              disabled={!activeTab || activeTab.isSaving}
-              onClick={() => {
-                if (activeTab) {
-                  void saveNote(activeTab.relativePath);
-                }
-              }}
-              type="button"
-            >
-              {activeTab?.isSaving ? "Saving..." : "Save"}
-            </button>
-            <div className="workspace__status">{statusMessage}</div>
-          </div>
-        </header>
-
-        <section className="workspace__layout">
+        <section className="workspace__layout" data-status={statusMessage}>
           <FlexLayout.Layout
             factory={editorFactory}
             model={model}
