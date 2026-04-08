@@ -30,7 +30,15 @@ interface DeleteDialogState {
   title: string;
 }
 
+interface TreeContextMenuState {
+  entry: WorkspaceEntry;
+  x: number;
+  y: number;
+}
+
 const MAIN_TABSET_ID = "editor-main";
+const NEW_FILE_ICON_URL = new URL("../../docs/00_履歴/ファイル追加.png", import.meta.url).href;
+const NEW_FOLDER_ICON_URL = new URL("../../docs/00_履歴/フォルダアイコン15.png", import.meta.url).href;
 
 function createLayoutModel(): FlexLayout.Model {
   return FlexLayout.Model.fromJson({
@@ -201,6 +209,29 @@ function toErrorMessage(error: unknown): string {
   return "不明なエラーが発生しました。";
 }
 
+function isEditableElement(element: HTMLElement | null): boolean {
+  if (!element) {
+    return false;
+  }
+
+  return (
+    element.tagName === "INPUT" ||
+    element.tagName === "TEXTAREA" ||
+    element.isContentEditable ||
+    element.closest("[contenteditable='true']") !== null
+  );
+}
+
+function clampContextMenuPosition(x: number, y: number): Pick<TreeContextMenuState, "x" | "y"> {
+  const menuWidth = 188;
+  const menuHeight = 196;
+
+  return {
+    x: Math.max(8, Math.min(x, window.innerWidth - menuWidth)),
+    y: Math.max(8, Math.min(y, window.innerHeight - menuHeight))
+  };
+}
+
 export function App(): JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
   const [openTabs, setOpenTabs] = useState<Record<string, OpenNoteTab>>({});
@@ -213,8 +244,10 @@ export function App(): JSX.Element {
   const [deleteDialogPending, setDeleteDialogPending] = useState(false);
   const [inlineEditor, setInlineEditor] = useState<FileTreeInlineEditorState | null>(null);
   const [inlineEditorPending, setInlineEditorPending] = useState(false);
+  const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
+  const sidebarRef = useRef<HTMLElement>(null);
 
   const selectedEntry = workspace ? findEntryByPath(workspace.entries, selectedEntryPath) : undefined;
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
@@ -256,6 +289,7 @@ export function App(): JSX.Element {
     } = {}
   ): void => {
     setInlineEditor(null);
+    setContextMenu(null);
 
     if (options.resetTabs) {
       resetOpenTabs();
@@ -352,6 +386,83 @@ export function App(): JSX.Element {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null;
+
+      if (target?.closest(".tree-context-menu")) {
+        return;
+      }
+
+      setContextMenu(null);
+    };
+
+    const closeContextMenu = (): void => {
+      setContextMenu(null);
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("blur", closeContextMenu);
+    window.addEventListener("resize", closeContextMenu);
+    document.addEventListener("scroll", closeContextMenu, true);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("blur", closeContextMenu);
+      window.removeEventListener("resize", closeContextMenu);
+      document.removeEventListener("scroll", closeContextMenu, true);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && contextMenu) {
+        event.preventDefault();
+        setContextMenu(null);
+        return;
+      }
+
+      if (inlineEditor || deleteDialog || !selectedEntry) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+
+      if (isEditableElement(target)) {
+        return;
+      }
+
+      const activeElement = document.activeElement as HTMLElement | null;
+
+      if (!sidebarRef.current?.contains(activeElement)) {
+        return;
+      }
+
+      if (event.key === "F2") {
+        event.preventDefault();
+        setContextMenu(null);
+        startRenameInline(selectedEntry);
+        return;
+      }
+
+      if (event.key === "Delete") {
+        event.preventDefault();
+        setContextMenu(null);
+        openDeleteDialog(selectedEntry);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu, deleteDialog, inlineEditor, selectedEntry]);
 
   const openNote = async (relativePath: string): Promise<void> => {
     const existingTab = openTabs[relativePath];
@@ -628,6 +739,7 @@ export function App(): JSX.Element {
     const locationLabel = basePath.length > 0 ? `${basePath} 配下` : `${workspace.rootName} 直下`;
 
     setDeleteDialog(null);
+    setContextMenu(null);
     setInlineEditor({
       mode: "create",
       initialValue: "",
@@ -657,6 +769,7 @@ export function App(): JSX.Element {
     }
 
     setDeleteDialog(null);
+    setContextMenu(null);
     setInlineEditor({
       mode: "rename",
       initialValue: displayNameForRename(entry),
@@ -676,6 +789,7 @@ export function App(): JSX.Element {
     }
 
     setInlineEditor(null);
+    setContextMenu(null);
     setDeleteDialog({
       title: "削除確認",
       description:
@@ -707,6 +821,17 @@ export function App(): JSX.Element {
     } finally {
       setDeleteDialogPending(false);
     }
+  };
+
+  const openTreeContextMenu = (entry: WorkspaceEntry, x: number, y: number): void => {
+    const position = clampContextMenuPosition(x, y);
+
+    setSelectedEntryPath(entry.relativePath);
+    setContextMenu({
+      entry,
+      x: position.x,
+      y: position.y
+    });
   };
 
   const updateTabContent = (relativePath: string, nextContent: string): void => {
@@ -801,106 +926,50 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell">
       <header className="app-menubar">
-        <div className="app-menubar__group">
-          <button
-            className="button button--ghost button--menu"
-            onClick={() => {
-              void openWorkspaceFolder();
-            }}
-            type="button"
-          >
-            Open Folder
-          </button>
-          <button
-            className="button button--ghost button--menu"
-            onClick={() => {
-              startCreateInline("file");
-            }}
-            type="button"
-          >
-            Note
-          </button>
-          <button
-            className="button button--ghost button--menu"
-            onClick={() => {
-              startCreateInline("directory");
-            }}
-            type="button"
-          >
-            Folder
-          </button>
-          <button
-            className="button button--ghost button--menu"
-            onClick={() => {
-              startRenameInline();
-            }}
-            type="button"
-          >
-            Rename
-          </button>
-          <button
-            className="button button--ghost button--menu"
-            onClick={() => {
-              openDeleteDialog();
-            }}
-            type="button"
-          >
-            Delete
-          </button>
-          <button
-            className="button button--ghost button--menu"
-            onClick={() => {
-              void refreshWorkspace("ワークスペースを更新しました");
-            }}
-            type="button"
-          >
-            Refresh
-          </button>
-        </div>
-
-        <div className="app-menubar__group app-menubar__group--meta">
-          <div className="app-menubar__meta">
-            <span className="app-menubar__meta-label">Workspace</span>
-            <strong>{workspace?.rootName ?? "No folder selected"}</strong>
-            <span className="app-menubar__meta-path">
-              {workspace?.rootPath ?? "Open Folder からワークスペースを選択してください。"}
-            </span>
-          </div>
-          <button
-            className="button button--primary"
-            disabled={!activeTab || activeTab.isSaving}
-            onClick={() => {
-              if (activeTab) {
-                void saveNote(activeTab.relativePath);
-              }
-            }}
-            type="button"
-          >
-            {activeTab?.isSaving ? "Saving..." : "Save"}
-          </button>
-        </div>
+        <button
+          className="button button--ghost button--menu"
+          onClick={() => {
+            void openWorkspaceFolder();
+          }}
+          type="button"
+        >
+          Open Folder
+        </button>
       </header>
 
-      <aside className="sidebar">
+      <aside className="sidebar" ref={sidebarRef}>
         <div className="sidebar__panel">
           <div className="sidebar__panel-header">
-            <div>
+            <div className="sidebar__panel-heading">
               <p className="sidebar__section-title">Explorer</p>
               <strong>{workspace?.rootName ?? "No folder selected"}</strong>
               <span className="sidebar__root-path">{workspace?.rootPath ?? "Open a folder to begin"}</span>
             </div>
             <div className="sidebar__panel-actions">
               <button
-                className="button button--ghost"
+                aria-label="New note"
+                className="button button--icon"
                 onClick={() => {
-                  void openWorkspaceFolder();
+                  startCreateInline("file");
                 }}
+                title="New note"
                 type="button"
               >
-                Open
+                <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FILE_ICON_URL} />
               </button>
               <button
-                className="button button--ghost"
+                aria-label="New folder"
+                className="button button--icon"
+                onClick={() => {
+                  startCreateInline("directory");
+                }}
+                title="New folder"
+                type="button"
+              >
+                <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FOLDER_ICON_URL} />
+              </button>
+              <button
+                className="button button--ghost sidebar__action-text"
                 onClick={() => {
                   void refreshWorkspace("ワークスペースを更新しました");
                 }}
@@ -909,48 +978,6 @@ export function App(): JSX.Element {
                 Sync
               </button>
             </div>
-          </div>
-
-          <div className="sidebar__actions">
-            <button
-              className="button button--primary"
-              onClick={() => {
-                startCreateInline("file");
-              }}
-              type="button"
-            >
-              New
-            </button>
-            <button
-              className="button button--ghost"
-              onClick={() => {
-                startCreateInline("directory");
-              }}
-              type="button"
-            >
-              Folder
-            </button>
-          </div>
-
-          <div className="sidebar__actions sidebar__actions--secondary">
-            <button
-              className="button button--ghost"
-              onClick={() => {
-                startRenameInline();
-              }}
-              type="button"
-            >
-              Rename
-            </button>
-            <button
-              className="button button--danger button--subtle"
-              onClick={() => {
-                openDeleteDialog();
-              }}
-              type="button"
-            >
-              Delete
-            </button>
           </div>
 
           <div className="sidebar__tree">
@@ -968,14 +995,10 @@ export function App(): JSX.Element {
                     setInlineEditor(null);
                   }
                 }}
-                onCreateEntry={(kind, entry) => {
-                  startCreateInline(kind, entry);
-                }}
-                onDeleteEntry={openDeleteDialog}
+                onContextMenuEntry={openTreeContextMenu}
                 onOpenFile={(relativePath) => {
                   void openNote(relativePath);
                 }}
-                onRenameEntry={startRenameInline}
                 onSelectEntry={setSelectedEntryPath}
                 onSubmitEditing={(value) => {
                   void submitInlineEditor(value);
@@ -1014,6 +1037,18 @@ export function App(): JSX.Element {
           </div>
 
           <div className="workspace__controls">
+            <button
+              className="button button--primary"
+              disabled={!activeTab || activeTab.isSaving}
+              onClick={() => {
+                if (activeTab) {
+                  void saveNote(activeTab.relativePath);
+                }
+              }}
+              type="button"
+            >
+              {activeTab?.isSaving ? "Saving..." : "Save"}
+            </button>
             <div className="workspace__status">{statusMessage}</div>
           </div>
         </header>
@@ -1057,6 +1092,59 @@ export function App(): JSX.Element {
           />
         </section>
       </main>
+
+      {contextMenu ? (
+        <div
+          className="tree-context-menu"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y
+          }}
+        >
+          {contextMenu.entry.kind === "directory" ? (
+            <>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  startCreateInline("file", contextMenu.entry);
+                }}
+                type="button"
+              >
+                New Note
+              </button>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  startCreateInline("directory", contextMenu.entry);
+                }}
+                type="button"
+              >
+                New Folder
+              </button>
+              <div className="tree-context-menu__separator" />
+            </>
+          ) : null}
+
+          <button
+            className="tree-context-menu__item"
+            onClick={() => {
+              startRenameInline(contextMenu.entry);
+            }}
+            type="button"
+          >
+            Rename
+          </button>
+          <button
+            className="tree-context-menu__item tree-context-menu__item--danger"
+            onClick={() => {
+              openDeleteDialog(contextMenu.entry);
+            }}
+            type="button"
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
 
       {deleteDialog ? (
         <WorkspaceDialog

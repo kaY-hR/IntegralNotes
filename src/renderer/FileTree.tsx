@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 
 import type { WorkspaceEntry, WorkspaceEntryKind } from "../shared/workspace";
 
@@ -23,10 +23,8 @@ interface FileTreeProps {
   expandedPaths: Set<string>;
   selectedPath: string;
   onCancelEditing: () => void;
-  onCreateEntry: (kind: WorkspaceEntryKind, entry: WorkspaceEntry) => void;
-  onDeleteEntry: (entry: WorkspaceEntry) => void;
+  onContextMenuEntry: (entry: WorkspaceEntry, x: number, y: number) => void;
   onOpenFile: (relativePath: string) => void;
-  onRenameEntry: (entry: WorkspaceEntry) => void;
   onSelectEntry: (relativePath: string) => void;
   onSubmitEditing: (value: string) => void;
   onToggleDirectory: (relativePath: string) => void;
@@ -154,10 +152,8 @@ export function FileTree({
   expandedPaths,
   selectedPath,
   onCancelEditing,
-  onCreateEntry,
-  onDeleteEntry,
+  onContextMenuEntry,
   onOpenFile,
-  onRenameEntry,
   onSelectEntry,
   onSubmitEditing,
   onToggleDirectory
@@ -185,10 +181,8 @@ export function FileTree({
           key={entry.relativePath}
           selectedPath={selectedPath}
           onCancelEditing={onCancelEditing}
-          onCreateEntry={onCreateEntry}
-          onDeleteEntry={onDeleteEntry}
+          onContextMenuEntry={onContextMenuEntry}
           onOpenFile={onOpenFile}
-          onRenameEntry={onRenameEntry}
           onSelectEntry={onSelectEntry}
           onSubmitEditing={onSubmitEditing}
           onToggleDirectory={onToggleDirectory}
@@ -209,10 +203,8 @@ function FileTreeNode({
   expandedPaths,
   selectedPath,
   onCancelEditing,
-  onCreateEntry,
-  onDeleteEntry,
+  onContextMenuEntry,
   onOpenFile,
-  onRenameEntry,
   onSelectEntry,
   onSubmitEditing,
   onToggleDirectory
@@ -246,9 +238,18 @@ function FileTreeNode({
     onOpenFile(entry.relativePath);
   };
 
+  const handleContextMenu = (event: MouseEvent): void => {
+    event.preventDefault();
+    onSelectEntry(entry.relativePath);
+    onContextMenuEntry(entry, event.clientX, event.clientY);
+  };
+
   return (
     <div className="tree-node">
-      <div className={`tree-row${isSelected ? " is-selected" : ""}${renameState ? " is-editing" : ""}`}>
+      <div
+        className={`tree-row${isSelected ? " is-selected" : ""}${renameState ? " is-editing" : ""}`}
+        onContextMenu={handleContextMenu}
+      >
         {renameState ? (
           <div className="tree-row__main tree-row__main--editing">
             <span className="tree-row__caret">{isDirectory ? (isExpanded ? "▾" : "▸") : "·"}</span>
@@ -268,55 +269,6 @@ function FileTreeNode({
             <span className="tree-row__label">{entry.name}</span>
           </button>
         )}
-
-        {!renameState ? (
-          <div className="tree-row__actions">
-            {isDirectory ? (
-              <>
-                <button
-                  className="tree-action"
-                  onClick={() => {
-                    onSelectEntry(entry.relativePath);
-                    onCreateEntry("file", entry);
-                  }}
-                  type="button"
-                >
-                  +N
-                </button>
-                <button
-                  className="tree-action"
-                  onClick={() => {
-                    onSelectEntry(entry.relativePath);
-                    onCreateEntry("directory", entry);
-                  }}
-                  type="button"
-                >
-                  +F
-                </button>
-              </>
-            ) : null}
-            <button
-              className="tree-action"
-              onClick={() => {
-                onSelectEntry(entry.relativePath);
-                onRenameEntry(entry);
-              }}
-              type="button"
-            >
-              Ren
-            </button>
-            <button
-              className="tree-action tree-action--danger"
-              onClick={() => {
-                onSelectEntry(entry.relativePath);
-                onDeleteEntry(entry);
-              }}
-              type="button"
-            >
-              Del
-            </button>
-          </div>
-        ) : null}
       </div>
 
       {shouldRenderChildren ? (
@@ -339,10 +291,8 @@ function FileTreeNode({
               key={child.relativePath}
               selectedPath={selectedPath}
               onCancelEditing={onCancelEditing}
-              onCreateEntry={onCreateEntry}
-              onDeleteEntry={onDeleteEntry}
+              onContextMenuEntry={onContextMenuEntry}
               onOpenFile={onOpenFile}
-              onRenameEntry={onRenameEntry}
               onSelectEntry={onSelectEntry}
               onSubmitEditing={onSubmitEditing}
               onToggleDirectory={onToggleDirectory}
