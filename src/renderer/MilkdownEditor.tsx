@@ -1,6 +1,8 @@
 import { Crepe } from "@milkdown/crepe";
 import { useEffect, useRef } from "react";
 
+import { integralSnippetFeatureConfigs } from "./integralSnippetMenu";
+
 interface MilkdownEditorProps {
   initialValue: string;
   onChange: (markdown: string) => void;
@@ -26,6 +28,7 @@ export function MilkdownEditor({
     }
 
     const editor = new Crepe({
+      featureConfigs: integralSnippetFeatureConfigs,
       root: rootElement,
       defaultValue: initialValue
     });
