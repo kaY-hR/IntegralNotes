@@ -10,7 +10,8 @@ const api: IntegralNotesApi = {
     ipcRenderer.invoke("workspace:saveNote", relativePath, content),
   createEntry: (request) => ipcRenderer.invoke("workspace:createEntry", request),
   renameEntry: (request) => ipcRenderer.invoke("workspace:renameEntry", request),
-  deleteEntry: (request) => ipcRenderer.invoke("workspace:deleteEntry", request)
+  deleteEntry: (request) => ipcRenderer.invoke("workspace:deleteEntry", request),
+  executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request)
 };
 
 contextBridge.exposeInMainWorld("integralNotes", api);

@@ -554,8 +554,161 @@ input:focus-visible {
     0 18px 36px rgba(35, 46, 60, 0.08);
 }
 
-.editor-surface .milkdown .milkdown-code-block .preview {
+.editor-surface .milkdown .integral-code-block {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #d5deea;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(247, 250, 253, 0.98), rgba(240, 246, 252, 0.98)),
+    #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.editor-surface .milkdown .integral-code-block--selected {
+  border-color: #9bbfe1;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 0 0 1px rgba(15, 108, 189, 0.18),
+    0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.editor-surface .milkdown .integral-code-block__toolbar,
+.editor-surface .milkdown .integral-code-block__meta,
+.editor-surface .milkdown .integral-code-block__actions,
+.editor-surface .milkdown .integral-code-block__runbar {
+  display: flex;
+  align-items: center;
+}
+
+.editor-surface .milkdown .integral-code-block__toolbar,
+.editor-surface .milkdown .integral-code-block__runbar {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.editor-surface .milkdown .integral-code-block__meta,
+.editor-surface .milkdown .integral-code-block__actions {
+  gap: 8px;
+}
+
+.editor-surface .milkdown .integral-code-block__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(87, 104, 121, 0.12);
+  color: #5b6d7d;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.editor-surface .milkdown .integral-code-block__badge--accent {
+  background: rgba(15, 108, 189, 0.1);
+  color: #0c5eac;
+}
+
+.editor-surface .milkdown .integral-code-block__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.editor-surface .milkdown .integral-code-block__button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.editor-surface .milkdown .integral-code-block__button--ghost {
+  background: rgba(15, 108, 189, 0.08);
+  color: #0f5ea5;
+}
+
+.editor-surface .milkdown .integral-code-block__button--primary {
+  background: linear-gradient(135deg, #0f6cbd, #004c97);
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 108, 189, 0.24);
+}
+
+.editor-surface .milkdown .integral-code-block__editor-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.editor-surface .milkdown .integral-code-block__editor {
   width: 100%;
+  min-height: 220px;
+  padding: 14px 16px;
+  border: 1px solid #ced9e4;
+  border-radius: 14px;
+  background: #fbfcfd;
+  color: #16324a;
+  font-family:
+    Consolas,
+    "SFMono-Regular",
+    "Cascadia Code",
+    monospace;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.editor-surface .milkdown .integral-code-block__editor:focus {
+  outline: 1px solid #8bbbe6;
+  outline-offset: 0;
+}
+
+.editor-surface .milkdown .integral-code-block__helper,
+.editor-surface .milkdown .integral-code-block__runhint {
+  margin: 0;
+  color: #5e6e7f;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.editor-surface .milkdown .integral-code-block__runbar {
+  flex-wrap: wrap;
+}
+
+.editor-surface .milkdown .integral-code-block__result {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 14px;
+  font-size: 0.82rem;
+}
+
+.editor-surface .milkdown .integral-code-block__result--success {
+  background: rgba(33, 147, 91, 0.08);
+  color: #1e5b42;
+}
+
+.editor-surface .milkdown .integral-code-block__result--error {
+  background: rgba(183, 63, 31, 0.08);
+  color: #8d3319;
+}
+
+.editor-surface .milkdown .integral-code-block__log {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.editor-surface .milkdown .integral-code-block__log li {
+  margin: 0;
 }
 
 .editor-surface .milkdown .integral-json-preview {
@@ -787,6 +940,8 @@ input:focus-visible {
     padding: 14px;
   }
 
+  .editor-surface .milkdown .integral-code-block__toolbar,
+  .editor-surface .milkdown .integral-code-block__runbar,
   .editor-surface .milkdown .integral-json-preview__header,
   .editor-surface .milkdown .integral-json-preview__section-header,
   .editor-surface .milkdown .integral-json-preview__timeline-row {

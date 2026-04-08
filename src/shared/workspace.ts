@@ -53,6 +53,23 @@ export interface DeleteEntryResult {
   deletedKind: WorkspaceEntryKind;
 }
 
+export interface ExecuteIntegralActionRequest {
+  actionId: string;
+  blockType: string;
+  payload: string;
+  params?: Record<string, unknown>;
+}
+
+export interface ExecuteIntegralActionResult {
+  actionId: string;
+  blockType: string;
+  finishedAt: string;
+  logLines: string[];
+  startedAt: string;
+  status: "success";
+  summary: string;
+}
+
 export interface IntegralNotesApi {
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
@@ -61,4 +78,7 @@ export interface IntegralNotesApi {
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;
   renameEntry: (request: RenameEntryRequest) => Promise<RenameEntryResult>;
   deleteEntry: (request: DeleteEntryRequest) => Promise<DeleteEntryResult>;
+  executeIntegralAction: (
+    request: ExecuteIntegralActionRequest
+  ) => Promise<ExecuteIntegralActionResult>;
 }

@@ -3,6 +3,8 @@ import path from "node:path";
 
 import type {
   CreateEntryRequest,
+  ExecuteIntegralActionRequest,
+  ExecuteIntegralActionResult,
   DeleteEntryRequest,
   RenameEntryRequest
 } from "../shared/workspace";
@@ -95,6 +97,94 @@ function registerIpcHandlers(): void {
   ipcMain.handle("workspace:deleteEntry", async (_event, request: DeleteEntryRequest) =>
     workspaceService.deleteEntry(request)
   );
+  ipcMain.handle("integral:executeAction", async (_event, request: ExecuteIntegralActionRequest) =>
+    executeIntegralAction(request)
+  );
+}
+
+async function executeIntegralAction(
+  request: ExecuteIntegralActionRequest
+): Promise<ExecuteIntegralActionResult> {
+  const startedAt = new Date().toISOString();
+  const block = parseIntegralPayload(request.payload);
+
+  await wait(220);
+
+  switch (`${request.blockType}:${request.actionId}`) {
+    case "LC.Method.Gradient:execute": {
+      const params = block?.params;
+      const timeProgram = Array.isArray(params?.["time-prog"]) ? params["time-prog"] : [];
+      const analysisTime = typeof params?.["analysis-time"] === "number" ? params["analysis-time"] : null;
+
+      return {
+        actionId: request.actionId,
+        blockType: request.blockType,
+        finishedAt: new Date().toISOString(),
+        logLines: [
+          "Mock runner selected",
+          `Gradient points: ${timeProgram.length}`,
+          analysisTime === null ? "Analysis time: unset" : `Analysis time: ${analysisTime} min`,
+          "Future hook: spawn external instrument-control executable here"
+        ],
+        startedAt,
+        status: "success",
+        summary: "LC グラジエント操作の実行要求を main process が受理しました。"
+      };
+    }
+
+    case "StandardGraphs.Chromatogram:analyze": {
+      const params = block?.params;
+      const datasets = Array.isArray(params?.data) ? params.data.filter((item) => typeof item === "string") : [];
+
+      return {
+        actionId: request.actionId,
+        blockType: request.blockType,
+        finishedAt: new Date().toISOString(),
+        logLines: [
+          "Mock runner selected",
+          `Datasets: ${datasets.length}`,
+          datasets.length > 0 ? `Input: ${datasets.join(", ")}` : "Input: not set",
+          "Future hook: spawn analysis executable or submit batch job here"
+        ],
+        startedAt,
+        status: "success",
+        summary: "クロマトグラム解析要求を main process が受理しました。"
+      };
+    }
+
+    default:
+      throw new Error(`未対応の Integral action です: ${request.blockType} / ${request.actionId}`);
+  }
+}
+
+function parseIntegralPayload(payload: string): { params?: Record<string, unknown>; type: string } | null {
+  try {
+    const parsed = JSON.parse(payload);
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+
+    if (typeof parsed.type !== "string") {
+      return null;
+    }
+
+    return {
+      params:
+        typeof parsed.params === "object" && parsed.params !== null && !Array.isArray(parsed.params)
+          ? (parsed.params as Record<string, unknown>)
+          : undefined,
+      type: parsed.type
+    };
+  } catch {
+    return null;
+  }
+}
+
+function wait(durationMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
 }
 
 if (!hasSingleInstanceLock) {

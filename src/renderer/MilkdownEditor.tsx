@@ -1,6 +1,7 @@
 import { Crepe } from "@milkdown/crepe";
 import { useEffect, useRef } from "react";
 
+import { installIntegralCodeBlockFeature } from "./integralCodeBlockFeature";
 import { integralSnippetFeatureConfigs } from "./integralSnippetMenu";
 
 interface MilkdownEditorProps {
@@ -32,6 +33,7 @@ export function MilkdownEditor({
       root: rootElement,
       defaultValue: initialValue
     });
+    editor.addFeature(installIntegralCodeBlockFeature);
 
     editor.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
