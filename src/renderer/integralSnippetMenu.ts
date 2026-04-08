@@ -3,6 +3,8 @@ import { commandsCtx } from "@milkdown/kit/core";
 import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
 import { insert } from "@milkdown/kit/utils";
 
+import { renderIntegralJsonCodeBlockPreview } from "./integralJsonPreview";
+
 interface IntegralSnippetTemplate {
   key: string;
   label: string;
@@ -69,5 +71,11 @@ export const integralSnippetFeatureConfigs: NonNullable<CrepeConfig["featureConf
         });
       }
     }
+  },
+  [Crepe.Feature.CodeMirror]: {
+    previewLabel: "Integral UI",
+    previewOnlyByDefault: true,
+    previewToggleText: (previewOnlyMode) => (previewOnlyMode ? "JSON編集" : "UI表示"),
+    renderPreview: (language, content) => renderIntegralJsonCodeBlockPreview(language, content)
   }
 };
