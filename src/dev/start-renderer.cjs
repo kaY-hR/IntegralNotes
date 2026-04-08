@@ -1,9 +1,12 @@
 const http = require("node:http");
 const net = require("node:net");
+const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const HOST = "127.0.0.1";
 const PORT = 5173;
+const APP_MARKER_PATH = "/src/renderer/App.tsx";
+const APP_MARKER_TEXT = "Research Notes Dock";
 
 function canConnectTcp(host, port) {
   return new Promise((resolve) => {
@@ -46,6 +49,40 @@ function canServeHttp(host, port) {
   });
 }
 
+function requestText(host, port, pathName) {
+  return new Promise((resolve) => {
+    const request = http.request(
+      {
+        host,
+        port,
+        path: pathName,
+        method: "GET",
+        timeout: 1500
+      },
+      (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          body += chunk;
+        });
+        response.on("end", () => {
+          resolve({
+            ok: response.statusCode && response.statusCode >= 200 && response.statusCode < 300,
+            body
+          });
+        });
+      }
+    );
+
+    request.once("error", () => resolve({ ok: false, body: "" }));
+    request.once("timeout", () => {
+      request.destroy();
+      resolve({ ok: false, body: "" });
+    });
+    request.end();
+  });
+}
+
 async function main() {
   const tcpOpen = await canConnectTcp(HOST, PORT);
 
@@ -60,11 +97,22 @@ async function main() {
       return;
     }
 
+    const markerResponse = await requestText(HOST, PORT, APP_MARKER_PATH);
+
+    if (!markerResponse.ok || !markerResponse.body.includes(APP_MARKER_TEXT)) {
+      console.error(
+        `[dev:renderer] Port ${PORT} is serving another app. Close the existing server or free the port before starting IntegralNotes.`
+      );
+      process.exit(1);
+      return;
+    }
+
     console.log(`[dev:renderer] Reusing existing renderer on http://${HOST}:${PORT}`);
     return;
   }
 
-  const viteBin = require.resolve("vite/bin/vite.js");
+  const vitePackageJson = require.resolve("vite/package.json");
+  const viteBin = path.join(path.dirname(vitePackageJson), "bin", "vite.js");
   const child = spawn(process.execPath, [viteBin], {
     stdio: "inherit",
     env: process.env,

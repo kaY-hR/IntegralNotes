@@ -55,6 +55,7 @@ export interface DeleteEntryResult {
 
 export interface IntegralNotesApi {
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot>;
+  openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   readNote: (relativePath: string) => Promise<NoteDocument>;
   saveNote: (relativePath: string, content: string) => Promise<NoteDocument>;
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;

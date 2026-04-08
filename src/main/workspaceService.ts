@@ -14,72 +14,57 @@ import type {
   WorkspaceSnapshot
 } from "../shared/workspace";
 
-const SAMPLE_WELCOME = `# IntegralNotes Prototype
+interface WorkspaceServiceOptions {
+  initialRootPath: string;
+  stateFilePath: string;
+}
 
-このノートはワークスペース初期化時に自動生成されます。
-
-## この仮実装でできること
-
-- 左サイドバーで Notes フォルダのツリーを閲覧
-- Markdown ノートの作成・リネーム・削除
-- Milkdown で WYSIWYG 編集
-- FlexLayout でタブを自由にドッキング
-
-## 次の実装候補
-
-1. ノートへの独自 UI ブロック挿入
-2. 解析データの紐付け
-3. サジェスト機能
-`;
-
-const SAMPLE_EXPERIMENT = `# 2026-04-08 実験メモ
-
-## 目的
-
-Gradient 条件の初期メモを残す。
-
-## 手順
-
-1. サンプル準備
-2. 条件設定
-3. クロマト確認
-
-## 所感
-
-- ここに考察を書き足していく
-- 将来的には独自 UI ブロックを差し込む
-`;
+interface PersistedWorkspaceState {
+  rootPath?: string;
+}
 
 export class WorkspaceService {
-  readonly rootPath: string;
+  private rootPath: string;
+  private readonly fallbackRootPath: string;
+  private readonly stateFilePath: string;
 
-  constructor(rootPath = path.resolve(process.cwd(), "Notes")) {
-    this.rootPath = rootPath;
+  constructor(options: WorkspaceServiceOptions) {
+    this.fallbackRootPath = path.resolve(options.initialRootPath);
+    this.rootPath = this.fallbackRootPath;
+    this.stateFilePath = options.stateFilePath;
+  }
+
+  get currentRootPath(): string {
+    return this.rootPath;
+  }
+
+  async initialize(): Promise<void> {
+    const persistedRootPath = await this.readPersistedRootPath();
+
+    if (persistedRootPath) {
+      this.rootPath = persistedRootPath;
+    }
+
+    await this.ensureWorkspaceReady();
+  }
+
+  async setRootPath(nextRootPath: string): Promise<WorkspaceSnapshot> {
+    this.rootPath = path.resolve(nextRootPath);
+    await this.ensureWorkspaceReady();
+    await this.persistState();
+
+    return this.getSnapshot();
   }
 
   async ensureWorkspaceReady(): Promise<void> {
     await fs.mkdir(this.rootPath, { recursive: true });
-
-    const visibleEntries = await fs.readdir(this.rootPath);
-
-    if (visibleEntries.length > 0) {
-      return;
-    }
-
-    await fs.mkdir(path.join(this.rootPath, "Experiments"), { recursive: true });
-    await fs.writeFile(path.join(this.rootPath, "Welcome.md"), SAMPLE_WELCOME, "utf8");
-    await fs.writeFile(
-      path.join(this.rootPath, "Experiments", "2026-04-08.md"),
-      SAMPLE_EXPERIMENT,
-      "utf8"
-    );
   }
 
   async getSnapshot(): Promise<WorkspaceSnapshot> {
     await this.ensureWorkspaceReady();
 
     return {
-      rootName: path.basename(this.rootPath),
+      rootName: path.basename(this.rootPath) || this.rootPath,
       rootPath: this.rootPath,
       entries: await this.readDirectoryEntries("")
     };
@@ -145,6 +130,14 @@ export class WorkspaceService {
     const kind: WorkspaceEntryKind = stats.isDirectory() ? "directory" : "file";
     const nextName = this.normalizeEntryName(request.nextName, kind);
     const destinationPath = path.join(path.dirname(sourcePath), nextName);
+
+    if (destinationPath === sourcePath) {
+      return {
+        snapshot: await this.getSnapshot(),
+        entry: await this.getEntryByPath(this.toRelativePath(destinationPath)),
+        previousRelativePath: request.targetPath
+      };
+    }
 
     await fs.rename(sourcePath, destinationPath);
 
@@ -283,5 +276,37 @@ export class WorkspaceService {
     }
 
     return isDirectory || path.extname(name).toLowerCase() === ".md";
+  }
+
+  private async readPersistedRootPath(): Promise<string | undefined> {
+    try {
+      const stateContent = await fs.readFile(this.stateFilePath, "utf8");
+      const state = JSON.parse(stateContent) as PersistedWorkspaceState;
+
+      if (typeof state.rootPath !== "string" || state.rootPath.trim().length === 0) {
+        return undefined;
+      }
+
+      const candidatePath = path.resolve(state.rootPath);
+      const stats = await fs.stat(candidatePath);
+
+      if (!stats.isDirectory()) {
+        return undefined;
+      }
+
+      return candidatePath;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async persistState(): Promise<void> {
+    await fs.mkdir(path.dirname(this.stateFilePath), { recursive: true });
+
+    const state: PersistedWorkspaceState = {
+      rootPath: this.rootPath
+    };
+
+    await fs.writeFile(this.stateFilePath, JSON.stringify(state, null, 2), "utf8");
   }
 }

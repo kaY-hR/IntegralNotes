@@ -160,6 +160,42 @@ function findFirstNote(entries: WorkspaceEntry[]): WorkspaceEntry | undefined {
   return undefined;
 }
 
+function collectDirectoryPaths(
+  entries: WorkspaceEntry[],
+  directoryPaths: Set<string> = new Set<string>()
+): Set<string> {
+  for (const entry of entries) {
+    if (entry.kind !== "directory") {
+      continue;
+    }
+
+    directoryPaths.add(entry.relativePath);
+
+    if (entry.children) {
+      collectDirectoryPaths(entry.children, directoryPaths);
+    }
+  }
+
+  return directoryPaths;
+}
+
+function defaultExpandedPaths(entries: WorkspaceEntry[]): Set<string> {
+  return new Set(
+    entries.filter((entry) => entry.kind === "directory").map((entry) => entry.relativePath)
+  );
+}
+
+function reconcileExpandedPaths(
+  currentExpandedPaths: Set<string>,
+  entries: WorkspaceEntry[]
+): Set<string> {
+  const availableDirectoryPaths = collectDirectoryPaths(entries);
+
+  return new Set(
+    Array.from(currentExpandedPaths).filter((entryPath) => availableDirectoryPaths.has(entryPath))
+  );
+}
+
 function isDirty(tab: OpenNoteTab | undefined): boolean {
   return Boolean(tab && tab.content !== tab.savedContent);
 }
@@ -195,8 +231,8 @@ export function App(): JSX.Element {
   const [openTabs, setOpenTabs] = useState<Record<string, OpenNoteTab>>({});
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
   const [selectedTabId, setSelectedTabId] = useState<string | undefined>(undefined);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(["", "Experiments"]));
-  const [statusMessage, setStatusMessage] = useState("Notes ワークスペースを読み込み中...");
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [statusMessage, setStatusMessage] = useState("ワークスペースを読み込み中...");
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [dialogPending, setDialogPending] = useState(false);
@@ -222,20 +258,77 @@ export function App(): JSX.Element {
     model.doAction(FlexLayout.Actions.renameTab(tabId, label));
   };
 
+  const resetOpenTabs = (): void => {
+    for (const relativePath of Object.keys(openTabsRef.current)) {
+      const tabId = toTabId(relativePath);
+
+      if (model.getNodeById(tabId)) {
+        model.doAction(FlexLayout.Actions.deleteTab(tabId));
+      }
+    }
+
+    setOpenTabs({});
+    setSelectedTabId(undefined);
+  };
+
+  const applyWorkspaceSnapshot = (
+    snapshot: WorkspaceSnapshot,
+    options: {
+      resetTabs?: boolean;
+      statusMessage?: string;
+    } = {}
+  ): void => {
+    if (options.resetTabs) {
+      resetOpenTabs();
+      setSelectedEntryPath("");
+      setExpandedPaths(defaultExpandedPaths(snapshot.entries));
+    } else {
+      closeTabsMatching((relativePath) => !hasEntry(snapshot.entries, relativePath));
+      setExpandedPaths((current) => reconcileExpandedPaths(current, snapshot.entries));
+
+      if (!hasEntry(snapshot.entries, selectedEntryPath)) {
+        setSelectedEntryPath("");
+      }
+    }
+
+    setWorkspace(snapshot);
+
+    if (options.statusMessage) {
+      setStatusMessage(options.statusMessage);
+    }
+  };
+
   const refreshWorkspace = async (nextStatus?: string): Promise<void> => {
     setLoadingWorkspace(true);
 
     try {
       const snapshot = await window.integralNotes.getWorkspaceSnapshot();
-      setWorkspace(snapshot);
+      applyWorkspaceSnapshot(snapshot, {
+        resetTabs: workspace === null,
+        statusMessage: nextStatus
+      });
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setLoadingWorkspace(false);
+    }
+  };
 
-      if (!hasEntry(snapshot.entries, selectedEntryPath)) {
-        setSelectedEntryPath("");
+  const openWorkspaceFolder = async (): Promise<void> => {
+    setLoadingWorkspace(true);
+
+    try {
+      const snapshot = await window.integralNotes.openWorkspaceFolder();
+
+      if (!snapshot) {
+        setStatusMessage("フォルダ選択をキャンセルしました。");
+        return;
       }
 
-      if (nextStatus) {
-        setStatusMessage(nextStatus);
-      }
+      applyWorkspaceSnapshot(snapshot, {
+        resetTabs: true,
+        statusMessage: `${snapshot.rootName} を開きました`
+      });
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
@@ -545,13 +638,15 @@ export function App(): JSX.Element {
     }
   };
 
-  const openCreateDialog = (kind: WorkspaceEntryKind): void => {
+  const openCreateDialog = (kind: WorkspaceEntryKind, targetEntry?: WorkspaceEntry): void => {
+    const baseEntry = targetEntry ?? selectedEntry;
     const basePath =
-      selectedEntry?.kind === "directory"
-        ? selectedEntry.relativePath
-        : selectedEntry
-          ? dirname(selectedEntry.relativePath)
+      baseEntry?.kind === "directory"
+        ? baseEntry.relativePath
+        : baseEntry
+          ? dirname(baseEntry.relativePath)
           : "";
+    const workspaceRootName = workspace?.rootName ?? "Workspace";
 
     setDialog({
       mode: "create",
@@ -559,7 +654,7 @@ export function App(): JSX.Element {
       description:
         basePath.length > 0
           ? `${basePath} 配下に作成します。`
-          : "Notes 直下に作成します。",
+          : `${workspaceRootName} 直下に作成します。`,
       confirmLabel: kind === "file" ? "Create note" : "Create folder",
       inputLabel: kind === "file" ? "ノート名" : "フォルダ名",
       initialValue: "",
@@ -569,8 +664,10 @@ export function App(): JSX.Element {
     });
   };
 
-  const openRenameDialog = (): void => {
-    if (!selectedEntry) {
+  const openRenameDialog = (targetEntry?: WorkspaceEntry): void => {
+    const entry = targetEntry ?? selectedEntry;
+
+    if (!entry) {
       setStatusMessage("リネーム対象を選択してください。");
       return;
     }
@@ -578,18 +675,20 @@ export function App(): JSX.Element {
     setDialog({
       mode: "rename",
       title: "リネーム",
-      description: `${selectedEntry.name} の名前を変更します。`,
+      description: `${entry.name} の名前を変更します。`,
       confirmLabel: "Rename",
       inputLabel: "新しい名前",
-      initialValue: displayNameForRename(selectedEntry),
+      initialValue: displayNameForRename(entry),
       requireInput: true,
-      targetKind: selectedEntry.kind,
-      targetPath: selectedEntry.relativePath
+      targetKind: entry.kind,
+      targetPath: entry.relativePath
     });
   };
 
-  const openDeleteDialog = (): void => {
-    if (!selectedEntry) {
+  const openDeleteDialog = (targetEntry?: WorkspaceEntry): void => {
+    const entry = targetEntry ?? selectedEntry;
+
+    if (!entry) {
       setStatusMessage("削除対象を選択してください。");
       return;
     }
@@ -598,13 +697,13 @@ export function App(): JSX.Element {
       mode: "delete",
       title: "削除確認",
       description:
-        selectedEntry.kind === "directory"
-          ? `${selectedEntry.name} 配下も含めて削除します。`
-          : `${selectedEntry.name} を削除します。`,
+        entry.kind === "directory"
+          ? `${entry.name} 配下も含めて削除します。`
+          : `${entry.name} を削除します。`,
       confirmLabel: "Delete",
       requireInput: false,
-      targetKind: selectedEntry.kind,
-      targetPath: selectedEntry.relativePath
+      targetKind: entry.kind,
+      targetPath: entry.relativePath
     });
   };
 
@@ -702,25 +801,36 @@ export function App(): JSX.Element {
       <aside className="sidebar">
         <div className="sidebar__hero">
           <p className="sidebar__eyebrow">IntegralNotes</p>
-          <h1>Research Notes Dock</h1>
-          <p>Markdown エディタ、ノートツリー、自由配置タブを 1 画面にまとめた仮実装です。</p>
+          <h1>Explorer</h1>
         </div>
 
         <div className="sidebar__panel">
           <div className="sidebar__panel-header">
             <div>
               <p className="sidebar__section-title">Workspace</p>
-              <strong>{workspace?.rootName ?? "Notes"}</strong>
+              <strong>{workspace?.rootName ?? "No folder selected"}</strong>
+              <span className="sidebar__root-path">{workspace?.rootPath ?? "Open a folder to begin"}</span>
             </div>
-            <button
-              className="button button--ghost"
-              onClick={() => {
-                void refreshWorkspace("ワークスペースを更新しました");
-              }}
-              type="button"
-            >
-              Refresh
-            </button>
+            <div className="sidebar__panel-actions">
+              <button
+                className="button button--ghost"
+                onClick={() => {
+                  void openWorkspaceFolder();
+                }}
+                type="button"
+              >
+                Open
+              </button>
+              <button
+                className="button button--ghost"
+                onClick={() => {
+                  void refreshWorkspace("ワークスペースを更新しました");
+                }}
+                type="button"
+              >
+                Sync
+              </button>
+            </div>
           </div>
 
           <div className="sidebar__actions">
@@ -730,8 +840,8 @@ export function App(): JSX.Element {
                 openCreateDialog("file");
               }}
               type="button"
-            >
-              + Note
+              >
+              New
             </button>
             <button
               className="button button--ghost"
@@ -739,22 +849,26 @@ export function App(): JSX.Element {
                 openCreateDialog("directory");
               }}
               type="button"
-            >
-              + Folder
+              >
+              Folder
             </button>
           </div>
 
           <div className="sidebar__actions sidebar__actions--secondary">
             <button
               className="button button--ghost"
-              onClick={openRenameDialog}
+              onClick={() => {
+                openRenameDialog();
+              }}
               type="button"
             >
               Rename
             </button>
             <button
               className="button button--danger button--subtle"
-              onClick={openDeleteDialog}
+              onClick={() => {
+                openDeleteDialog();
+              }}
               type="button"
             >
               Delete
@@ -769,9 +883,14 @@ export function App(): JSX.Element {
                 entries={workspace.entries}
                 expandedPaths={expandedPaths}
                 selectedPath={selectedEntryPath}
+                onCreateEntry={(kind, entry) => {
+                  openCreateDialog(kind, entry);
+                }}
+                onDeleteEntry={openDeleteDialog}
                 onOpenFile={(relativePath) => {
                   void openNote(relativePath);
                 }}
+                onRenameEntry={openRenameDialog}
                 onSelectEntry={setSelectedEntryPath}
                 onToggleDirectory={(relativePath) => {
                   setExpandedPaths((current) => {
@@ -795,19 +914,72 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="workspace">
-        <header className="workspace__header">
-          <div>
-            <p className="workspace__eyebrow">Editor Surface</p>
-            <h2>{activeTab?.name ?? "No note selected"}</h2>
-            <p className="workspace__path">
-              {activeTab
-                ? `${activeTab.relativePath}${isDirty(activeTab) ? "  |  unsaved changes" : ""}`
-                : "左のツリーから Markdown ノートを開いてください。"}
-            </p>
+        <header className="app-menubar">
+          <div className="app-menubar__group">
+            <button
+              className="button button--ghost button--menu"
+              onClick={() => {
+                void openWorkspaceFolder();
+              }}
+              type="button"
+            >
+                Open Folder
+            </button>
+            <button
+              className="button button--ghost button--menu"
+              onClick={() => {
+                openCreateDialog("file");
+              }}
+              type="button"
+            >
+                Note
+            </button>
+            <button
+              className="button button--ghost button--menu"
+              onClick={() => {
+                openCreateDialog("directory");
+              }}
+              type="button"
+            >
+                Folder
+            </button>
+            <button
+              className="button button--ghost button--menu"
+              onClick={() => {
+                openRenameDialog();
+              }}
+              type="button"
+            >
+              Rename
+            </button>
+            <button
+              className="button button--ghost button--menu"
+              onClick={() => {
+                openDeleteDialog();
+              }}
+              type="button"
+            >
+              Delete
+            </button>
+            <button
+              className="button button--ghost button--menu"
+              onClick={() => {
+                void refreshWorkspace("ワークスペースを更新しました");
+              }}
+              type="button"
+            >
+              Refresh
+            </button>
           </div>
 
-          <div className="workspace__controls">
-            <div className="workspace__status">{statusMessage}</div>
+          <div className="app-menubar__group app-menubar__group--meta">
+            <div className="app-menubar__meta">
+              <span className="app-menubar__meta-label">Workspace</span>
+              <strong>{workspace?.rootName ?? "No folder selected"}</strong>
+              <span className="app-menubar__meta-path">
+                {workspace?.rootPath ?? "Open Folder からワークスペースを選択してください。"}
+              </span>
+            </div>
             <button
               className="button button--primary"
               disabled={!activeTab || activeTab.isSaving}
@@ -823,6 +995,22 @@ export function App(): JSX.Element {
           </div>
         </header>
 
+        <header className="workspace__header">
+          <div>
+            <p className="workspace__eyebrow">Editor</p>
+            <h2>{activeTab?.name ?? "No note selected"}</h2>
+            <p className="workspace__path">
+              {activeTab
+                ? `${activeTab.relativePath}${isDirty(activeTab) ? "  |  unsaved changes" : ""}`
+                : "左のツリーから Markdown ノートを開いてください。"}
+            </p>
+          </div>
+
+          <div className="workspace__controls">
+            <div className="workspace__status">{statusMessage}</div>
+          </div>
+        </header>
+
         <section className="workspace__layout">
           <FlexLayout.Layout
             factory={editorFactory}
@@ -830,9 +1018,9 @@ export function App(): JSX.Element {
             onModelChange={handleLayoutModelChange}
             onTabSetPlaceHolder={() => (
               <div className="layout-placeholder">
-                <p className="layout-placeholder__eyebrow">Dock-Ready Editor</p>
-                <h3>ノートを開くとここにタブが追加されます</h3>
-                <p>FlexLayout の標準操作で、タブの分割・移動・最大化を試せます。</p>
+                <p className="layout-placeholder__eyebrow">Editor</p>
+                <h3>Open a note to start editing</h3>
+                <p>Use the explorer on the left or choose Open Folder.</p>
                 <div className="layout-placeholder__actions">
                   <button
                     className="button button--primary"
@@ -854,7 +1042,7 @@ export function App(): JSX.Element {
                     }}
                     type="button"
                   >
-                    Create note
+                    New note
                   </button>
                 </div>
               </div>

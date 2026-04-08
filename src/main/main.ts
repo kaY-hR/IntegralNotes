@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 
 import type {
@@ -8,15 +8,16 @@ import type {
 } from "../shared/workspace";
 import { WorkspaceService } from "./workspaceService";
 
-const workspaceService = new WorkspaceService();
+const workspaceService = new WorkspaceService({
+  initialRootPath: path.resolve(process.cwd(), "Notes"),
+  stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
+});
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 
 async function createMainWindow(): Promise<void> {
-  await workspaceService.ensureWorkspaceReady();
-
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 980,
@@ -30,6 +31,9 @@ async function createMainWindow(): Promise<void> {
       nodeIntegration: false
     }
   });
+
+  const snapshot = await workspaceService.getSnapshot();
+  mainWindow.setTitle(`${snapshot.rootName} - IntegralNotes`);
 
   if (process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -49,7 +53,31 @@ function registerIpcHandlers(): void {
 
   ipcRegistered = true;
 
-  ipcMain.handle("workspace:getSnapshot", async () => workspaceService.getSnapshot());
+  ipcMain.handle("workspace:getSnapshot", async () => {
+    const snapshot = await workspaceService.getSnapshot();
+    mainWindow?.setTitle(`${snapshot.rootName} - IntegralNotes`);
+    return snapshot;
+  });
+  ipcMain.handle("workspace:openFolder", async () => {
+    if (!mainWindow) {
+      return null;
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "ワークスペースフォルダを開く",
+      defaultPath: workspaceService.currentRootPath,
+      properties: ["openDirectory"]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const snapshot = await workspaceService.setRootPath(result.filePaths[0]);
+    mainWindow.setTitle(`${snapshot.rootName} - IntegralNotes`);
+
+    return snapshot;
+  });
   ipcMain.handle("workspace:readNote", async (_event, relativePath: string) =>
     workspaceService.readNote(relativePath)
   );
@@ -85,6 +113,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    await workspaceService.initialize();
     registerIpcHandlers();
     await createMainWindow();
 
