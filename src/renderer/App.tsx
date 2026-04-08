@@ -9,7 +9,7 @@ import type {
   WorkspaceEntryKind,
   WorkspaceSnapshot
 } from "../shared/workspace";
-import { FileTree } from "./FileTree";
+import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 
@@ -22,38 +22,13 @@ interface OpenNoteTab {
   savedContent: string;
 }
 
-type DialogState =
-  | {
-      confirmLabel: string;
-      description: string;
-      initialValue: string;
-      inputLabel: string;
-      mode: "create";
-      parentPath: string;
-      requireInput: true;
-      title: string;
-      targetKind: WorkspaceEntryKind;
-    }
-  | {
-      confirmLabel: string;
-      description: string;
-      initialValue: string;
-      inputLabel: string;
-      mode: "rename";
-      requireInput: true;
-      targetKind: WorkspaceEntryKind;
-      targetPath: string;
-      title: string;
-    }
-  | {
-      confirmLabel: string;
-      description: string;
-      mode: "delete";
-      requireInput: false;
-      targetKind: WorkspaceEntryKind;
-      targetPath: string;
-      title: string;
-    };
+interface DeleteDialogState {
+  confirmLabel: string;
+  description: string;
+  targetKind: WorkspaceEntryKind;
+  targetPath: string;
+  title: string;
+}
 
 const MAIN_TABSET_ID = "editor-main";
 
@@ -234,8 +209,10 @@ export function App(): JSX.Element {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [statusMessage, setStatusMessage] = useState("ワークスペースを読み込み中...");
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
-  const [dialog, setDialog] = useState<DialogState | null>(null);
-  const [dialogPending, setDialogPending] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
+  const [deleteDialogPending, setDeleteDialogPending] = useState(false);
+  const [inlineEditor, setInlineEditor] = useState<FileTreeInlineEditorState | null>(null);
+  const [inlineEditorPending, setInlineEditorPending] = useState(false);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
 
@@ -278,6 +255,8 @@ export function App(): JSX.Element {
       statusMessage?: string;
     } = {}
   ): void => {
+    setInlineEditor(null);
+
     if (options.resetTabs) {
       resetOpenTabs();
       setSelectedEntryPath("");
@@ -598,47 +577,47 @@ export function App(): JSX.Element {
     setStatusMessage(`${basename(result.deletedRelativePath)} を削除しました`);
   };
 
-  const submitDialog = async (value: string): Promise<void> => {
-    if (!dialog) {
+  const submitInlineEditor = async (value: string): Promise<void> => {
+    if (!inlineEditor) {
       return;
     }
 
-    setDialogPending(true);
+    setInlineEditorPending(true);
 
     try {
-      if (dialog.mode === "create") {
+      if (inlineEditor.mode === "create") {
         const result = await window.integralNotes.createEntry({
-          parentPath: dialog.parentPath,
+          parentPath: inlineEditor.parentPath,
           name: value,
-          kind: dialog.targetKind
+          kind: inlineEditor.kind
         });
+
+        setInlineEditor(null);
         await handleCreateResult(result);
       }
 
-      if (dialog.mode === "rename") {
+      if (inlineEditor.mode === "rename") {
         const result = await window.integralNotes.renameEntry({
-          targetPath: dialog.targetPath,
+          targetPath: inlineEditor.targetPath,
           nextName: value
         });
+
+        setInlineEditor(null);
         await handleRenameResult(result);
       }
-
-      if (dialog.mode === "delete") {
-        const result = await window.integralNotes.deleteEntry({
-          targetPath: dialog.targetPath
-        });
-        handleDeleteResult(result);
-      }
-
-      setDialog(null);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
-      setDialogPending(false);
+      setInlineEditorPending(false);
     }
   };
 
-  const openCreateDialog = (kind: WorkspaceEntryKind, targetEntry?: WorkspaceEntry): void => {
+  const startCreateInline = (kind: WorkspaceEntryKind, targetEntry?: WorkspaceEntry): void => {
+    if (!workspace) {
+      setStatusMessage("ワークスペースを読み込み中です。");
+      return;
+    }
+
     const baseEntry = targetEntry ?? selectedEntry;
     const basePath =
       baseEntry?.kind === "directory"
@@ -646,25 +625,30 @@ export function App(): JSX.Element {
         : baseEntry
           ? dirname(baseEntry.relativePath)
           : "";
-    const workspaceRootName = workspace?.rootName ?? "Workspace";
+    const locationLabel = basePath.length > 0 ? `${basePath} 配下` : `${workspace.rootName} 直下`;
 
-    setDialog({
+    setDeleteDialog(null);
+    setInlineEditor({
       mode: "create",
-      title: kind === "file" ? "新規ノート" : "新規フォルダ",
-      description:
-        basePath.length > 0
-          ? `${basePath} 配下に作成します。`
-          : `${workspaceRootName} 直下に作成します。`,
-      confirmLabel: kind === "file" ? "Create note" : "Create folder",
-      inputLabel: kind === "file" ? "ノート名" : "フォルダ名",
       initialValue: "",
-      parentPath: basePath,
-      requireInput: true,
-      targetKind: kind
+      kind,
+      parentPath: basePath
     });
+    setSelectedEntryPath(baseEntry?.relativePath ?? "");
+    setStatusMessage(
+      `${locationLabel}に${kind === "file" ? "ノート" : "フォルダ"}を作成します。名前を入力してください。`
+    );
+
+    if (basePath.length > 0) {
+      setExpandedPaths((current) => {
+        const next = new Set(current);
+        next.add(basePath);
+        return next;
+      });
+    }
   };
 
-  const openRenameDialog = (targetEntry?: WorkspaceEntry): void => {
+  const startRenameInline = (targetEntry?: WorkspaceEntry): void => {
     const entry = targetEntry ?? selectedEntry;
 
     if (!entry) {
@@ -672,17 +656,15 @@ export function App(): JSX.Element {
       return;
     }
 
-    setDialog({
+    setDeleteDialog(null);
+    setInlineEditor({
       mode: "rename",
-      title: "リネーム",
-      description: `${entry.name} の名前を変更します。`,
-      confirmLabel: "Rename",
-      inputLabel: "新しい名前",
       initialValue: displayNameForRename(entry),
-      requireInput: true,
-      targetKind: entry.kind,
+      kind: entry.kind,
       targetPath: entry.relativePath
     });
+    setSelectedEntryPath(entry.relativePath);
+    setStatusMessage(`${entry.name} をリネームします。名前を編集してください。`);
   };
 
   const openDeleteDialog = (targetEntry?: WorkspaceEntry): void => {
@@ -693,18 +675,38 @@ export function App(): JSX.Element {
       return;
     }
 
-    setDialog({
-      mode: "delete",
+    setInlineEditor(null);
+    setDeleteDialog({
       title: "削除確認",
       description:
         entry.kind === "directory"
           ? `${entry.name} 配下も含めて削除します。`
           : `${entry.name} を削除します。`,
       confirmLabel: "Delete",
-      requireInput: false,
       targetKind: entry.kind,
       targetPath: entry.relativePath
     });
+  };
+
+  const submitDeleteDialog = async (): Promise<void> => {
+    if (!deleteDialog) {
+      return;
+    }
+
+    setDeleteDialogPending(true);
+
+    try {
+      const result = await window.integralNotes.deleteEntry({
+        targetPath: deleteDialog.targetPath
+      });
+
+      handleDeleteResult(result);
+      setDeleteDialog(null);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setDeleteDialogPending(false);
+    }
   };
 
   const updateTabContent = (relativePath: string, nextContent: string): void => {
@@ -798,16 +800,92 @@ export function App(): JSX.Element {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar__hero">
-          <p className="sidebar__eyebrow">IntegralNotes</p>
-          <h1>Explorer</h1>
+      <header className="app-menubar">
+        <div className="app-menubar__group">
+          <button
+            className="button button--ghost button--menu"
+            onClick={() => {
+              void openWorkspaceFolder();
+            }}
+            type="button"
+          >
+            Open Folder
+          </button>
+          <button
+            className="button button--ghost button--menu"
+            onClick={() => {
+              startCreateInline("file");
+            }}
+            type="button"
+          >
+            Note
+          </button>
+          <button
+            className="button button--ghost button--menu"
+            onClick={() => {
+              startCreateInline("directory");
+            }}
+            type="button"
+          >
+            Folder
+          </button>
+          <button
+            className="button button--ghost button--menu"
+            onClick={() => {
+              startRenameInline();
+            }}
+            type="button"
+          >
+            Rename
+          </button>
+          <button
+            className="button button--ghost button--menu"
+            onClick={() => {
+              openDeleteDialog();
+            }}
+            type="button"
+          >
+            Delete
+          </button>
+          <button
+            className="button button--ghost button--menu"
+            onClick={() => {
+              void refreshWorkspace("ワークスペースを更新しました");
+            }}
+            type="button"
+          >
+            Refresh
+          </button>
         </div>
 
+        <div className="app-menubar__group app-menubar__group--meta">
+          <div className="app-menubar__meta">
+            <span className="app-menubar__meta-label">Workspace</span>
+            <strong>{workspace?.rootName ?? "No folder selected"}</strong>
+            <span className="app-menubar__meta-path">
+              {workspace?.rootPath ?? "Open Folder からワークスペースを選択してください。"}
+            </span>
+          </div>
+          <button
+            className="button button--primary"
+            disabled={!activeTab || activeTab.isSaving}
+            onClick={() => {
+              if (activeTab) {
+                void saveNote(activeTab.relativePath);
+              }
+            }}
+            type="button"
+          >
+            {activeTab?.isSaving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </header>
+
+      <aside className="sidebar">
         <div className="sidebar__panel">
           <div className="sidebar__panel-header">
             <div>
-              <p className="sidebar__section-title">Workspace</p>
+              <p className="sidebar__section-title">Explorer</p>
               <strong>{workspace?.rootName ?? "No folder selected"}</strong>
               <span className="sidebar__root-path">{workspace?.rootPath ?? "Open a folder to begin"}</span>
             </div>
@@ -837,19 +915,19 @@ export function App(): JSX.Element {
             <button
               className="button button--primary"
               onClick={() => {
-                openCreateDialog("file");
+                startCreateInline("file");
               }}
               type="button"
-              >
+            >
               New
             </button>
             <button
               className="button button--ghost"
               onClick={() => {
-                openCreateDialog("directory");
+                startCreateInline("directory");
               }}
               type="button"
-              >
+            >
               Folder
             </button>
           </div>
@@ -858,7 +936,7 @@ export function App(): JSX.Element {
             <button
               className="button button--ghost"
               onClick={() => {
-                openRenameDialog();
+                startRenameInline();
               }}
               type="button"
             >
@@ -880,18 +958,28 @@ export function App(): JSX.Element {
               <div className="sidebar__placeholder">Loading workspace...</div>
             ) : workspace ? (
               <FileTree
+                editingPending={inlineEditorPending}
+                editingState={inlineEditor}
                 entries={workspace.entries}
                 expandedPaths={expandedPaths}
                 selectedPath={selectedEntryPath}
+                onCancelEditing={() => {
+                  if (!inlineEditorPending) {
+                    setInlineEditor(null);
+                  }
+                }}
                 onCreateEntry={(kind, entry) => {
-                  openCreateDialog(kind, entry);
+                  startCreateInline(kind, entry);
                 }}
                 onDeleteEntry={openDeleteDialog}
                 onOpenFile={(relativePath) => {
                   void openNote(relativePath);
                 }}
-                onRenameEntry={openRenameDialog}
+                onRenameEntry={startRenameInline}
                 onSelectEntry={setSelectedEntryPath}
+                onSubmitEditing={(value) => {
+                  void submitInlineEditor(value);
+                }}
                 onToggleDirectory={(relativePath) => {
                   setExpandedPaths((current) => {
                     const next = new Set(current);
@@ -914,87 +1002,6 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="workspace">
-        <header className="app-menubar">
-          <div className="app-menubar__group">
-            <button
-              className="button button--ghost button--menu"
-              onClick={() => {
-                void openWorkspaceFolder();
-              }}
-              type="button"
-            >
-                Open Folder
-            </button>
-            <button
-              className="button button--ghost button--menu"
-              onClick={() => {
-                openCreateDialog("file");
-              }}
-              type="button"
-            >
-                Note
-            </button>
-            <button
-              className="button button--ghost button--menu"
-              onClick={() => {
-                openCreateDialog("directory");
-              }}
-              type="button"
-            >
-                Folder
-            </button>
-            <button
-              className="button button--ghost button--menu"
-              onClick={() => {
-                openRenameDialog();
-              }}
-              type="button"
-            >
-              Rename
-            </button>
-            <button
-              className="button button--ghost button--menu"
-              onClick={() => {
-                openDeleteDialog();
-              }}
-              type="button"
-            >
-              Delete
-            </button>
-            <button
-              className="button button--ghost button--menu"
-              onClick={() => {
-                void refreshWorkspace("ワークスペースを更新しました");
-              }}
-              type="button"
-            >
-              Refresh
-            </button>
-          </div>
-
-          <div className="app-menubar__group app-menubar__group--meta">
-            <div className="app-menubar__meta">
-              <span className="app-menubar__meta-label">Workspace</span>
-              <strong>{workspace?.rootName ?? "No folder selected"}</strong>
-              <span className="app-menubar__meta-path">
-                {workspace?.rootPath ?? "Open Folder からワークスペースを選択してください。"}
-              </span>
-            </div>
-            <button
-              className="button button--primary"
-              disabled={!activeTab || activeTab.isSaving}
-              onClick={() => {
-                if (activeTab) {
-                  void saveNote(activeTab.relativePath);
-                }
-              }}
-              type="button"
-            >
-              {activeTab?.isSaving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </header>
-
         <header className="workspace__header">
           <div>
             <p className="workspace__eyebrow">Editor</p>
@@ -1038,7 +1045,7 @@ export function App(): JSX.Element {
                   <button
                     className="button button--ghost"
                     onClick={() => {
-                      openCreateDialog("file");
+                      startCreateInline("file");
                     }}
                     type="button"
                   >
@@ -1051,24 +1058,22 @@ export function App(): JSX.Element {
         </section>
       </main>
 
-      {dialog ? (
+      {deleteDialog ? (
         <WorkspaceDialog
-          confirmLabel={dialog.confirmLabel}
-          danger={dialog.mode === "delete"}
-          description={dialog.description}
-          initialValue={dialog.requireInput ? dialog.initialValue : undefined}
-          inputLabel={dialog.requireInput ? dialog.inputLabel : undefined}
+          confirmLabel={deleteDialog.confirmLabel}
+          danger
+          description={deleteDialog.description}
           onClose={() => {
-            if (!dialogPending) {
-              setDialog(null);
+            if (!deleteDialogPending) {
+              setDeleteDialog(null);
             }
           }}
-          onConfirm={(value) => {
-            void submitDialog(value);
+          onConfirm={() => {
+            void submitDeleteDialog();
           }}
-          pending={dialogPending}
-          requireInput={dialog.requireInput}
-          title={dialog.title}
+          pending={deleteDialogPending}
+          requireInput={false}
+          title={deleteDialog.title}
         />
       ) : null}
     </div>
