@@ -1,0 +1,96 @@
+const http = require("node:http");
+const net = require("node:net");
+const { spawn } = require("node:child_process");
+
+const HOST = "127.0.0.1";
+const PORT = 5173;
+
+function canConnectTcp(host, port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+
+    const finish = (value) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(value);
+    };
+
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.setTimeout(1200, () => finish(false));
+  });
+}
+
+function canServeHttp(host, port) {
+  return new Promise((resolve) => {
+    const request = http.request(
+      {
+        host,
+        port,
+        path: "/",
+        method: "GET",
+        timeout: 1500
+      },
+      (response) => {
+        response.resume();
+        resolve(true);
+      }
+    );
+
+    request.once("error", () => resolve(false));
+    request.once("timeout", () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.end();
+  });
+}
+
+async function main() {
+  const tcpOpen = await canConnectTcp(HOST, PORT);
+
+  if (tcpOpen) {
+    const httpReady = await canServeHttp(HOST, PORT);
+
+    if (!httpReady) {
+      console.error(
+        `[dev:renderer] Port ${PORT} is already in use, but it does not look like a reusable Vite server.`
+      );
+      process.exit(1);
+      return;
+    }
+
+    console.log(`[dev:renderer] Reusing existing renderer on http://${HOST}:${PORT}`);
+    return;
+  }
+
+  const viteBin = require.resolve("vite/bin/vite.js");
+  const child = spawn(process.execPath, [viteBin], {
+    stdio: "inherit",
+    env: process.env,
+    cwd: process.cwd()
+  });
+
+  const forwardSignal = (signal) => {
+    if (!child.killed) {
+      child.kill(signal);
+    }
+  };
+
+  process.on("SIGINT", forwardSignal);
+  process.on("SIGTERM", forwardSignal);
+
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 0);
+  });
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
