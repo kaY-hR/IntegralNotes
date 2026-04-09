@@ -12,6 +12,8 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
+    "plugins:package:shimadzu-lc": "node src/dev/plugin-package-builder.mjs package plugins/shimadzu-lc",
+    "plugins:package:standard-graphs": "node src/dev/plugin-package-builder.mjs package plugins/standard-graphs",
     "plugins:package:all": "node src/dev/plugin-package-builder.mjs package plugins/shimadzu-lc plugins/standard-graphs",
     "plugins:where": "node src/dev/plugin-installer.mjs where",
     "plugins:install:all": "node src/dev/plugin-installer.mjs install plugins/shimadzu-lc plugins/standard-graphs",

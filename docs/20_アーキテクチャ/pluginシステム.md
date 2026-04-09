@@ -114,15 +114,20 @@ manifest 例:
 
 - `iframe` mode のみ
 - main process が `renderer/index.html` を読み、renderer process が `iframe srcDoc` に渡す
-- block 情報は `postMessage` で渡す
-- message type は `integral:set-block`
+- `renderer/index.html` からの相対 asset path は、その HTML の配置ディレクトリ基準で解決する
+- app -> plugin は `postMessage` で block 情報を渡す
+- message type
+  - app -> plugin
+    - `integral:set-block`
+  - plugin -> app
+    - `integral:update-params`
 
 ### interactive renderer に向けた方針
 
 - renderer を read-only preview に固定しない。block 固有の設定 UI は plugin renderer 側へ寄せる。
 - Markdown 上の `itg-notes` JSON を唯一の正とする。plugin renderer 内の state は一時 state であり、保存責務は app 本体の node view が持つ。
-- 直近の MVP は `iframe postMessage` の reverse bridge を追加し、plugin renderer から app 本体へ `params` 更新を返せるようにする。
-- MVP では plugin renderer が更新できるのは基本的に `params` のみとし、`type` や plugin manifest 由来の情報は app 側が保持する。
+- 現在の MVP として `iframe postMessage` の reverse bridge を実装し、plugin renderer から app 本体へ `params` 更新を返せるようにした。
+- 現在の MVP では plugin renderer が更新できるのは基本的に `params` のみとし、`type` や plugin manifest 由来の情報は app 側が保持する。
 - app は更新を受けたら node の `value` を JSON 文字列として再 serialize し、保存対象 Markdown を更新する。
 - app は正規化後の block を再度 `integral:set-block` で iframe に返し、plugin renderer と Markdown の内容を同期させる。
 - action button は当面 app 本体側に残してよい。最優先は「専用 GUI で値を変更すると JSON へ反映される」経路の確立。
@@ -255,18 +260,19 @@ flowchart LR
 
 ## 現在の制約
 
-- interactive renderer 用 reverse bridge はまだ未実装
-- JSON 編集 UI と action button は本体 renderer に残っている
-- plugin renderer から更新できるのはまだ 0-way で、`integral:set-block` の片方向配信のみ
+- plugin renderer が返せる更新は現在 `params` 全体の差し替えのみ
+- raw JSON textarea は通常 UI から外し、編集導線は plugin renderer 側へ寄せた
+- action button と validation / serialize は本体 renderer に残っている
+- `type` や top-level field の編集権限は app 側に残している
 - host は `stdio executable` ではなく module load の MVP
 - GUI install は zip import のみで、store / server 連携はまだない
 - zip install / package builder は現在 Windows 前提
 
 ## 次の段階
 
-1. `integral:update-params` を追加し、plugin renderer から app 本体へ `params` を返せる reverse bridge を実装する
-2. app 本体 textarea 依存を減らし、`LC.Method.Gradient` などを plugin renderer の専用 GUI で編集できるようにする
-3. block JSON の validation / normalization 方針を固め、GUI 編集結果を安全に Markdown へ再 serialize できるようにする
+1. `LC.Method.Gradient` 以外の block でも plugin renderer の専用 GUI 編集を広げる
+2. `integral:update-params` の先で validation / normalization / error UI を強化する
+3. 必要に応じて `integral:request-action` や `integral:resize` などの renderer bridge を追加する
 4. plugin ごとの schema / snippet / menu contribution を追加する
 5. host runtime を `stdio executable` に拡張する
 6. plugin store 用 catalog / download API を設計し、既存 install engine に接続する

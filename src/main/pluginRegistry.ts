@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type {
   ExecuteIntegralActionRequest,
@@ -56,7 +57,10 @@ export class PluginRegistry {
       throw new Error(`plugin renderer が見つかりません: ${pluginId}`);
     }
 
-    return fs.readFile(plugin.rendererEntryPath, "utf8");
+    return prepareRendererDocument(
+      await fs.readFile(plugin.rendererEntryPath, "utf8"),
+      path.dirname(plugin.rendererEntryPath)
+    );
   }
 
   async executeAction(
@@ -411,6 +415,25 @@ function toPowerShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function prepareRendererDocument(document: string, rendererDirectoryPath: string): string {
+  if (/<base\s/iu.test(document)) {
+    return document;
+  }
+
+  const baseHref = escapeHtmlAttribute(pathToFileURL(`${rendererDirectoryPath}${path.sep}`).href);
+  const baseTag = `<base href="${baseHref}">`;
+
+  if (/<head(\s[^>]*)?>/iu.test(document)) {
+    return document.replace(/<head(\s[^>]*)?>/iu, (match) => `${match}\n    ${baseTag}`);
+  }
+
+  if (/<html(\s[^>]*)?>/iu.test(document)) {
+    return document.replace(/<html(\s[^>]*)?>/iu, (match) => `${match}\n  <head>${baseTag}</head>`);
+  }
+
+  return `${baseTag}\n${document}`;
+}
+
 function assertPathInsideRoot(rootPath: string, targetPath: string): void {
   const resolvedRootPath = path.resolve(rootPath);
   const resolvedTargetPath = path.resolve(targetPath);
@@ -434,4 +457,8 @@ function isPluginHostRunner(
   value: unknown
 ): value is PluginHostModule["runIntegralPluginAction"] {
   return typeof value === "function";
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }

@@ -5,7 +5,7 @@
   "description": "Bundled sample graph plugin for IntegralNotes",
   "scripts": {
     "install:local": "node ../../src/dev/plugin-installer.mjs install .",
-    "package:release": "node ../../src/dev/plugin-package-builder.mjs package .",
+    "package:release": "node ../../src/dev/plugin-package-builder.mjs package . --out-root ../../plugins/dist",
     "uninstall:local": "node ../../src/dev/plugin-installer.mjs uninstall .",
     "where:local": "node ../../src/dev/plugin-installer.mjs where ."
   },

@@ -8,8 +8,8 @@
       :root {
         color-scheme: light;
         font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
-        background: #f4f8fc;
-        color: #16324a;
+        background: #eef3f8;
+        color: #17334d;
       }
 
       * {
@@ -18,14 +18,25 @@
 
       html,
       body {
-        margin: 0;
         width: 100%;
         height: 100%;
-        background: linear-gradient(180deg, #f8fbff, #edf4fb);
+        margin: 0;
+        background:
+          radial-gradient(circle at top right, rgba(150, 196, 233, 0.24), transparent 32%),
+          linear-gradient(180deg, #f7fbff, #eaf1f7);
       }
 
       body {
-        padding: 14px;
+        padding: 12px;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
       }
 
       .card {
@@ -33,98 +44,469 @@
         gap: 12px;
         min-height: 100%;
         padding: 14px;
-        border: 1px solid #d1e0ee;
-        border-radius: 14px;
+        border: 1px solid #c4d5e6;
+        border-radius: 16px;
         background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 253, 0.98)),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(240, 246, 252, 0.98)),
           #ffffff;
-      }
-
-      .header,
-      .row,
-      .stats {
-        display: flex;
-      }
-
-      .header,
-      .row {
-        align-items: center;
-        justify-content: space-between;
-      }
-
-      .stats {
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-
-      .stat {
-        min-width: 92px;
-        padding: 8px 10px;
-        border: 1px solid #d6e2ee;
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.86);
-      }
-
-      .label {
-        display: block;
-        margin-bottom: 4px;
-        color: #6c8094;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .value {
-        font-size: 14px;
-        font-weight: 700;
-      }
-
-      .rows {
-        display: grid;
-        gap: 8px;
-      }
-
-      .index {
-        min-width: 26px;
-        color: #7a8ea3;
-        font-size: 12px;
-        font-weight: 700;
-      }
-
-      .time {
-        min-width: 62px;
-        font-size: 12px;
-      }
-
-      .track {
-        position: relative;
-        flex: 1;
-        height: 10px;
-        overflow: hidden;
-        border-radius: 999px;
-        background: linear-gradient(90deg, #dceaf5, #eff5fa);
-      }
-
-      .fill {
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, #1f8ad3, #0a63a7);
-      }
-
-      .conc {
-        min-width: 58px;
-        text-align: right;
-        font-size: 12px;
-        font-weight: 700;
+        box-shadow:
+          0 18px 34px rgba(105, 134, 161, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.7);
       }
 
       .empty {
         display: grid;
-        min-height: 120px;
+        min-height: 180px;
         place-items: center;
-        color: #698093;
+        color: #6d8296;
         font-size: 13px;
+      }
+
+      .heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .eyebrow,
+      .panel-title,
+      .field-label,
+      .table th,
+      .pill,
+      .sync {
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow {
+        display: block;
+        margin-bottom: 4px;
+        color: #66809b;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .title {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: #50697f;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .pills {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .pill {
+        padding: 6px 10px;
+        border: 1px solid #d1dfec;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.86);
+        color: #56738d;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .sync {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(24, 125, 208, 0.12);
+        color: #1266a8;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .sync::before {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #1d83d8;
+        content: "";
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 168px minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .sidebar {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .field-card {
+        padding: 10px;
+        border: 1px solid #d1deeb;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      .field-label {
+        display: block;
+        margin-bottom: 6px;
+        color: #647d96;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .field-input {
+        width: 100%;
+        padding: 7px 9px;
+        border: 1px solid #bccedf;
+        border-radius: 8px;
+        background: #f8fbfe;
+        color: #17334d;
+        font-size: 13px;
+      }
+
+      .field-suffix {
+        margin-top: 6px;
+        color: #6f859b;
+        font-size: 11px;
+      }
+
+      .metrics {
+        display: grid;
+        gap: 8px;
+      }
+
+      .metric {
+        padding: 10px;
+        border: 1px solid #d6e1eb;
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 246, 252, 0.92));
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 18px;
+      }
+
+      .chart-panel {
+        display: grid;
+        gap: 10px;
+        padding: 8px;
+        border: 1px solid #bfd2e3;
+        border-radius: 14px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(234, 241, 248, 0.96)),
+          #ffffff;
+      }
+
+      .chart-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 0 2px;
+      }
+
+      .panel-shell {
+        display: grid;
+        grid-template-columns: 116px minmax(0, 1fr);
+        gap: 0;
+        overflow: hidden;
+        border: 1px solid #b5c9dc;
+        border-radius: 12px;
+        background: #e8edf2;
+      }
+
+      .panel-sidebar {
+        padding: 12px 10px;
+        border-right: 1px solid #c3d3e2;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(213, 224, 235, 0.85)),
+          #dde6ee;
+      }
+
+      .panel-title {
+        display: inline-block;
+        padding-bottom: 3px;
+        border-bottom: 3px solid #37a8e5;
+        color: #2c7096;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .radio-line {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+        color: #5b7690;
+        font-size: 11px;
+      }
+
+      .radio-line span::before {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 12px;
+        height: 12px;
+        margin-right: 5px;
+        border: 1px solid #88a7c0;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #2d78af;
+        font-size: 9px;
+        content: "";
+      }
+
+      .radio-line span.is-active::before {
+        content: "●";
+      }
+
+      .axis-field {
+        display: grid;
+        gap: 4px;
+        margin-top: 16px;
+      }
+
+      .axis-field input {
+        width: 100%;
+        padding: 5px 7px;
+        border: 1px solid #b8c8d7;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.92);
+      }
+
+      .axis-caption {
+        color: #5d7790;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .graph-area {
+        position: relative;
+        min-height: 254px;
+        padding: 16px 16px 44px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(236, 241, 246, 0.95)),
+          #eff4f8;
+      }
+
+      .graph-grid {
+        position: absolute;
+        inset: 16px 16px 44px;
+        background-image:
+          linear-gradient(to right, rgba(121, 149, 176, 0.2) 1px, transparent 1px),
+          linear-gradient(to top, rgba(121, 149, 176, 0.18) 1px, transparent 1px);
+        background-size: 18% 100%, 100% 24%;
+        border: 1px solid rgba(134, 160, 185, 0.42);
+      }
+
+      .graph-template {
+        position: absolute;
+        inset: 24px 26px 56px 34px;
+        width: calc(100% - 60px);
+        height: calc(100% - 80px);
+        object-fit: contain;
+        opacity: 0.16;
+        filter: saturate(0.9);
+        pointer-events: none;
+      }
+
+      .graph-overlay,
+      .graph-line {
+        position: absolute;
+        inset: 16px 16px 44px;
+        width: calc(100% - 32px);
+        height: calc(100% - 60px);
+      }
+
+      .graph-line {
+        overflow: visible;
+      }
+
+      .graph-line polyline {
+        fill: none;
+        stroke: #ff2a23;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 4;
+        filter: drop-shadow(0 2px 3px rgba(255, 70, 60, 0.22));
+      }
+
+      .graph-axis-top,
+      .graph-axis-bottom {
+        position: absolute;
+        left: 20px;
+        right: 20px;
+        display: flex;
+        justify-content: space-between;
+        color: #657f98;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .graph-axis-top {
+        top: 6px;
+      }
+
+      .graph-axis-bottom {
+        bottom: 16px;
+      }
+
+      .segment-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .segment {
+        padding: 8px 9px;
+        border: 1px solid #d3dfeb;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.82);
+      }
+
+      .segment strong {
+        display: block;
+        margin-top: 3px;
+        font-size: 14px;
+      }
+
+      .editor {
+        display: grid;
+        gap: 8px;
+      }
+
+      .editor-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .editor-header p {
+        margin: 0;
+        color: #557088;
+        font-size: 12px;
+      }
+
+      .editor-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .button {
+        padding: 8px 11px;
+        border: 1px solid #bdd1e3;
+        border-radius: 9px;
+        background: linear-gradient(180deg, #ffffff, #edf4fb);
+        color: #184467;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .button--accent {
+        border-color: #6ab0e6;
+        background: linear-gradient(180deg, #e8f6ff, #d4ebfd);
+        color: #0d5d98;
+      }
+
+      .table-shell {
+        overflow: hidden;
+        border: 1px solid #ccdbe8;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .table th,
+      .table td {
+        padding: 9px 10px;
+        border-bottom: 1px solid #deebf5;
+        text-align: left;
+      }
+
+      .table th {
+        color: #6b849b;
+        font-size: 10px;
+        font-weight: 700;
+        background: rgba(238, 245, 251, 0.96);
+      }
+
+      .table td {
+        font-size: 12px;
+      }
+
+      .table tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .table input {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #bfd0e0;
+        border-radius: 8px;
+        background: #fbfdff;
+        color: #18364f;
+      }
+
+      .table-index {
+        width: 56px;
+        color: #557088;
+        font-weight: 700;
+      }
+
+      .table-action {
+        width: 72px;
+        text-align: right;
+      }
+
+      .icon-button {
+        padding: 5px 8px;
+        border: 1px solid #d5c1c1;
+        border-radius: 8px;
+        background: linear-gradient(180deg, #fff8f8, #f9eded);
+        color: #8d3d3d;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .footer-note {
+        color: #6a8197;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 860px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .segment-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .panel-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .panel-sidebar {
+          border-right: 0;
+          border-bottom: 1px solid #c3d3e2;
+        }
       }
     </style>
   </head>
@@ -134,60 +516,478 @@
     </div>
     <script>
       const root = document.getElementById("root");
+      const SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
+      const UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
+
+      let currentModel = null;
 
       window.addEventListener("message", (event) => {
-        if (!event.data || event.data.type !== "integral:set-block") {
+        if (!event.data || event.data.type !== SET_BLOCK_MESSAGE_TYPE) {
           return;
         }
 
-        render(event.data.payload);
+        currentModel = event.data.payload;
+        renderCurrentModel();
       });
 
-      function render(payload) {
-        const block = payload?.block ?? {};
-        const params = isRecord(block.params) ? block.params : {};
-        const analysisTime = readNumber(params["analysis-time"]);
+      function renderCurrentModel() {
+        if (!currentModel) {
+          root.innerHTML = '<div class="empty">Shimadzu LC renderer is ready.</div>';
+          return;
+        }
+
+        const block = isRecord(currentModel.block) ? currentModel.block : {};
+        const params = isRecord(block.params) ? { ...block.params } : {};
         const points = readGradientPoints(params["time-prog"]);
+        const analysisTime = readNumber(params["analysis-time"]) ?? inferAnalysisTime(points);
+        const segments = buildSegments(points, analysisTime);
+        const polyline = buildPolyline(points, analysisTime);
+        const startConc = points[0]?.conc ?? null;
+        const endConc = points.length > 0 ? Math.max(...points.map((point) => point.conc)) : null;
+        const finalConc = points.at(-1)?.conc ?? null;
 
         root.innerHTML = `
-          <div class="header">
+          <div class="heading">
             <div>
-              <div class="label">Plugin</div>
-              <div class="value">Shimadzu LC</div>
+              <span class="eyebrow">LC Method Renderer</span>
+              <h1 class="title">グラジエント設定</h1>
+              <p class="subtitle">
+                plugin GUI から値を変更すると、IntegralNotes 本体が \`itg-notes\` JSON を更新します。
+              </p>
             </div>
-            <div class="label">${escapeHtml(block.type ?? "unknown")}</div>
-          </div>
-          <div class="stats">
-            <div class="stat">
-              <span class="label">Analysis</span>
-              <strong class="value">${analysisTime === null ? "-" : `${formatNumber(analysisTime)} min`}</strong>
-            </div>
-            <div class="stat">
-              <span class="label">Points</span>
-              <strong class="value">${points.length}</strong>
-            </div>
-            <div class="stat">
-              <span class="label">Mode</span>
-              <strong class="value">Gradient</strong>
+            <div class="pills">
+              <span class="sync">Markdown synced</span>
+              <span class="pill">${escapeHtml(block.type ?? "unknown")}</span>
+              <span class="pill">${escapeHtml(currentModel.plugin?.displayName ?? "Shimadzu LC")}</span>
             </div>
           </div>
-          ${
-            points.length === 0
-              ? '<div class="empty">time-prog が未設定です。</div>'
-              : `<div class="rows">${points
+
+          <div class="workspace">
+            <div class="sidebar">
+              <div class="field-card">
+                <label class="field-label" for="analysis-time-input">Analysis Time</label>
+                <input
+                  class="field-input"
+                  data-role="analysis-time"
+                  id="analysis-time-input"
+                  min="0"
+                  step="0.1"
+                  type="number"
+                  value="${formatInputValue(analysisTime)}"
+                />
+                <div class="field-suffix">minutes</div>
+              </div>
+
+              <div class="metrics">
+                <div class="metric">
+                  <span class="field-label">Start B.Conc</span>
+                  <strong>${formatDisplayNumber(startConc, "%")}</strong>
+                </div>
+                <div class="metric">
+                  <span class="field-label">Peak B.Conc</span>
+                  <strong>${formatDisplayNumber(endConc, "%")}</strong>
+                </div>
+                <div class="metric">
+                  <span class="field-label">Final B.Conc</span>
+                  <strong>${formatDisplayNumber(finalConc, "%")}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-panel">
+              <div class="chart-toolbar">
+                <div>
+                  <span class="eyebrow">Preview</span>
+                  <div class="panel-title">グラジエント</div>
+                </div>
+                <div class="pills">
+                  <span class="pill">${points.length} points</span>
+                  <span class="pill">${formatDisplayNumber(analysisTime, "min")}</span>
+                </div>
+              </div>
+
+              <div class="panel-shell">
+                <div class="panel-sidebar">
+                  <div class="panel-title">グラジエント</div>
+                  <div class="radio-line">
+                    <span class="is-active">詳細</span>
+                    <span>シングル</span>
+                  </div>
+
+                  <div class="axis-field">
+                    <span class="axis-caption">End B.Conc</span>
+                    <input
+                      data-role="end-conc"
+                      min="0"
+                      step="0.1"
+                      type="number"
+                      value="${formatInputValue(endConc)}"
+                    />
+                  </div>
+
+                  <div class="axis-field">
+                    <span class="axis-caption">Start B.Conc</span>
+                    <input
+                      data-role="start-conc"
+                      min="0"
+                      step="0.1"
+                      type="number"
+                      value="${formatInputValue(startConc)}"
+                    />
+                  </div>
+                </div>
+
+                <div class="graph-area">
+                  <div class="graph-axis-top">
+                    <span>95.0</span>
+                    <span>B.Conc</span>
+                    <span>0.0</span>
+                  </div>
+                  <div class="graph-grid"></div>
+                  <img alt="" class="graph-template" src="../gradient.png" />
+                  <svg class="graph-line" preserveAspectRatio="none" viewBox="0 0 100 100">
+                    <polyline points="${polyline}"></polyline>
+                  </svg>
+                  <div class="graph-axis-bottom">
+                    ${segments
+                      .map(
+                        (segment) =>
+                          `<span>${escapeHtml(formatSegmentValue(segment.duration))}</span>`
+                      )
+                      .join("")}
+                  </div>
+                </div>
+              </div>
+
+              <div class="segment-strip">
+                ${segments
                   .map(
-                    (point, index) => `
-                      <div class="row">
-                        <span class="index">#${index + 1}</span>
-                        <span class="time">${formatNumber(point.time)} min</span>
-                        <div class="track"><div class="fill" style="width:${clamp(point.conc, 0, 100)}%"></div></div>
-                        <span class="conc">${formatNumber(point.conc)} %</span>
+                    (segment) => `
+                      <div class="segment">
+                        <span class="field-label">${escapeHtml(segment.label)}</span>
+                        <strong>${escapeHtml(formatSegmentValue(segment.duration))}</strong>
                       </div>
                     `
                   )
-                  .join("")}</div>`
-          }
+                  .join("")}
+              </div>
+            </div>
+          </div>
+
+          <div class="editor">
+            <div class="editor-header">
+              <p>time-prog を編集すると、Preview と Markdown の両方に反映されます。</p>
+              <div class="editor-actions">
+                <button class="button button--accent" data-action="add-point" type="button">Add Point</button>
+              </div>
+            </div>
+
+            <div class="table-shell">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th class="table-index">Step</th>
+                    <th>Time (min)</th>
+                    <th>B.Conc (%)</th>
+                    <th class="table-action">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    points.length === 0
+                      ? `
+                        <tr>
+                          <td class="table-index">-</td>
+                          <td colspan="3">time-prog が未設定です。Add Point から初期化できます。</td>
+                        </tr>
+                      `
+                      : points
+                          .map(
+                            (point, index) => `
+                              <tr>
+                                <td class="table-index">#${index + 1}</td>
+                                <td>
+                                  <input
+                                    data-point-index="${index}"
+                                    data-point-key="time"
+                                    min="0"
+                                    step="0.1"
+                                    type="number"
+                                    value="${formatInputValue(point.time)}"
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    data-point-index="${index}"
+                                    data-point-key="Conc"
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    type="number"
+                                    value="${formatInputValue(point.conc)}"
+                                  />
+                                </td>
+                                <td class="table-action">
+                                  <button class="icon-button" data-action="remove-point" data-point-index="${index}" type="button">
+                                    Remove
+                                  </button>
+                                </td>
+                              </tr>
+                            `
+                          )
+                          .join("")
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="footer-note">
+            Relative asset paths are resolved from <code>renderer/index.html</code>, so this preview can use
+            <code>../gradient.png</code> as a template image.
+          </div>
         `;
+
+        bindInteractions(params, points, analysisTime);
+      }
+
+      function bindInteractions(params, points, analysisTime) {
+        const analysisInput = root.querySelector('[data-role="analysis-time"]');
+        const startConcInput = root.querySelector('[data-role="start-conc"]');
+        const endConcInput = root.querySelector('[data-role="end-conc"]');
+        const addPointButton = root.querySelector('[data-action="add-point"]');
+
+        if (analysisInput) {
+          analysisInput.addEventListener("change", () => {
+            const nextAnalysisTime = readNumber(analysisInput.value);
+
+            if (nextAnalysisTime === null) {
+              renderCurrentModel();
+              return;
+            }
+
+            commitParams(params, points, nextAnalysisTime);
+          });
+        }
+
+        if (startConcInput) {
+          startConcInput.addEventListener("change", () => {
+            const nextConc = readNumber(startConcInput.value);
+
+            if (nextConc === null || points.length === 0) {
+              renderCurrentModel();
+              return;
+            }
+
+            const nextPoints = points.map((point, index) =>
+              index === 0 ? { ...point, conc: clamp(nextConc, 0, 100) } : point
+            );
+            commitParams(params, nextPoints, analysisTime);
+          });
+        }
+
+        if (endConcInput) {
+          endConcInput.addEventListener("change", () => {
+            const nextConc = readNumber(endConcInput.value);
+
+            if (nextConc === null || points.length === 0) {
+              renderCurrentModel();
+              return;
+            }
+
+            const peakIndex = findPeakPointIndex(points);
+            const nextPoints = points.map((point, index) =>
+              index === peakIndex ? { ...point, conc: clamp(nextConc, 0, 100) } : point
+            );
+            commitParams(params, nextPoints, analysisTime);
+          });
+        }
+
+        if (addPointButton) {
+          addPointButton.addEventListener("click", () => {
+            const nextPoints = createNextPoint(points, analysisTime);
+            const nextAnalysisTime = Math.max(
+              analysisTime,
+              nextPoints.at(-1)?.time ?? analysisTime
+            );
+            commitParams(params, nextPoints, nextAnalysisTime);
+          });
+        }
+
+        root.querySelectorAll("[data-point-key]").forEach((input) => {
+          input.addEventListener("change", () => {
+            const pointIndex = Number(input.getAttribute("data-point-index"));
+            const pointKey = input.getAttribute("data-point-key");
+            const nextValue = readNumber(input.value);
+
+            if (!Number.isInteger(pointIndex) || nextValue === null || !pointKey) {
+              renderCurrentModel();
+              return;
+            }
+
+            const nextPoints = points.map((point, index) => {
+              if (index !== pointIndex) {
+                return point;
+              }
+
+              if (pointKey === "time") {
+                return {
+                  ...point,
+                  time: Math.max(nextValue, 0)
+                };
+              }
+
+              return {
+                ...point,
+                conc: clamp(nextValue, 0, 100)
+              };
+            });
+
+            const normalizedPoints = sortPoints(nextPoints);
+            const nextAnalysisTime = Math.max(
+              analysisTime,
+              normalizedPoints.at(-1)?.time ?? analysisTime
+            );
+            commitParams(params, normalizedPoints, nextAnalysisTime);
+          });
+        });
+
+        root.querySelectorAll('[data-action="remove-point"]').forEach((button) => {
+          button.addEventListener("click", () => {
+            const pointIndex = Number(button.getAttribute("data-point-index"));
+
+            if (!Number.isInteger(pointIndex)) {
+              return;
+            }
+
+            const nextPoints = points.filter((_, index) => index !== pointIndex);
+            const nextAnalysisTime = Math.max(
+              nextPoints.at(-1)?.time ?? 0,
+              nextPoints.length === 0 ? 0 : analysisTime
+            );
+            commitParams(params, nextPoints, nextAnalysisTime);
+          });
+        });
+      }
+
+      function commitParams(previousParams, points, analysisTime) {
+        const nextPoints = sortPoints(points);
+        const nextParams = {
+          ...previousParams,
+          "analysis-time": roundNumber(Math.max(analysisTime, 0)),
+          "time-prog": nextPoints.map((point) => ({
+            time: roundNumber(point.time),
+            Conc: roundNumber(point.conc)
+          }))
+        };
+
+        if (currentModel && isRecord(currentModel.block)) {
+          currentModel = {
+            ...currentModel,
+            block: {
+              ...currentModel.block,
+              params: nextParams
+            }
+          };
+        }
+
+        renderCurrentModel();
+        window.parent.postMessage(
+          {
+            payload: {
+              params: nextParams
+            },
+            type: UPDATE_PARAMS_MESSAGE_TYPE
+          },
+          "*"
+        );
+      }
+
+      function buildSegments(points, analysisTime) {
+        const durations = [];
+
+        if (points.length === 0) {
+          durations.push(0, 0, 0, analysisTime);
+        } else {
+          durations.push(points[0].time);
+
+          for (let index = 1; index < points.length; index += 1) {
+            durations.push(points[index].time - points[index - 1].time);
+          }
+        }
+
+        while (durations.length < 4) {
+          durations.push(0);
+        }
+
+        if (durations.length > 4) {
+          const head = durations.slice(0, 3);
+          const tail = durations.slice(3).reduce((sum, value) => sum + value, 0);
+          durations.length = 0;
+          durations.push(...head, tail);
+        }
+
+        const accountedTime = durations.reduce((sum, value) => sum + value, 0);
+
+        if (analysisTime > accountedTime) {
+          durations[durations.length - 1] += analysisTime - accountedTime;
+        }
+
+        return [
+          { duration: Math.max(durations[0], 0), label: "Start Hold" },
+          { duration: Math.max(durations[1], 0), label: "Ramp" },
+          { duration: Math.max(durations[2], 0), label: "Plateau" },
+          { duration: Math.max(durations[3], 0), label: "Re-equil" }
+        ];
+      }
+
+      function buildPolyline(points, analysisTime) {
+        const safeTime = Math.max(analysisTime, points.at(-1)?.time ?? 1, 1);
+        const normalizedPoints =
+          points.length === 0
+            ? [
+                { conc: 5, time: 0 },
+                { conc: 5, time: safeTime }
+              ]
+            : points;
+
+        return normalizedPoints
+          .map((point) => {
+            const x = 6 + (clamp(point.time, 0, safeTime) / safeTime) * 88;
+            const y = 92 - (clamp(point.conc, 0, 100) / 100) * 78;
+            return `${roundNumber(x)},${roundNumber(y)}`;
+          })
+          .join(" ");
+      }
+
+      function createNextPoint(points, analysisTime) {
+        if (points.length === 0) {
+          return [
+            { conc: 5, time: 0 },
+            { conc: 95, time: Math.max(analysisTime * 0.6, 5) },
+            { conc: 5, time: Math.max(analysisTime, 8) }
+          ];
+        }
+
+        const lastPoint = points.at(-1);
+        const nextTime = roundNumber((lastPoint?.time ?? 0) + 1);
+        return [...points, { conc: lastPoint?.conc ?? 5, time: nextTime }];
+      }
+
+      function findPeakPointIndex(points) {
+        let peakIndex = 0;
+
+        for (let index = 1; index < points.length; index += 1) {
+          if (points[index].conc > points[peakIndex].conc) {
+            peakIndex = index;
+          }
+        }
+
+        return peakIndex;
+      }
+
+      function inferAnalysisTime(points) {
+        return points.at(-1)?.time ?? 10;
       }
 
       function readGradientPoints(value) {
@@ -195,23 +995,31 @@
           return [];
         }
 
-        return value
-          .map((item) => {
-            if (!isRecord(item)) {
-              return null;
-            }
+        return sortPoints(
+          value
+            .map((item) => {
+              if (!isRecord(item)) {
+                return null;
+              }
 
-            const time = readNumber(item.time);
-            const conc = readNumber(item.Conc);
+              const time = readNumber(item.time);
+              const conc = readNumber(item.Conc);
 
-            if (time === null || conc === null) {
-              return null;
-            }
+              if (time === null || conc === null) {
+                return null;
+              }
 
-            return { time, conc };
-          })
-          .filter(Boolean)
-          .sort((left, right) => left.time - right.time);
+              return {
+                conc: clamp(conc, 0, 100),
+                time: Math.max(time, 0)
+              };
+            })
+            .filter(Boolean)
+        );
+      }
+
+      function sortPoints(points) {
+        return [...points].sort((left, right) => left.time - right.time);
       }
 
       function readNumber(value) {
@@ -227,17 +1035,41 @@
         return null;
       }
 
-      function isRecord(value) {
-        return typeof value === "object" && value !== null && !Array.isArray(value);
+      function formatInputValue(value) {
+        if (value === null || value === undefined || !Number.isFinite(value)) {
+          return "";
+        }
+
+        return String(roundNumber(value));
+      }
+
+      function formatDisplayNumber(value, suffix) {
+        if (value === null || value === undefined || !Number.isFinite(value)) {
+          return "-";
+        }
+
+        return `${formatSegmentValue(value)} ${suffix}`;
+      }
+
+      function formatSegmentValue(value) {
+        if (!Number.isFinite(value)) {
+          return "-";
+        }
+
+        const normalized = Number.isInteger(value) ? String(value) : value.toFixed(2);
+        return normalized.replace(/\.?0+$/, "");
+      }
+
+      function roundNumber(value) {
+        return Math.round(value * 100) / 100;
       }
 
       function clamp(value, min, max) {
         return Math.min(Math.max(value, min), max);
       }
 
-      function formatNumber(value) {
-        const normalized = Number.isInteger(value) ? String(value) : value.toFixed(2);
-        return normalized.replace(/\.?0+$/, "");
+      function isRecord(value) {
+        return typeof value === "object" && value !== null && !Array.isArray(value);
       }
 
       function escapeHtml(value) {

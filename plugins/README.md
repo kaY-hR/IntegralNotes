@@ -32,6 +32,9 @@ installer は既定で `%APPDATA%/IntegralNotes/plugins` を使う。
 
 - 全 plugin
   - `npm run plugins:package:all`
+- root から plugin 単位
+  - `npm run plugins:package:shimadzu-lc`
+  - `npm run plugins:package:standard-graphs`
 - plugin 単位
   - `npm --prefix plugins/shimadzu-lc run package:release`
   - `npm --prefix plugins/standard-graphs run package:release`

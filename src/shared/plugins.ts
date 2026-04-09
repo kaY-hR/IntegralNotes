@@ -6,7 +6,9 @@ export const PLUGIN_API_VERSION = "1";
 export const PLUGIN_HOST_MODULE_EXPORT = "runIntegralPluginAction";
 export const PLUGIN_HOST_RUNTIME = "module";
 export const PLUGIN_MANIFEST_FILENAME = "integral-plugin.json";
-export const PLUGIN_RENDER_MESSAGE_TYPE = "integral:set-block";
+export const PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
+export const PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
+export const PLUGIN_RENDER_MESSAGE_TYPE = PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE;
 
 export type InstalledPluginOrigin = "external";
 
@@ -58,16 +60,32 @@ export interface InstalledPluginDefinition {
   version: string;
 }
 
+export interface PluginRendererBlock extends JsonRecord {
+  params?: Record<string, unknown>;
+  type: string;
+}
+
 export interface PluginRendererModel {
-  block: {
-    params?: Record<string, unknown>;
-    type: string;
-  };
+  block: PluginRendererBlock;
   blockDefinition: PluginBlockContribution;
   plugin: Pick<
     InstalledPluginDefinition,
     "description" | "displayName" | "id" | "namespace" | "origin" | "version"
   >;
+}
+
+export interface PluginRenderSetBlockMessage {
+  payload: PluginRendererModel;
+  type: typeof PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE;
+}
+
+export interface PluginRenderUpdateParamsPayload {
+  params: Record<string, unknown>;
+}
+
+export interface PluginRenderUpdateParamsMessage {
+  payload: PluginRenderUpdateParamsPayload;
+  type: typeof PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE;
 }
 
 export interface PluginHostActionContext {
