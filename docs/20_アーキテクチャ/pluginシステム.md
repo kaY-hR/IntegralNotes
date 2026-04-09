@@ -12,7 +12,7 @@
 - repo 内の `plugins/*` は runtime の install 先ではなく、plugin source と sample 実装の置き場。
 - plugin の配布物は zip を基本にする。
 - 開発中は zip + `install.bat` / `uninstall.bat` で配布できる。
-- 将来的には plugin store を GUI から使って install する。
+- plugin store は後段とし、先に `interactive renderer` と block JSON 同期を確立する。
 
 ## plugin の配置先
 
@@ -117,6 +117,49 @@ manifest 例:
 - block 情報は `postMessage` で渡す
 - message type は `integral:set-block`
 
+### interactive renderer に向けた方針
+
+- renderer を read-only preview に固定しない。block 固有の設定 UI は plugin renderer 側へ寄せる。
+- Markdown 上の `itg-notes` JSON を唯一の正とする。plugin renderer 内の state は一時 state であり、保存責務は app 本体の node view が持つ。
+- 直近の MVP は `iframe postMessage` の reverse bridge を追加し、plugin renderer から app 本体へ `params` 更新を返せるようにする。
+- MVP では plugin renderer が更新できるのは基本的に `params` のみとし、`type` や plugin manifest 由来の情報は app 側が保持する。
+- app は更新を受けたら node の `value` を JSON 文字列として再 serialize し、保存対象 Markdown を更新する。
+- app は正規化後の block を再度 `integral:set-block` で iframe に返し、plugin renderer と Markdown の内容を同期させる。
+- action button は当面 app 本体側に残してよい。最優先は「専用 GUI で値を変更すると JSON へ反映される」経路の確立。
+
+#### reverse bridge MVP
+
+app -> plugin:
+
+```json
+{
+  "type": "integral:set-block",
+  "payload": {
+    "block": {
+      "type": "LC.Method.Gradient",
+      "params": {}
+    }
+  }
+}
+```
+
+plugin -> app:
+
+```json
+{
+  "type": "integral:update-params",
+  "payload": {
+    "params": {
+      "analysis-time": 8
+    }
+  }
+}
+```
+
+- まずは full block 差し替えではなく `params` 更新に絞る。
+- block JSON の整形、validation、unknown field の保持は app 本体側で行う。
+- 将来的に必要なら `integral:request-action` や `integral:resize` を追加する。
+
 ### host
 
 - `module` runtime のみ
@@ -128,11 +171,16 @@ manifest 例:
 ```mermaid
 flowchart LR
   Note["Markdown itg-notes"] --> Renderer["renderer"]
-  Renderer --> Runtime["integralPluginRuntime.ts"]
+  Renderer --> NodeView["integralCodeBlockFeature.tsx"]
+  NodeView --> Iframe["plugin renderer iframe"]
+  Iframe -->|integral:update-params| NodeView
+  NodeView -->|setNodeMarkup| Note
+  NodeView --> Runtime["integralPluginRuntime.ts"]
   Runtime --> Main["pluginRegistry.ts"]
   Main --> Installed["%APPDATA%/IntegralNotes/plugins/*"]
   Main --> Host["host/index.cjs"]
   Main --> Html["renderer/index.html"]
+  Html --> Iframe
 ```
 
 ## install 導線
@@ -207,16 +255,18 @@ flowchart LR
 
 ## 現在の制約
 
-- renderer は read-only preview 前提
+- interactive renderer 用 reverse bridge はまだ未実装
 - JSON 編集 UI と action button は本体 renderer に残っている
-- renderer から本体への reverse command bridge はまだない
+- plugin renderer から更新できるのはまだ 0-way で、`integral:set-block` の片方向配信のみ
 - host は `stdio executable` ではなく module load の MVP
 - GUI install は zip import のみで、store / server 連携はまだない
 - zip install / package builder は現在 Windows 前提
 
 ## 次の段階
 
-1. plugin store 用 catalog / download API を設計する
-2. GUI の `Install ZIP` と同じ install engine を store download に流用する
-3. host runtime を `stdio executable` に拡張する
+1. `integral:update-params` を追加し、plugin renderer から app 本体へ `params` を返せる reverse bridge を実装する
+2. app 本体 textarea 依存を減らし、`LC.Method.Gradient` などを plugin renderer の専用 GUI で編集できるようにする
+3. block JSON の validation / normalization 方針を固め、GUI 編集結果を安全に Markdown へ再 serialize できるようにする
 4. plugin ごとの schema / snippet / menu contribution を追加する
+5. host runtime を `stdio executable` に拡張する
+6. plugin store 用 catalog / download API を設計し、既存 install engine に接続する
