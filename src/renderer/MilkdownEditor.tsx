@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 
 import { installIntegralCodeBlockFeature } from "./integralCodeBlockFeature";
 import { initializeIntegralPluginRuntime } from "./integralPluginRuntime";
-import { integralSnippetFeatureConfigs } from "./integralSnippetMenu";
+import { createIntegralSnippetFeatureConfigs } from "./integralSnippetMenu";
 
 interface MilkdownEditorProps {
   initialValue: string;
@@ -29,21 +29,8 @@ export function MilkdownEditor({
       return;
     }
 
-    const editor = new Crepe({
-      featureConfigs: integralSnippetFeatureConfigs,
-      root: rootElement,
-      defaultValue: initialValue
-    });
-
-    installIntegralCodeBlockFeature(editor);
-
-    editor.on((listener) => {
-      listener.markdownUpdated((_ctx, markdown) => {
-        onChangeRef.current(markdown);
-      });
-    });
-
     let shouldDestroyAfterCreate = false;
+    let editor: Crepe | null = null;
 
     void (async () => {
       try {
@@ -51,6 +38,24 @@ export function MilkdownEditor({
       } catch (error) {
         console.error("Failed to initialize plugin runtime.", error);
       }
+
+      if (shouldDestroyAfterCreate) {
+        return;
+      }
+
+      editor = new Crepe({
+        featureConfigs: createIntegralSnippetFeatureConfigs(),
+        root: rootElement,
+        defaultValue: initialValue
+      });
+
+      installIntegralCodeBlockFeature(editor);
+
+      editor.on((listener) => {
+        listener.markdownUpdated((_ctx, markdown) => {
+          onChangeRef.current(markdown);
+        });
+      });
 
       await editor.create();
 

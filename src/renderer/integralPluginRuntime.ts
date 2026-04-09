@@ -33,6 +33,10 @@ export function resetIntegralPluginRuntime(): void {
   rendererDocumentCache.clear();
 }
 
+export function getInstalledIntegralPlugins(): readonly InstalledPluginDefinition[] {
+  return installedPlugins;
+}
+
 export function getInstalledIntegralBlockDefinition(type: string): IntegralBlockDefinition | null {
   for (const plugin of installedPlugins) {
     for (const block of plugin.blocks) {

@@ -3,7 +3,10 @@ import { commandsCtx } from "@milkdown/kit/core";
 import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
 import { insert } from "@milkdown/kit/utils";
 
+import type { PluginBlockContribution } from "../shared/plugins";
+
 import { INTEGRAL_BLOCK_LANGUAGE } from "./integralBlockRegistry";
+import { getInstalledIntegralPlugins } from "./integralPluginRuntime";
 
 interface IntegralSnippetTemplate {
   key: string;
@@ -26,11 +29,10 @@ function toIntegralCodeBlock(value: unknown): string {
   return [`\`\`\`${INTEGRAL_BLOCK_LANGUAGE}`, JSON.stringify(value, null, 2), "```"].join("\n");
 }
 
-const INTEGRAL_SNIPPETS: readonly IntegralSnippetTemplate[] = [
-  {
-    key: "integral-lc-gradient",
+const KNOWN_SNIPPET_TEMPLATES: Readonly<Record<string, { label: string; value: unknown }>> = {
+  "LC.Method.Gradient": {
     label: "LCのグラジエント設定",
-    markdown: toIntegralCodeBlock({
+    value: {
       type: "LC.Method.Gradient",
       params: {
         "analysis-time": 8,
@@ -39,37 +41,73 @@ const INTEGRAL_SNIPPETS: readonly IntegralSnippetTemplate[] = [
           { time: 8, Conc: 100 }
         ]
       }
-    })
+    }
   },
-  {
-    key: "integral-standard-chromatogram",
+  "StandardGraphs.Chromatogram": {
     label: "クロマトグラム表示",
-    markdown: toIntegralCodeBlock({
+    value: {
       type: "StandardGraphs.Chromatogram",
       params: {
         data: ["lc1.lcd", "lc2.lcd"]
       }
-    })
-  }
-];
-
-export const integralSnippetFeatureConfigs: NonNullable<CrepeConfig["featureConfigs"]> = {
-  [Crepe.Feature.BlockEdit]: {
-    buildMenu: (builder) => {
-      const integralGroup = builder.addGroup("integral", "Integral");
-
-      for (const snippet of INTEGRAL_SNIPPETS) {
-        integralGroup.addItem(snippet.key, {
-          icon: SNIPPET_ICON,
-          label: snippet.label,
-          onRun: (ctx) => {
-            const commands = ctx.get(commandsCtx);
-
-            commands.call(clearTextInCurrentBlockCommand.key);
-            insert(snippet.markdown)(ctx);
-          }
-        });
-      }
     }
   }
 };
+
+export function createIntegralSnippetFeatureConfigs(): NonNullable<CrepeConfig["featureConfigs"]> {
+  return {
+    [Crepe.Feature.BlockEdit]: {
+      buildMenu: (builder) => {
+        const snippets = createIntegralSnippetTemplates();
+
+        if (snippets.length === 0) {
+          return;
+        }
+
+        const integralGroup = builder.addGroup("integral", "Integral");
+
+        for (const snippet of snippets) {
+          integralGroup.addItem(snippet.key, {
+            icon: SNIPPET_ICON,
+            label: snippet.label,
+            onRun: (ctx) => {
+              const commands = ctx.get(commandsCtx);
+
+              commands.call(clearTextInCurrentBlockCommand.key);
+              insert(snippet.markdown)(ctx);
+            }
+          });
+        }
+      }
+    }
+  };
+}
+
+function createIntegralSnippetTemplates(): IntegralSnippetTemplate[] {
+  const snippets: IntegralSnippetTemplate[] = [];
+
+  for (const plugin of getInstalledIntegralPlugins()) {
+    for (const block of plugin.blocks) {
+      snippets.push(toIntegralSnippetTemplate(block));
+    }
+  }
+
+  return snippets;
+}
+
+function toIntegralSnippetTemplate(block: PluginBlockContribution): IntegralSnippetTemplate {
+  const knownTemplate = KNOWN_SNIPPET_TEMPLATES[block.type];
+
+  return {
+    key: `integral-${toSnippetKeySegment(block.type)}`,
+    label: knownTemplate?.label ?? block.title,
+    markdown: toIntegralCodeBlock(knownTemplate?.value ?? { type: block.type })
+  };
+}
+
+function toSnippetKeySegment(type: string): string {
+  const normalized = type.toLowerCase().replace(/[^a-z0-9]+/gu, "-");
+  const trimmed = normalized.replace(/^-+/u, "").replace(/-+$/u, "");
+
+  return trimmed.length > 0 ? trimmed : "block";
+}
