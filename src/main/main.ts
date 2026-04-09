@@ -32,6 +32,59 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 let pluginRegistry: PluginRegistry | null = null;
+const MIN_ZOOM_LEVEL = -3;
+const MAX_ZOOM_LEVEL = 3;
+const ZOOM_LEVEL_STEP = 0.5;
+
+function clampZoomLevel(zoomLevel: number): number {
+  return Math.max(MIN_ZOOM_LEVEL, Math.min(zoomLevel, MAX_ZOOM_LEVEL));
+}
+
+function adjustWindowZoom(window: BrowserWindow, direction: "in" | "out" | "reset"): void {
+  if (direction === "reset") {
+    window.webContents.setZoomLevel(0);
+    return;
+  }
+
+  const currentZoomLevel = window.webContents.getZoomLevel();
+  const delta = direction === "in" ? ZOOM_LEVEL_STEP : -ZOOM_LEVEL_STEP;
+  window.webContents.setZoomLevel(clampZoomLevel(currentZoomLevel + delta));
+}
+
+function registerWindowZoomHandlers(window: BrowserWindow): void {
+  window.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !(input.control || input.meta)) {
+      return;
+    }
+
+    if (input.code === "Minus" || input.code === "NumpadSubtract" || input.key === "-") {
+      event.preventDefault();
+      adjustWindowZoom(window, "out");
+      return;
+    }
+
+    if (
+      input.code === "Equal" ||
+      input.code === "NumpadAdd" ||
+      input.key === "+" ||
+      input.key === "="
+    ) {
+      event.preventDefault();
+      adjustWindowZoom(window, "in");
+      return;
+    }
+
+    if (input.code === "Digit0" || input.code === "Numpad0" || input.key === "0") {
+      event.preventDefault();
+      adjustWindowZoom(window, "reset");
+    }
+  });
+
+  window.webContents.on("zoom-changed", (event, zoomDirection) => {
+    event.preventDefault();
+    adjustWindowZoom(window, zoomDirection);
+  });
+}
 
 async function createMainWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -47,6 +100,11 @@ async function createMainWindow(): Promise<void> {
       nodeIntegration: false
     }
   });
+  registerWindowZoomHandlers(mainWindow);
+
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    mainWindow.removeMenu();
+  }
 
   const snapshot = await workspaceService.getSnapshot();
   mainWindow.setTitle(`${snapshot.rootName} - IntegralNotes`);

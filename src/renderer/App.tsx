@@ -35,7 +35,8 @@ interface DeleteDialogState {
 }
 
 interface TreeContextMenuState {
-  entry: WorkspaceEntry;
+  entry?: WorkspaceEntry;
+  scope: "entry" | "root";
   x: number;
   y: number;
 }
@@ -256,6 +257,7 @@ export function App(): JSX.Element {
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
+  const shouldAutoOpenInitialNoteRef = useRef(false);
   const sidebarRef = useRef<HTMLElement>(null);
 
   const selectedEntry = workspace ? findEntryByPath(workspace.entries, selectedEntryPath) : undefined;
@@ -301,6 +303,7 @@ export function App(): JSX.Element {
     setContextMenu(null);
 
     if (options.resetTabs) {
+      shouldAutoOpenInitialNoteRef.current = true;
       resetOpenTabs();
       setSelectedEntryPath("");
       setExpandedPaths(defaultExpandedPaths(snapshot.entries));
@@ -440,10 +443,16 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!workspace || Object.keys(openTabs).length > 0 || selectedTabId) {
+    if (
+      !workspace ||
+      !shouldAutoOpenInitialNoteRef.current ||
+      Object.keys(openTabs).length > 0 ||
+      selectedTabId
+    ) {
       return;
     }
 
+    shouldAutoOpenInitialNoteRef.current = false;
     const firstNote = findFirstNote(workspace.entries);
 
     if (!firstNote) {
@@ -915,6 +924,18 @@ export function App(): JSX.Element {
     setSelectedEntryPath(entry.relativePath);
     setContextMenu({
       entry,
+      scope: "entry",
+      x: position.x,
+      y: position.y
+    });
+  };
+
+  const openTreeRootContextMenu = (x: number, y: number): void => {
+    const position = clampContextMenuPosition(x, y);
+
+    setSelectedEntryPath("");
+    setContextMenu({
+      scope: "root",
       x: position.x,
       y: position.y
     });
@@ -1068,7 +1089,37 @@ export function App(): JSX.Element {
             </div>
           </div>
 
-          <div className="sidebar__tree">
+          <div
+            className="sidebar__tree"
+            onClick={(event) => {
+              if (!workspace) {
+                return;
+              }
+
+              const target = event.target as HTMLElement | null;
+
+              if (target?.closest(".tree-row")) {
+                return;
+              }
+
+              setSelectedEntryPath("");
+              setContextMenu(null);
+            }}
+            onContextMenu={(event) => {
+              if (!workspace) {
+                return;
+              }
+
+              const target = event.target as HTMLElement | null;
+
+              if (target?.closest(".tree-row")) {
+                return;
+              }
+
+              event.preventDefault();
+              openTreeRootContextMenu(event.clientX, event.clientY);
+            }}
+          >
             {loadingWorkspace && !workspace ? (
               <div className="sidebar__placeholder">Loading workspace...</div>
             ) : workspace ? (
@@ -1161,12 +1212,12 @@ export function App(): JSX.Element {
             top: contextMenu.y
           }}
         >
-          {contextMenu.entry.kind === "directory" ? (
+          {contextMenu.scope === "root" || contextMenu.entry?.kind === "directory" ? (
             <>
               <button
                 className="tree-context-menu__item"
                 onClick={() => {
-                  startCreateInline("file", contextMenu.entry);
+                  startCreateInline("file", contextMenu.scope === "entry" ? contextMenu.entry : undefined);
                 }}
                 type="button"
               >
@@ -1175,34 +1226,41 @@ export function App(): JSX.Element {
               <button
                 className="tree-context-menu__item"
                 onClick={() => {
-                  startCreateInline("directory", contextMenu.entry);
+                  startCreateInline(
+                    "directory",
+                    contextMenu.scope === "entry" ? contextMenu.entry : undefined
+                  );
                 }}
                 type="button"
               >
                 New Folder
               </button>
-              <div className="tree-context-menu__separator" />
             </>
           ) : null}
 
-          <button
-            className="tree-context-menu__item"
-            onClick={() => {
-              startRenameInline(contextMenu.entry);
-            }}
-            type="button"
-          >
-            Rename
-          </button>
-          <button
-            className="tree-context-menu__item tree-context-menu__item--danger"
-            onClick={() => {
-              openDeleteDialog(contextMenu.entry);
-            }}
-            type="button"
-          >
-            Delete
-          </button>
+          {contextMenu.scope === "entry" && contextMenu.entry ? (
+            <>
+              {contextMenu.entry.kind === "directory" ? <div className="tree-context-menu__separator" /> : null}
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  startRenameInline(contextMenu.entry);
+                }}
+                type="button"
+              >
+                Rename
+              </button>
+              <button
+                className="tree-context-menu__item tree-context-menu__item--danger"
+                onClick={() => {
+                  openDeleteDialog(contextMenu.entry);
+                }}
+                type="button"
+              >
+                Delete
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
 
