@@ -52,34 +52,6 @@ function adjustWindowZoom(window: BrowserWindow, direction: "in" | "out" | "rese
 }
 
 function registerWindowZoomHandlers(window: BrowserWindow): void {
-  window.webContents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown" || !(input.control || input.meta)) {
-      return;
-    }
-
-    if (input.code === "Minus" || input.code === "NumpadSubtract" || input.key === "-") {
-      event.preventDefault();
-      adjustWindowZoom(window, "out");
-      return;
-    }
-
-    if (
-      input.code === "Equal" ||
-      input.code === "NumpadAdd" ||
-      input.key === "+" ||
-      input.key === "="
-    ) {
-      event.preventDefault();
-      adjustWindowZoom(window, "in");
-      return;
-    }
-
-    if (input.code === "Digit0" || input.code === "Numpad0" || input.key === "0") {
-      event.preventDefault();
-      adjustWindowZoom(window, "reset");
-    }
-  });
-
   window.webContents.on("zoom-changed", (event, zoomDirection) => {
     event.preventDefault();
     adjustWindowZoom(window, zoomDirection);

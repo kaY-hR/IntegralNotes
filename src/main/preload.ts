@@ -1,10 +1,32 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 
 import type { IntegralNotesApi } from "../shared/workspace";
+
+const MIN_ZOOM_LEVEL = -3;
+const MAX_ZOOM_LEVEL = 3;
+const ZOOM_LEVEL_STEP = 0.5;
+
+function clampZoomLevel(zoomLevel: number): number {
+  return Math.max(MIN_ZOOM_LEVEL, Math.min(zoomLevel, MAX_ZOOM_LEVEL));
+}
+
+function adjustZoomLevel(direction: "in" | "out" | "reset"): void {
+  if (direction === "reset") {
+    webFrame.setZoomLevel(0);
+    return;
+  }
+
+  const currentZoomLevel = webFrame.getZoomLevel();
+  const delta = direction === "in" ? ZOOM_LEVEL_STEP : -ZOOM_LEVEL_STEP;
+  webFrame.setZoomLevel(clampZoomLevel(currentZoomLevel + delta));
+}
 
 const api: IntegralNotesApi = {
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
+  zoomIn: () => adjustZoomLevel("in"),
+  zoomOut: () => adjustZoomLevel("out"),
+  resetZoom: () => adjustZoomLevel("reset"),
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),

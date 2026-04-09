@@ -89,6 +89,9 @@ export interface UninstallPluginResult {
 export interface IntegralNotesApi {
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;

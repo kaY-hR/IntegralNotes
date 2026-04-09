@@ -227,6 +227,38 @@ function isEditableElement(element: HTMLElement | null): boolean {
   );
 }
 
+function isZoomModifierPressed(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && !event.altKey;
+}
+
+function isZoomOutShortcut(event: KeyboardEvent): boolean {
+  return (
+    isZoomModifierPressed(event) &&
+    (event.key === "-" || event.key === "_" || event.code === "Minus" || event.code === "NumpadSubtract")
+  );
+}
+
+function isZoomInShortcut(event: KeyboardEvent): boolean {
+  if (!isZoomModifierPressed(event)) {
+    return false;
+  }
+
+  if (
+    event.key === "+" ||
+    event.key === "=" ||
+    event.code === "Equal" ||
+    event.code === "NumpadAdd"
+  ) {
+    return true;
+  }
+
+  return event.shiftKey && (event.code === "Semicolon" || event.key === ":" || event.key === ";");
+}
+
+function isZoomResetShortcut(event: KeyboardEvent): boolean {
+  return isZoomModifierPressed(event) && (event.key === "0" || event.code === "Digit0" || event.code === "Numpad0");
+}
+
 function clampContextMenuPosition(x: number, y: number): Pick<TreeContextMenuState, "x" | "y"> {
   const menuWidth = 188;
   const menuHeight = 196;
@@ -464,6 +496,27 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (isZoomInShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.integralNotes.zoomIn();
+        return;
+      }
+
+      if (isZoomOutShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.integralNotes.zoomOut();
+        return;
+      }
+
+      if (isZoomResetShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.integralNotes.resetZoom();
+        return;
+      }
+
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") {
         return;
       }
@@ -475,10 +528,10 @@ export function App(): JSX.Element {
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [activeTab]);
 
