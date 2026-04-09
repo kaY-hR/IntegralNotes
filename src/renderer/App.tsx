@@ -5,12 +5,16 @@ import type {
   CreateEntryResult,
   DeleteEntryResult,
   RenameEntryResult,
+  UninstallPluginResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
   WorkspaceSnapshot
 } from "../shared/workspace";
+import type { InstalledPluginDefinition } from "../shared/plugins";
 import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
+import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { MilkdownEditor } from "./MilkdownEditor";
+import { PluginManagerDialog } from "./PluginManagerDialog";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 
 interface OpenNoteTab {
@@ -245,6 +249,11 @@ export function App(): JSX.Element {
   const [inlineEditor, setInlineEditor] = useState<FileTreeInlineEditorState | null>(null);
   const [inlineEditorPending, setInlineEditorPending] = useState(false);
   const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
+  const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
+  const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
+  const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
+  const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
+  const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -346,6 +355,83 @@ export function App(): JSX.Element {
       setStatusMessage(toErrorMessage(error));
     } finally {
       setLoadingWorkspace(false);
+    }
+  };
+
+  const refreshInstalledPluginState = async (nextStatusMessage?: string): Promise<void> => {
+    try {
+      const [plugins, installRootPath] = await Promise.all([
+        window.integralNotes.listInstalledPlugins(),
+        window.integralNotes.getPluginInstallRootPath()
+      ]);
+
+      setInstalledPlugins(plugins);
+      setPluginInstallRootPath(installRootPath);
+
+      if (nextStatusMessage) {
+        setStatusMessage(nextStatusMessage);
+      }
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
+  const synchronizePluginRuntime = async (nextStatusMessage: string): Promise<void> => {
+    resetIntegralPluginRuntime();
+    setPluginCatalogRevision((current) => current + 1);
+    await refreshInstalledPluginState(nextStatusMessage);
+  };
+
+  const openPluginManager = (): void => {
+    setPluginDialogOpen(true);
+    void refreshInstalledPluginState();
+  };
+
+  const installPluginFromZip = async (): Promise<void> => {
+    setPluginDialogPendingAction("install");
+
+    try {
+      const result = await window.integralNotes.installPluginFromZip();
+
+      if (!result) {
+        setStatusMessage("plugin zip の選択をキャンセルしました。");
+        return;
+      }
+
+      await synchronizePluginRuntime(
+        `${result.plugin.displayName} ${result.plugin.version} をインストールしました`
+      );
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setPluginDialogPendingAction(null);
+    }
+  };
+
+  const refreshPluginsFromDialog = async (): Promise<void> => {
+    setPluginDialogPendingAction("refresh");
+
+    try {
+      await refreshInstalledPluginState("plugin 一覧を更新しました。");
+    } finally {
+      setPluginDialogPendingAction(null);
+    }
+  };
+
+  const uninstallPlugin = async (pluginId: string): Promise<void> => {
+    setPluginDialogPendingAction(`uninstall:${pluginId}`);
+
+    try {
+      const result: UninstallPluginResult = await window.integralNotes.uninstallPlugin(pluginId);
+      const nextStatusMessage = result.removed
+        ? `${pluginId} をアンインストールしました`
+        : `${pluginId} は既に見つかりません`;
+
+      await synchronizePluginRuntime(nextStatusMessage);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setPluginDialogPendingAction(null);
     }
   };
 
@@ -915,7 +1001,7 @@ export function App(): JSX.Element {
     return (
       <MilkdownEditor
         initialValue={tab.content}
-        key={relativePath}
+        key={`${relativePath}:${pluginCatalogRevision}`}
         onChange={(markdown) => {
           updateTabContent(relativePath, markdown);
         }}
@@ -934,6 +1020,13 @@ export function App(): JSX.Element {
           type="button"
         >
           Open Folder
+        </button>
+        <button
+          className="button button--ghost button--menu"
+          onClick={openPluginManager}
+          type="button"
+        >
+          Plugins
         </button>
       </header>
 
@@ -1129,6 +1222,28 @@ export function App(): JSX.Element {
           pending={deleteDialogPending}
           requireInput={false}
           title={deleteDialog.title}
+        />
+      ) : null}
+
+      {pluginDialogOpen ? (
+        <PluginManagerDialog
+          installRootPath={pluginInstallRootPath}
+          onClose={() => {
+            if (pluginDialogPendingAction === null) {
+              setPluginDialogOpen(false);
+            }
+          }}
+          onInstall={() => {
+            void installPluginFromZip();
+          }}
+          onRefresh={() => {
+            void refreshPluginsFromDialog();
+          }}
+          onUninstall={(pluginId) => {
+            void uninstallPlugin(pluginId);
+          }}
+          pendingAction={pluginDialogPendingAction}
+          plugins={installedPlugins}
         />
       ) : null}
     </div>

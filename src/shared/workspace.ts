@@ -1,4 +1,4 @@
-import type { InstalledPluginSummary } from "./plugins";
+import type { InstalledPluginDefinition } from "./plugins";
 
 export type WorkspaceEntryKind = "directory" | "file";
 
@@ -72,15 +72,33 @@ export interface ExecuteIntegralActionResult {
   summary: string;
 }
 
+export interface InstallPluginFromZipResult {
+  archivePath: string;
+  installRootPath: string;
+  plugin: InstalledPluginDefinition;
+  targetDirectoryName: string;
+}
+
+export interface UninstallPluginResult {
+  installRootPath: string;
+  installedPluginPath: string;
+  pluginId: string;
+  removed: boolean;
+}
+
 export interface IntegralNotesApi {
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
-  listInstalledPlugins: () => Promise<InstalledPluginSummary[]>;
+  getPluginInstallRootPath: () => Promise<string>;
+  listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
+  installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
+  loadPluginRendererDocument: (pluginId: string) => Promise<string>;
   readNote: (relativePath: string) => Promise<NoteDocument>;
   saveNote: (relativePath: string, content: string) => Promise<NoteDocument>;
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;
   renameEntry: (request: RenameEntryRequest) => Promise<RenameEntryResult>;
   deleteEntry: (request: DeleteEntryRequest) => Promise<DeleteEntryResult>;
+  uninstallPlugin: (pluginId: string) => Promise<UninstallPluginResult>;
   executeIntegralAction: (
     request: ExecuteIntegralActionRequest
   ) => Promise<ExecuteIntegralActionResult>;

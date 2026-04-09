@@ -1,0 +1,17 @@
+{
+  "name": "@integral-notes/plugin-shimadzu-lc",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Bundled sample LC plugin for IntegralNotes",
+  "scripts": {
+    "install:local": "node ../../src/dev/plugin-installer.mjs install .",
+    "package:release": "node ../../src/dev/plugin-package-builder.mjs package .",
+    "uninstall:local": "node ../../src/dev/plugin-installer.mjs uninstall .",
+    "where:local": "node ../../src/dev/plugin-installer.mjs where ."
+  },
+  "files": [
+    "integral-plugin.json",
+    "renderer",
+    "host"
+  ]
+}

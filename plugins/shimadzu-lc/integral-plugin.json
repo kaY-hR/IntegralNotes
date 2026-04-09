@@ -1,0 +1,30 @@
+{
+  "apiVersion": "1",
+  "id": "shimadzu.lc",
+  "namespace": "LC",
+  "displayName": "Shimadzu LC",
+  "version": "0.1.0",
+  "description": "LC method 系 block を提供する plugin",
+  "renderer": {
+    "entry": "renderer/index.html",
+    "mode": "iframe"
+  },
+  "host": {
+    "entry": "host/index.cjs",
+    "runtime": "module"
+  },
+  "blocks": [
+    {
+      "type": "LC.Method.Gradient",
+      "title": "LC Gradient",
+      "description": "勾配プログラムを可視化し、実行 action を提供する。",
+      "actions": [
+        {
+          "id": "execute",
+          "label": "装置操作を実行",
+          "busyLabel": "装置操作を送信中..."
+        }
+      ]
+    }
+  ]
+}

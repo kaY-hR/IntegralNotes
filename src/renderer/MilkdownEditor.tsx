@@ -2,6 +2,7 @@ import { Crepe } from "@milkdown/crepe";
 import { useEffect, useRef } from "react";
 
 import { installIntegralCodeBlockFeature } from "./integralCodeBlockFeature";
+import { initializeIntegralPluginRuntime } from "./integralPluginRuntime";
 import { integralSnippetFeatureConfigs } from "./integralSnippetMenu";
 
 interface MilkdownEditorProps {
@@ -44,14 +45,22 @@ export function MilkdownEditor({
 
     let shouldDestroyAfterCreate = false;
 
-    void editor.create().then(() => {
+    void (async () => {
+      try {
+        await initializeIntegralPluginRuntime();
+      } catch (error) {
+        console.error("Failed to initialize plugin runtime.", error);
+      }
+
+      await editor.create();
+
       if (shouldDestroyAfterCreate) {
         void editor.destroy();
         return;
       }
 
       editorRef.current = editor;
-    });
+    })();
 
     return () => {
       shouldDestroyAfterCreate = true;

@@ -12,6 +12,10 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
+    "plugins:package:all": "node src/dev/plugin-package-builder.mjs package plugins/shimadzu-lc plugins/standard-graphs",
+    "plugins:where": "node src/dev/plugin-installer.mjs where",
+    "plugins:install:all": "node src/dev/plugin-installer.mjs install plugins/shimadzu-lc plugins/standard-graphs",
+    "plugins:uninstall:all": "node src/dev/plugin-installer.mjs uninstall plugins/shimadzu-lc plugins/standard-graphs",
     "start": "electron dist-electron/main/main.js",
     "dist:win": "npm run build && electron-builder --win nsis --publish never"
   },

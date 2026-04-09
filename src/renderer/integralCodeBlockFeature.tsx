@@ -5,17 +5,21 @@ import type { Root } from "react-dom/client";
 
 import { codeBlockSchema } from "@milkdown/kit/preset/commonmark";
 import { $nodeSchema, $view } from "@milkdown/kit/utils";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
+import { PLUGIN_RENDER_MESSAGE_TYPE } from "../shared/plugins";
 import type { ExecuteIntegralActionResult } from "../shared/workspace";
 
 import {
   INTEGRAL_BLOCK_LANGUAGE,
+  type IntegralBlockActionDefinition,
   type IntegralJsonBlock,
   getIntegralBlockDefinition,
   parseIntegralJsonBlock,
   renderIntegralBlockBody
 } from "./integralBlockRegistry";
+import { loadIntegralPluginRendererDocument } from "./integralPluginRuntime";
 
 type MarkdownCodeNode = {
   lang?: string | null;
@@ -139,9 +143,9 @@ export function installIntegralCodeBlockFeature(editor: Crepe): void {
 class IntegralNotesBlockView implements NodeView {
   readonly dom: HTMLElement;
 
+  private busyActionId: string | null = null;
   private destroyed = false;
   private executionState: ExecutionState | null = null;
-  private isBusy = false;
   private readonly root: Root;
   private selected = false;
   private readonly viewId = ++nextViewId;
@@ -236,7 +240,7 @@ class IntegralNotesBlockView implements NodeView {
     this.root.render(
       <IntegralCodeBlockPanel
         executionState={this.executionState}
-        isBusy={this.isBusy}
+        busyActionId={this.busyActionId}
         onChangeText={this.handleTextChange}
         onExecute={this.handleExecute}
         onFormat={this.handleFormat}
@@ -298,7 +302,7 @@ class IntegralNotesBlockView implements NodeView {
     }
   };
 
-  private handleExecute = async (): Promise<void> => {
+  private handleExecute = async (action: IntegralBlockActionDefinition): Promise<void> => {
     const rawText = readIntegralNodeValue(this.node);
     const parsed = parseIntegralDraft(rawText);
 
@@ -312,9 +316,9 @@ class IntegralNotesBlockView implements NodeView {
       return;
     }
 
-    const action = getIntegralBlockDefinition(parsed.block.type)?.action;
+    const actions = getIntegralBlockDefinition(parsed.block.type)?.actions ?? [];
 
-    if (!action) {
+    if (!actions.some((candidate) => candidate.id === action.id)) {
       this.executionState = {
         kind: "error",
         logLines: [`未対応の Integral action です: ${parsed.block.type}`],
@@ -324,7 +328,7 @@ class IntegralNotesBlockView implements NodeView {
       return;
     }
 
-    this.isBusy = true;
+    this.busyActionId = action.id;
     this.executionState = null;
     this.render();
 
@@ -379,7 +383,7 @@ class IntegralNotesBlockView implements NodeView {
       });
     } finally {
       if (!this.destroyed) {
-        this.isBusy = false;
+        this.busyActionId = null;
         this.render();
       }
     }
@@ -387,8 +391,8 @@ class IntegralNotesBlockView implements NodeView {
 }
 
 function IntegralCodeBlockPanel({
+  busyActionId,
   executionState,
-  isBusy,
   onChangeText,
   onExecute,
   onFormat,
@@ -396,17 +400,17 @@ function IntegralCodeBlockPanel({
   rawText,
   selected
 }: {
+  busyActionId: string | null;
   executionState: ExecutionState | null;
-  isBusy: boolean;
   onChangeText: (nextText: string) => void;
-  onExecute: () => void;
+  onExecute: (action: IntegralBlockActionDefinition) => void;
   onFormat: () => void;
   parsed: ParsedIntegralDraft;
   rawText: string;
   selected: boolean;
 }): JSX.Element {
   const blockDefinition = parsed.block ? getIntegralBlockDefinition(parsed.block.type) : null;
-  const actionDefinition = blockDefinition?.action;
+  const actionDefinitions = blockDefinition?.actions ?? [];
 
   return (
     <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
@@ -414,6 +418,9 @@ function IntegralCodeBlockPanel({
         <div className="integral-code-block__meta">
           <span className="integral-code-block__badge integral-code-block__badge--accent">Integral</span>
           <span className="integral-code-block__badge">itg-notes</span>
+          {blockDefinition ? (
+            <span className="integral-code-block__badge">{blockDefinition.pluginDisplayName}</span>
+          ) : null}
           <span className="integral-code-block__badge">{parsed.block?.type ?? "invalid"}</span>
         </div>
 
@@ -426,16 +433,17 @@ function IntegralCodeBlockPanel({
             整形
           </button>
 
-          {actionDefinition ? (
+          {actionDefinitions.map((actionDefinition) => (
             <button
               className="integral-code-block__button integral-code-block__button--primary"
-              disabled={isBusy}
-              onClick={onExecute}
+              disabled={busyActionId !== null}
+              key={actionDefinition.id}
+              onClick={() => onExecute(actionDefinition)}
               type="button"
             >
-              {isBusy ? actionDefinition.busyLabel : actionDefinition.label}
+              {busyActionId === actionDefinition.id ? actionDefinition.busyLabel : actionDefinition.label}
             </button>
-          ) : null}
+          ))}
         </div>
       </div>
 
@@ -456,7 +464,11 @@ function IntegralCodeBlockPanel({
               "専用 renderer 未登録のため、汎用 Integral preview を表示しています。"}
           </p>
 
-          {renderIntegralBlockBody(parsed.block)}
+          {blockDefinition?.hasRenderer ? (
+            <PluginRendererPanel block={parsed.block} blockDefinition={blockDefinition} />
+          ) : (
+            renderIntegralBlockBody(parsed.block)
+          )}
         </div>
       ) : (
         <div className="integral-code-block__result integral-code-block__result--error">
@@ -477,10 +489,10 @@ function IntegralCodeBlockPanel({
         </p>
       </div>
 
-      {actionDefinition ? (
+      {actionDefinitions.length > 0 ? (
         <div className="integral-code-block__runbar">
           <p className="integral-code-block__runhint">
-            実行ボタンは mock runner 経由で main process に処理を渡します。
+            実行ボタンは plugin host module 経由で main process に処理を渡します。
           </p>
         </div>
       ) : null}
@@ -500,6 +512,121 @@ function IntegralCodeBlockPanel({
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function PluginRendererPanel({
+  block,
+  blockDefinition
+}: {
+  block: IntegralJsonBlock;
+  blockDefinition: NonNullable<ReturnType<typeof getIntegralBlockDefinition>>;
+}): JSX.Element {
+  const [rendererDocument, setRendererDocument] = useState<string | null>(null);
+  const [rendererError, setRendererError] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const postRenderModel = (): void => {
+    const frameWindow = iframeRef.current?.contentWindow;
+
+    if (!frameWindow) {
+      return;
+    }
+
+    frameWindow.postMessage(
+      {
+        payload: {
+          block,
+          blockDefinition: {
+            actions: blockDefinition.actions,
+            description: blockDefinition.description,
+            title: blockDefinition.title,
+            type: blockDefinition.type
+          },
+          plugin: {
+            description: blockDefinition.pluginDescription,
+            displayName: blockDefinition.pluginDisplayName,
+            id: blockDefinition.pluginId,
+            namespace: blockDefinition.pluginNamespace,
+            origin: blockDefinition.pluginOrigin,
+            version: blockDefinition.pluginVersion
+          }
+        },
+        type: PLUGIN_RENDER_MESSAGE_TYPE
+      },
+      "*"
+    );
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setRendererDocument(null);
+    setRendererError(null);
+
+    void loadIntegralPluginRendererDocument(blockDefinition.pluginId)
+      .then((document) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (document === null) {
+          setRendererError("plugin renderer が未登録です。");
+          return;
+        }
+
+        setRendererDocument(document);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRendererError(formatErrorMessage(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [blockDefinition.pluginId]);
+
+  useEffect(() => {
+    if (!rendererDocument) {
+      return;
+    }
+
+    postRenderModel();
+  }, [block, blockDefinition, rendererDocument]);
+
+  if (rendererError) {
+    return (
+      <>
+        <div className="integral-code-block__result integral-code-block__result--error">
+          <strong>Plugin renderer の読込に失敗しました。</strong>
+          <span>{rendererError}</span>
+        </div>
+        {renderIntegralBlockBody(block)}
+      </>
+    );
+  }
+
+  if (!rendererDocument) {
+    return (
+      <div className="integral-plugin-frame-shell integral-plugin-frame-shell--loading">
+        <span>Plugin renderer を読み込み中...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="integral-plugin-frame-shell">
+      <iframe
+        className="integral-plugin-frame"
+        onLoad={postRenderModel}
+        ref={iframeRef}
+        sandbox="allow-scripts"
+        srcDoc={rendererDocument}
+        title={`${blockDefinition.title} plugin renderer`}
+      />
     </div>
   );
 }

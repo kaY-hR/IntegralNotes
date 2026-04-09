@@ -3,10 +3,12 @@ interface JsonRecord {
 }
 
 export const PLUGIN_API_VERSION = "1";
+export const PLUGIN_HOST_MODULE_EXPORT = "runIntegralPluginAction";
+export const PLUGIN_HOST_RUNTIME = "module";
 export const PLUGIN_MANIFEST_FILENAME = "integral-plugin.json";
-export const PLUGIN_RUNNER_PROTOCOL_VERSION = "1";
+export const PLUGIN_RENDER_MESSAGE_TYPE = "integral:set-block";
 
-export type InstalledPluginOrigin = "builtin" | "external";
+export type InstalledPluginOrigin = "external";
 
 export interface PluginActionContribution {
   busyLabel: string;
@@ -26,9 +28,9 @@ export interface PluginRendererContribution {
   mode: "iframe";
 }
 
-export interface PluginExecutableContribution {
+export interface PluginHostContribution {
   entry: string;
-  protocolVersion: typeof PLUGIN_RUNNER_PROTOCOL_VERSION;
+  runtime: typeof PLUGIN_HOST_RUNTIME;
 }
 
 export interface PluginManifest {
@@ -36,16 +38,19 @@ export interface PluginManifest {
   blocks: PluginBlockContribution[];
   description: string;
   displayName: string;
-  executable?: PluginExecutableContribution;
+  host?: PluginHostContribution;
   id: string;
   namespace: string;
   renderer?: PluginRendererContribution;
   version: string;
 }
 
-export interface InstalledPluginSummary {
-  blocks: string[];
+export interface InstalledPluginDefinition {
+  blocks: PluginBlockContribution[];
+  description: string;
   displayName: string;
+  hasHost: boolean;
+  hasRenderer: boolean;
   id: string;
   namespace: string;
   origin: InstalledPluginOrigin;
@@ -53,52 +58,54 @@ export interface InstalledPluginSummary {
   version: string;
 }
 
-export const BUILTIN_PLUGIN_MANIFESTS = [
-  {
-    apiVersion: PLUGIN_API_VERSION,
-    blocks: [
-      {
-        actions: [
-          {
-            busyLabel: "装置操作を送信中...",
-            id: "execute",
-            label: "装置操作を実行"
-          }
-        ],
-        description: "勾配プログラムを可視化し、実行要求を main process へ渡します。",
-        title: "LC Gradient",
-        type: "LC.Method.Gradient"
-      }
-    ],
-    description: "IntegralNotes 組み込みの LC 系 block 群です。",
-    displayName: "IntegralNotes LC",
-    id: "integralnotes.builtin.lc",
-    namespace: "LC",
-    version: "0.1.0"
-  },
-  {
-    apiVersion: PLUGIN_API_VERSION,
-    blocks: [
-      {
-        actions: [
-          {
-            busyLabel: "解析ジョブを起動中...",
-            id: "analyze",
-            label: "解析を実行"
-          }
-        ],
-        description: "対象データを確認し、クロマトグラム解析要求を main process へ渡します。",
-        title: "Chromatogram",
-        type: "StandardGraphs.Chromatogram"
-      }
-    ],
-    description: "IntegralNotes 組み込みのグラフ系 block 群です。",
-    displayName: "IntegralNotes Standard Graphs",
-    id: "integralnotes.builtin.standard-graphs",
-    namespace: "StandardGraphs",
-    version: "0.1.0"
+export interface PluginRendererModel {
+  block: {
+    params?: Record<string, unknown>;
+    type: string;
+  };
+  blockDefinition: PluginBlockContribution;
+  plugin: Pick<
+    InstalledPluginDefinition,
+    "description" | "displayName" | "id" | "namespace" | "origin" | "version"
+  >;
+}
+
+export interface PluginHostActionContext {
+  actionId: string;
+  blockType: string;
+  params?: Record<string, unknown>;
+  payload: string;
+  plugin: InstalledPluginDefinition;
+}
+
+export interface PluginHostActionResult {
+  logLines: string[];
+  summary: string;
+}
+
+export interface PluginHostModule {
+  runIntegralPluginAction: (
+    context: PluginHostActionContext
+  ) => Promise<PluginHostActionResult> | PluginHostActionResult;
+}
+
+export function findInstalledPluginBlock(
+  plugins: readonly InstalledPluginDefinition[],
+  blockType: string
+): { block: PluginBlockContribution; plugin: InstalledPluginDefinition } | null {
+  for (const plugin of plugins) {
+    const block = plugin.blocks.find((candidate) => candidate.type === blockType);
+
+    if (block) {
+      return {
+        block,
+        plugin
+      };
+    }
   }
-] as const satisfies readonly PluginManifest[];
+
+  return null;
+}
 
 export function findPluginBlockContribution(
   manifests: readonly PluginManifest[],
@@ -140,9 +147,9 @@ export function parsePluginManifest(manifest: unknown): PluginManifest | null {
 
   const blocks = parsePluginBlocks(manifest.blocks, namespace);
   const renderer = parsePluginRendererContribution(manifest.renderer);
-  const executable = parsePluginExecutableContribution(manifest.executable);
+  const host = parsePluginHostContribution(manifest.host);
 
-  if (blocks === null || blocks.length === 0 || renderer === null || executable === null) {
+  if (blocks === null || blocks.length === 0 || renderer === null || host === null) {
     return null;
   }
 
@@ -151,7 +158,7 @@ export function parsePluginManifest(manifest: unknown): PluginManifest | null {
     blocks,
     description,
     displayName,
-    executable: executable ?? undefined,
+    host: host ?? undefined,
     id,
     namespace,
     renderer: renderer ?? undefined,
@@ -167,14 +174,22 @@ export function parsePluginManifestText(content: string): PluginManifest | null 
   }
 }
 
-export function toInstalledPluginSummary(
+export function toInstalledPluginDefinition(
   manifest: PluginManifest,
   origin: InstalledPluginOrigin,
   sourcePath: string | null
-): InstalledPluginSummary {
+): InstalledPluginDefinition {
   return {
-    blocks: manifest.blocks.map((block) => block.type),
+    blocks: manifest.blocks.map((block) => ({
+      actions: block.actions?.map((action) => ({ ...action })),
+      description: block.description,
+      title: block.title,
+      type: block.type
+    })),
+    description: manifest.description,
     displayName: manifest.displayName,
+    hasHost: manifest.host !== undefined,
+    hasRenderer: manifest.renderer !== undefined,
     id: manifest.id,
     namespace: manifest.namespace,
     origin,
@@ -291,7 +306,7 @@ function parsePluginRendererContribution(value: unknown): PluginRendererContribu
   };
 }
 
-function parsePluginExecutableContribution(value: unknown): PluginExecutableContribution | null | undefined {
+function parsePluginHostContribution(value: unknown): PluginHostContribution | null | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -301,15 +316,15 @@ function parsePluginExecutableContribution(value: unknown): PluginExecutableCont
   }
 
   const entry = readRelativeAssetPath(value.entry);
-  const protocolVersion = readNonEmptyString(value.protocolVersion);
+  const runtime = readNonEmptyString(value.runtime);
 
-  if (entry === null || protocolVersion !== PLUGIN_RUNNER_PROTOCOL_VERSION) {
+  if (entry === null || runtime !== PLUGIN_HOST_RUNTIME) {
     return null;
   }
 
   return {
     entry,
-    protocolVersion: PLUGIN_RUNNER_PROTOCOL_VERSION
+    runtime: PLUGIN_HOST_RUNTIME
   };
 }
 
@@ -327,9 +342,7 @@ function readRelativeAssetPath(value: unknown): string | null {
 
   const normalizedSegments = entry.split(/[\\/]+/u);
 
-  if (
-    normalizedSegments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
-  ) {
+  if (normalizedSegments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
     return null;
   }
 

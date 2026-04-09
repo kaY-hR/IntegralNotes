@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shimadzu LC Renderer</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+        background: #f4f8fc;
+        color: #16324a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(180deg, #f8fbff, #edf4fb);
+      }
+
+      body {
+        padding: 14px;
+      }
+
+      .card {
+        display: grid;
+        gap: 12px;
+        min-height: 100%;
+        padding: 14px;
+        border: 1px solid #d1e0ee;
+        border-radius: 14px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 253, 0.98)),
+          #ffffff;
+      }
+
+      .header,
+      .row,
+      .stats {
+        display: flex;
+      }
+
+      .header,
+      .row {
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .stats {
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .stat {
+        min-width: 92px;
+        padding: 8px 10px;
+        border: 1px solid #d6e2ee;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .label {
+        display: block;
+        margin-bottom: 4px;
+        color: #6c8094;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .value {
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .rows {
+        display: grid;
+        gap: 8px;
+      }
+
+      .index {
+        min-width: 26px;
+        color: #7a8ea3;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .time {
+        min-width: 62px;
+        font-size: 12px;
+      }
+
+      .track {
+        position: relative;
+        flex: 1;
+        height: 10px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #dceaf5, #eff5fa);
+      }
+
+      .fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #1f8ad3, #0a63a7);
+      }
+
+      .conc {
+        min-width: 58px;
+        text-align: right;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .empty {
+        display: grid;
+        min-height: 120px;
+        place-items: center;
+        color: #698093;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card" id="root">
+      <div class="empty">Shimadzu LC renderer is ready.</div>
+    </div>
+    <script>
+      const root = document.getElementById("root");
+
+      window.addEventListener("message", (event) => {
+        if (!event.data || event.data.type !== "integral:set-block") {
+          return;
+        }
+
+        render(event.data.payload);
+      });
+
+      function render(payload) {
+        const block = payload?.block ?? {};
+        const params = isRecord(block.params) ? block.params : {};
+        const analysisTime = readNumber(params["analysis-time"]);
+        const points = readGradientPoints(params["time-prog"]);
+
+        root.innerHTML = `
+          <div class="header">
+            <div>
+              <div class="label">Plugin</div>
+              <div class="value">Shimadzu LC</div>
+            </div>
+            <div class="label">${escapeHtml(block.type ?? "unknown")}</div>
+          </div>
+          <div class="stats">
+            <div class="stat">
+              <span class="label">Analysis</span>
+              <strong class="value">${analysisTime === null ? "-" : `${formatNumber(analysisTime)} min`}</strong>
+            </div>
+            <div class="stat">
+              <span class="label">Points</span>
+              <strong class="value">${points.length}</strong>
+            </div>
+            <div class="stat">
+              <span class="label">Mode</span>
+              <strong class="value">Gradient</strong>
+            </div>
+          </div>
+          ${
+            points.length === 0
+              ? '<div class="empty">time-prog が未設定です。</div>'
+              : `<div class="rows">${points
+                  .map(
+                    (point, index) => `
+                      <div class="row">
+                        <span class="index">#${index + 1}</span>
+                        <span class="time">${formatNumber(point.time)} min</span>
+                        <div class="track"><div class="fill" style="width:${clamp(point.conc, 0, 100)}%"></div></div>
+                        <span class="conc">${formatNumber(point.conc)} %</span>
+                      </div>
+                    `
+                  )
+                  .join("")}</div>`
+          }
+        `;
+      }
+
+      function readGradientPoints(value) {
+        if (!Array.isArray(value)) {
+          return [];
+        }
+
+        return value
+          .map((item) => {
+            if (!isRecord(item)) {
+              return null;
+            }
+
+            const time = readNumber(item.time);
+            const conc = readNumber(item.Conc);
+
+            if (time === null || conc === null) {
+              return null;
+            }
+
+            return { time, conc };
+          })
+          .filter(Boolean)
+          .sort((left, right) => left.time - right.time);
+      }
+
+      function readNumber(value) {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+
+        if (typeof value === "string" && value.trim().length > 0) {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        return null;
+      }
+
+      function isRecord(value) {
+        return typeof value === "object" && value !== null && !Array.isArray(value);
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function formatNumber(value) {
+        const normalized = Number.isInteger(value) ? String(value) : value.toFixed(2);
+        return normalized.replace(/\.?0+$/, "");
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+    </script>
+  </body>
+</html>

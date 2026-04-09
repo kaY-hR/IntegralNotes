@@ -1,0 +1,29 @@
+{
+  "name": "@integral-notes/plugin-sdk",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./host": {
+      "types": "./src/host.d.ts",
+      "default": "./src/host.js"
+    },
+    "./manifest": {
+      "types": "./src/manifest.d.ts",
+      "default": "./src/manifest.js"
+    },
+    "./installer": {
+      "types": "./src/installer.d.ts",
+      "default": "./src/installer.js"
+    },
+    "./renderer": {
+      "types": "./src/renderer.d.ts",
+      "default": "./src/renderer.js"
+    }
+  }
+}

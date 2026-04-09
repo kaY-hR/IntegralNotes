@@ -5,10 +5,12 @@ import type {
   CreateEntryRequest,
   DeleteEntryRequest,
   ExecuteIntegralActionRequest,
-  ExecuteIntegralActionResult,
   RenameEntryRequest
 } from "../shared/workspace";
-import { PluginRegistry, resolvePluginInstallRootPath } from "./pluginRegistry";
+import {
+  PluginRegistry,
+  resolveInstalledPluginRootPath
+} from "./pluginRegistry";
 import { WorkspaceService } from "./workspaceService";
 
 function resolveInitialWorkspacePath(): string {
@@ -25,13 +27,11 @@ const workspaceService = new WorkspaceService({
   initialRootPath: resolveInitialWorkspacePath(),
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
-const pluginRegistry = new PluginRegistry({
-  installRootPath: resolvePluginInstallRootPath(app.getPath("userData"))
-});
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
+let pluginRegistry: PluginRegistry | null = null;
 
 async function createMainWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -94,7 +94,36 @@ function registerIpcHandlers(): void {
 
     return snapshot;
   });
-  ipcMain.handle("plugins:listInstalled", async () => pluginRegistry.listInstalledPlugins());
+  ipcMain.handle("plugins:getInstallRootPath", async () => getPluginRegistry().getInstallRootPath());
+  ipcMain.handle("plugins:listInstalled", async () => getPluginRegistry().listInstalledPlugins());
+  ipcMain.handle("plugins:installFromZip", async () => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Install Plugin from ZIP",
+      filters: [
+        {
+          name: "Plugin ZIP",
+          extensions: ["zip"]
+        }
+      ],
+      properties: ["openFile"]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return getPluginRegistry().installPluginFromArchive(result.filePaths[0]);
+  });
+  ipcMain.handle("plugins:loadRendererDocument", async (_event, pluginId: string) =>
+    getPluginRegistry().loadRendererDocument(pluginId)
+  );
+  ipcMain.handle("plugins:uninstall", async (_event, pluginId: string) =>
+    getPluginRegistry().uninstallPlugin(pluginId)
+  );
   ipcMain.handle("workspace:readNote", async (_event, relativePath: string) =>
     workspaceService.readNote(relativePath)
   );
@@ -113,93 +142,16 @@ function registerIpcHandlers(): void {
     workspaceService.deleteEntry(request)
   );
   ipcMain.handle("integral:executeAction", async (_event, request: ExecuteIntegralActionRequest) =>
-    executeIntegralAction(request)
+    getPluginRegistry().executeAction(request)
   );
 }
 
-async function executeIntegralAction(
-  request: ExecuteIntegralActionRequest
-): Promise<ExecuteIntegralActionResult> {
-  const startedAt = new Date().toISOString();
-  const block = parseIntegralPayload(request.payload);
-
-  await wait(220);
-
-  switch (`${request.blockType}:${request.actionId}`) {
-    case "LC.Method.Gradient:execute": {
-      const params = block?.params;
-      const timeProgram = Array.isArray(params?.["time-prog"]) ? params["time-prog"] : [];
-      const analysisTime = typeof params?.["analysis-time"] === "number" ? params["analysis-time"] : null;
-
-      return {
-        actionId: request.actionId,
-        blockType: request.blockType,
-        finishedAt: new Date().toISOString(),
-        logLines: [
-          "Mock runner selected",
-          `Gradient points: ${timeProgram.length}`,
-          analysisTime === null ? "Analysis time: unset" : `Analysis time: ${analysisTime} min`,
-          "Future hook: spawn external instrument-control executable here"
-        ],
-        startedAt,
-        status: "success",
-        summary: "LC グラジエント操作の実行要求を main process が受理しました。"
-      };
-    }
-
-    case "StandardGraphs.Chromatogram:analyze": {
-      const params = block?.params;
-      const datasets = Array.isArray(params?.data) ? params.data.filter((item) => typeof item === "string") : [];
-
-      return {
-        actionId: request.actionId,
-        blockType: request.blockType,
-        finishedAt: new Date().toISOString(),
-        logLines: [
-          "Mock runner selected",
-          `Datasets: ${datasets.length}`,
-          datasets.length > 0 ? `Input: ${datasets.join(", ")}` : "Input: not set",
-          "Future hook: spawn analysis executable or submit batch job here"
-        ],
-        startedAt,
-        status: "success",
-        summary: "クロマトグラム解析要求を main process が受理しました。"
-      };
-    }
-
-    default:
-      throw new Error(`未対応の Integral action です: ${request.blockType} / ${request.actionId}`);
+function getPluginRegistry(): PluginRegistry {
+  if (pluginRegistry === null) {
+    throw new Error("plugin registry is not ready.");
   }
-}
 
-function parseIntegralPayload(payload: string): { params?: Record<string, unknown>; type: string } | null {
-  try {
-    const parsed = JSON.parse(payload);
-
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return null;
-    }
-
-    if (typeof parsed.type !== "string") {
-      return null;
-    }
-
-    return {
-      params:
-        typeof parsed.params === "object" && parsed.params !== null && !Array.isArray(parsed.params)
-          ? (parsed.params as Record<string, unknown>)
-          : undefined,
-      type: parsed.type
-    };
-  } catch {
-    return null;
-  }
-}
-
-function wait(durationMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, durationMs);
-  });
+  return pluginRegistry;
 }
 
 if (!hasSingleInstanceLock) {
@@ -219,6 +171,9 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     await workspaceService.initialize();
+    pluginRegistry = new PluginRegistry({
+      installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
+    });
     registerIpcHandlers();
     await createMainWindow();
 

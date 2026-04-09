@@ -1,0 +1,30 @@
+{
+  "apiVersion": "1",
+  "id": "integralnotes.standard-graphs",
+  "namespace": "StandardGraphs",
+  "displayName": "Standard Graphs",
+  "version": "0.1.0",
+  "description": "標準グラフ系 block を提供する plugin",
+  "renderer": {
+    "entry": "renderer/index.html",
+    "mode": "iframe"
+  },
+  "host": {
+    "entry": "host/index.cjs",
+    "runtime": "module"
+  },
+  "blocks": [
+    {
+      "type": "StandardGraphs.Chromatogram",
+      "title": "Chromatogram",
+      "description": "クロマトグラム overlay を preview し、解析 action を提供する。",
+      "actions": [
+        {
+          "id": "analyze",
+          "label": "解析を実行",
+          "busyLabel": "解析ジョブを起動中..."
+        }
+      ]
+    }
+  ]
+}

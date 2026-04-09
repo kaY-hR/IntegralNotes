@@ -1,49 +1,177 @@
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import type {
+  ExecuteIntegralActionRequest,
+  ExecuteIntegralActionResult,
+  InstallPluginFromZipResult,
+  UninstallPluginResult
+} from "../shared/workspace";
 import {
-  BUILTIN_PLUGIN_MANIFESTS,
+  PLUGIN_HOST_MODULE_EXPORT,
   PLUGIN_MANIFEST_FILENAME,
   parsePluginManifestText,
-  toInstalledPluginSummary,
-  type InstalledPluginSummary,
+  toInstalledPluginDefinition,
+  type InstalledPluginDefinition,
+  type PluginHostModule,
   type PluginManifest
 } from "../shared/plugins";
 
 interface PluginRegistryOptions {
-  builtinManifests?: readonly PluginManifest[];
   installRootPath: string;
 }
 
+interface ResolvedInstalledPlugin {
+  definition: InstalledPluginDefinition;
+  hostEntryPath: string | null;
+  manifest: PluginManifest;
+  rendererEntryPath: string | null;
+  rootPath: string;
+}
+
 export class PluginRegistry {
-  private readonly builtinManifests: readonly PluginManifest[];
   private readonly installRootPath: string;
 
   constructor(options: PluginRegistryOptions) {
-    this.builtinManifests = options.builtinManifests ?? BUILTIN_PLUGIN_MANIFESTS;
     this.installRootPath = path.resolve(options.installRootPath);
   }
 
-  async listInstalledPlugins(): Promise<InstalledPluginSummary[]> {
-    const builtinPlugins = this.builtinManifests.map((manifest) =>
-      toInstalledPluginSummary(manifest, "builtin", null)
-    );
-    const externalPlugins = await this.readExternalPlugins();
-
-    return [...builtinPlugins, ...externalPlugins].sort((left, right) => {
-      if (left.origin !== right.origin) {
-        return left.origin === "builtin" ? -1 : 1;
-      }
-
-      return left.displayName.localeCompare(right.displayName, "ja");
-    });
+  getInstallRootPath(): string {
+    return this.installRootPath;
   }
 
-  private async readExternalPlugins(): Promise<InstalledPluginSummary[]> {
+  async listInstalledPlugins(): Promise<InstalledPluginDefinition[]> {
+    const plugins = await this.getResolvedPlugins();
+
+    return plugins
+      .map((plugin) => plugin.definition)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName, "ja"));
+  }
+
+  async loadRendererDocument(pluginId: string): Promise<string> {
+    const plugin = await this.findPluginById(pluginId);
+
+    if (!plugin || !plugin.rendererEntryPath) {
+      throw new Error(`plugin renderer が見つかりません: ${pluginId}`);
+    }
+
+    return fs.readFile(plugin.rendererEntryPath, "utf8");
+  }
+
+  async executeAction(
+    request: ExecuteIntegralActionRequest
+  ): Promise<ExecuteIntegralActionResult> {
+    const plugin = await this.findPluginByBlockType(request.blockType);
+
+    if (!plugin) {
+      throw new Error(`block type に対応する plugin が見つかりません: ${request.blockType}`);
+    }
+
+    if (!plugin.hostEntryPath) {
+      throw new Error(`plugin host が未定義です: ${plugin.definition.id}`);
+    }
+
+    const startedAt = new Date().toISOString();
+    const runIntegralPluginAction = this.loadPluginHostRunner(plugin.hostEntryPath);
+    const result = await Promise.resolve(
+      runIntegralPluginAction({
+        actionId: request.actionId,
+        blockType: request.blockType,
+        params: request.params,
+        payload: request.payload,
+        plugin: plugin.definition
+      })
+    );
+
+    return {
+      actionId: request.actionId,
+      blockType: request.blockType,
+      finishedAt: new Date().toISOString(),
+      logLines: result.logLines,
+      startedAt,
+      status: "success",
+      summary: result.summary
+    };
+  }
+
+  async installPluginFromArchive(archivePath: string): Promise<InstallPluginFromZipResult> {
+    const resolvedArchivePath = path.resolve(archivePath);
+    const tempRootPath = await this.createTempInstallDirectory();
+
+    try {
+      await extractZipArchive(resolvedArchivePath, tempRootPath);
+
+      const pluginSourceRootPath = await resolveExtractedPluginRootPath(tempRootPath);
+      const manifestPath = path.join(pluginSourceRootPath, PLUGIN_MANIFEST_FILENAME);
+      const manifest = parsePluginManifestText(await fs.readFile(manifestPath, "utf8"));
+
+      if (manifest === null) {
+        throw new Error(`plugin manifest が不正です: ${manifestPath}`);
+      }
+
+      await fs.mkdir(this.installRootPath, { recursive: true });
+
+      const targetDirectoryName = sanitizePluginDirectoryName(manifest.id);
+      const installedPluginPath = path.join(this.installRootPath, targetDirectoryName);
+
+      assertPathInsideRoot(this.installRootPath, installedPluginPath);
+      await fs.rm(installedPluginPath, { force: true, recursive: true });
+      await fs.cp(pluginSourceRootPath, installedPluginPath, { force: true, recursive: true });
+
+      const installedPlugin = await this.readPluginDirectory(installedPluginPath);
+
+      if (!installedPlugin) {
+        throw new Error(`plugin install 後の読込に失敗しました: ${manifest.id}`);
+      }
+
+      return {
+        archivePath: resolvedArchivePath,
+        installRootPath: this.installRootPath,
+        plugin: installedPlugin.definition,
+        targetDirectoryName
+      };
+    } finally {
+      await fs.rm(tempRootPath, { force: true, recursive: true });
+    }
+  }
+
+  async uninstallPlugin(pluginId: string): Promise<UninstallPluginResult> {
+    const installedPlugin = await this.findPluginById(pluginId);
+    const installedPluginPath =
+      installedPlugin?.rootPath ?? path.join(this.installRootPath, sanitizePluginDirectoryName(pluginId));
+
+    assertPathInsideRoot(this.installRootPath, installedPluginPath);
+
+    if (!(await pathExists(installedPluginPath))) {
+      return {
+        installRootPath: this.installRootPath,
+        installedPluginPath,
+        pluginId,
+        removed: false
+      };
+    }
+
+    await fs.rm(installedPluginPath, { force: true, recursive: true });
+
+    return {
+      installRootPath: this.installRootPath,
+      installedPluginPath,
+      pluginId,
+      removed: true
+    };
+  }
+
+  private async getResolvedPlugins(): Promise<ResolvedInstalledPlugin[]> {
+    const externalPlugins = await this.readPluginsFromRoot(this.installRootPath);
+    return this.mergeResolvedPlugins(externalPlugins);
+  }
+
+  private async readPluginsFromRoot(rootPath: string): Promise<ResolvedInstalledPlugin[]> {
     let entries;
 
     try {
-      entries = await fs.readdir(this.installRootPath, { withFileTypes: true });
+      entries = await fs.readdir(rootPath, { withFileTypes: true });
     } catch (error) {
       if (isMissingPathError(error)) {
         return [];
@@ -55,13 +183,14 @@ export class PluginRegistry {
     const plugins = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
-        .map((entry) => this.readExternalPlugin(path.join(this.installRootPath, entry.name)))
+        .sort((left, right) => left.name.localeCompare(right.name, "ja"))
+        .map((entry) => this.readPluginDirectory(path.join(rootPath, entry.name)))
     );
 
-    return plugins.filter((plugin): plugin is InstalledPluginSummary => plugin !== null);
+    return plugins.filter((plugin): plugin is ResolvedInstalledPlugin => plugin !== null);
   }
 
-  private async readExternalPlugin(pluginRootPath: string): Promise<InstalledPluginSummary | null> {
+  private async readPluginDirectory(pluginRootPath: string): Promise<ResolvedInstalledPlugin | null> {
     const manifestPath = path.join(pluginRootPath, PLUGIN_MANIFEST_FILENAME);
     let content: string;
 
@@ -81,14 +210,228 @@ export class PluginRegistry {
       return null;
     }
 
-    return toInstalledPluginSummary(manifest, "external", pluginRootPath);
+    return {
+      definition: toInstalledPluginDefinition(manifest, "external", pluginRootPath),
+      hostEntryPath: manifest.host ? path.join(pluginRootPath, ...manifest.host.entry.split("/")) : null,
+      manifest,
+      rendererEntryPath: manifest.renderer ? path.join(pluginRootPath, ...manifest.renderer.entry.split("/")) : null,
+      rootPath: pluginRootPath
+    };
+  }
+
+  private mergeResolvedPlugins(
+    plugins: readonly ResolvedInstalledPlugin[]
+  ): ResolvedInstalledPlugin[] {
+    const merged: ResolvedInstalledPlugin[] = [];
+    const seenPluginIds = new Set<string>();
+    const seenBlockTypes = new Set<string>();
+
+    for (const plugin of plugins) {
+      if (seenPluginIds.has(plugin.definition.id)) {
+        continue;
+      }
+
+      const filteredBlocks = plugin.manifest.blocks.filter((block) => !seenBlockTypes.has(block.type));
+
+      if (filteredBlocks.length === 0) {
+        continue;
+      }
+
+      filteredBlocks.forEach((block) => {
+        seenBlockTypes.add(block.type);
+      });
+      seenPluginIds.add(plugin.definition.id);
+
+      const manifest: PluginManifest = {
+        ...plugin.manifest,
+        blocks: filteredBlocks
+      };
+
+      merged.push({
+        ...plugin,
+        definition: toInstalledPluginDefinition(manifest, "external", plugin.rootPath),
+        manifest
+      });
+    }
+
+    return merged;
+  }
+
+  private async findPluginByBlockType(blockType: string): Promise<ResolvedInstalledPlugin | null> {
+    const plugins = await this.getResolvedPlugins();
+
+    for (const plugin of plugins) {
+      if (plugin.manifest.blocks.some((block) => block.type === blockType)) {
+        return plugin;
+      }
+    }
+
+    return null;
+  }
+
+  private async findPluginById(pluginId: string): Promise<ResolvedInstalledPlugin | null> {
+    const plugins = await this.getResolvedPlugins();
+
+    return plugins.find((plugin) => plugin.definition.id === pluginId) ?? null;
+  }
+
+  private loadPluginHostRunner(hostEntryPath: string): PluginHostModule["runIntegralPluginAction"] {
+    const resolvedHostPath = require.resolve(hostEntryPath);
+    delete require.cache[resolvedHostPath];
+
+    const loaded = require(resolvedHostPath) as unknown;
+    const loadedRecord =
+      typeof loaded === "object" && loaded !== null
+        ? (loaded as Record<string, unknown>)
+        : null;
+    const directExport =
+      loadedRecord?.[PLUGIN_HOST_MODULE_EXPORT] as PluginHostModule["runIntegralPluginAction"] | undefined;
+
+    if (isPluginHostRunner(directExport)) {
+      return directExport;
+    }
+
+    const defaultExport = loadedRecord?.default;
+
+    if (isPluginHostRunner(defaultExport)) {
+      return defaultExport;
+    }
+
+    if (
+      typeof defaultExport === "object" &&
+      defaultExport !== null &&
+      isPluginHostRunner((defaultExport as Record<string, unknown>).runIntegralPluginAction)
+    ) {
+      return (defaultExport as Record<string, unknown>)
+        .runIntegralPluginAction as PluginHostModule["runIntegralPluginAction"];
+    }
+
+    throw new Error(`plugin host export が不正です: ${hostEntryPath}`);
+  }
+
+  private async createTempInstallDirectory(): Promise<string> {
+    const tempParentPath = path.join(path.dirname(this.installRootPath), ".plugin-install");
+    await fs.mkdir(tempParentPath, { recursive: true });
+    return fs.mkdtemp(path.join(tempParentPath, "extract-"));
   }
 }
 
-export function resolvePluginInstallRootPath(userDataPath: string): string {
+export function resolveInstalledPluginRootPath(userDataPath: string): string {
   return path.join(userDataPath, "plugins");
+}
+
+async function resolveExtractedPluginRootPath(extractRootPath: string): Promise<string> {
+  if (await pathExists(path.join(extractRootPath, PLUGIN_MANIFEST_FILENAME))) {
+    return extractRootPath;
+  }
+
+  const entries = await fs.readdir(extractRootPath, { withFileTypes: true });
+  const candidates = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(extractRootPath, entry.name));
+  const pluginRootPaths: string[] = [];
+
+  for (const candidatePath of candidates) {
+    if (await pathExists(path.join(candidatePath, PLUGIN_MANIFEST_FILENAME))) {
+      pluginRootPaths.push(candidatePath);
+    }
+  }
+
+  if (pluginRootPaths.length === 1) {
+    return pluginRootPaths[0];
+  }
+
+  if (pluginRootPaths.length === 0) {
+    throw new Error("zip 内に integral-plugin.json が見つかりません。");
+  }
+
+  throw new Error("zip 内に複数の plugin root が見つかりました。");
+}
+
+async function extractZipArchive(archivePath: string, destinationPath: string): Promise<void> {
+  if (path.extname(archivePath).toLowerCase() !== ".zip") {
+    throw new Error("plugin install は zip のみ対応しています。");
+  }
+
+  if (process.platform !== "win32") {
+    throw new Error("zip install は現在 Windows のみ対応しています。");
+  }
+
+  await fs.mkdir(destinationPath, { recursive: true });
+
+  await new Promise<void>((resolve, reject) => {
+    const command = [
+      `Expand-Archive -LiteralPath ${toPowerShellLiteral(archivePath)}`,
+      `-DestinationPath ${toPowerShellLiteral(destinationPath)}`,
+      "-Force"
+    ].join(" ");
+
+    execFile(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command
+      ],
+      (error, _stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr.trim() || error.message));
+          return;
+        }
+
+        resolve();
+      }
+    );
+  });
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizePluginDirectoryName(pluginId: string): string {
+  const sanitized = pluginId.trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-");
+
+  if (sanitized.length === 0) {
+    throw new Error("plugin id から install directory 名を生成できません。");
+  }
+
+  return sanitized;
+}
+
+function toPowerShellLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function assertPathInsideRoot(rootPath: string, targetPath: string): void {
+  const resolvedRootPath = path.resolve(rootPath);
+  const resolvedTargetPath = path.resolve(targetPath);
+  const relativePath = path.relative(resolvedRootPath, resolvedTargetPath);
+
+  if (
+    relativePath.length === 0 ||
+    relativePath === "." ||
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(`plugin install path が不正です: ${resolvedTargetPath}`);
+  }
 }
 
 function isMissingPathError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isPluginHostRunner(
+  value: unknown
+): value is PluginHostModule["runIntegralPluginAction"] {
+  return typeof value === "function";
 }
