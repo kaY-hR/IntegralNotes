@@ -1,3 +1,5 @@
+import { BUILTIN_PLUGIN_MANIFESTS } from "../shared/plugins";
+
 interface JsonRecord {
   [key: string]: unknown;
 }
@@ -33,26 +35,8 @@ const CHROMATOGRAM_TRACE_PATHS = [
   "M8 88 C22 88 26 88 34 72 S48 48 58 48 S72 86 84 86 S98 24 108 24 S122 68 136 68 S154 18 166 18 S186 74 198 74 S214 54 232 54"
 ] as const;
 
-const INTEGRAL_BLOCK_DEFINITIONS: Readonly<Record<string, IntegralBlockDefinition>> = {
-  "LC.Method.Gradient": {
-    action: {
-      busyLabel: "装置操作を送信中...",
-      id: "execute",
-      label: "装置操作を実行"
-    },
-    description: "勾配プログラムを可視化し、実行要求を main process へ渡します。",
-    title: "LC Gradient"
-  },
-  "StandardGraphs.Chromatogram": {
-    action: {
-      busyLabel: "解析ジョブを起動中...",
-      id: "analyze",
-      label: "解析を実行"
-    },
-    description: "対象データを確認し、クロマトグラム解析要求を main process へ渡します。",
-    title: "Chromatogram"
-  }
-};
+const INTEGRAL_BLOCK_DEFINITIONS: Readonly<Record<string, IntegralBlockDefinition>> =
+  buildIntegralBlockDefinitions();
 
 export function getIntegralBlockDefinition(type: string): IntegralBlockDefinition | null {
   return INTEGRAL_BLOCK_DEFINITIONS[type] ?? null;
@@ -254,6 +238,31 @@ function GenericBlockBody({ block }: { block: IntegralJsonBlock }): JSX.Element 
       </p>
     </>
   );
+}
+
+function buildIntegralBlockDefinitions(): Readonly<Record<string, IntegralBlockDefinition>> {
+  const definitions: Record<string, IntegralBlockDefinition> = {};
+
+  for (const manifest of BUILTIN_PLUGIN_MANIFESTS) {
+    for (const block of manifest.blocks) {
+      const primaryAction = block.actions?.[0];
+
+      definitions[block.type] = {
+        action:
+          primaryAction === undefined
+            ? undefined
+            : {
+                busyLabel: primaryAction.busyLabel,
+                id: primaryAction.id,
+                label: primaryAction.label
+              },
+        description: block.description,
+        title: block.title
+      };
+    }
+  }
+
+  return definitions;
 }
 
 function StatCard({ label, value }: { label: string; value: string }): JSX.Element {

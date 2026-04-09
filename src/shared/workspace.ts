@@ -1,3 +1,5 @@
+import type { InstalledPluginSummary } from "./plugins";
+
 export type WorkspaceEntryKind = "directory" | "file";
 
 export interface WorkspaceEntry {
@@ -73,6 +75,7 @@ export interface ExecuteIntegralActionResult {
 export interface IntegralNotesApi {
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
+  listInstalledPlugins: () => Promise<InstalledPluginSummary[]>;
   readNote: (relativePath: string) => Promise<NoteDocument>;
   saveNote: (relativePath: string, content: string) => Promise<NoteDocument>;
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;

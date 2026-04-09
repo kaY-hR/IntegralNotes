@@ -8,6 +8,7 @@ import type {
   ExecuteIntegralActionResult,
   RenameEntryRequest
 } from "../shared/workspace";
+import { PluginRegistry, resolvePluginInstallRootPath } from "./pluginRegistry";
 import { WorkspaceService } from "./workspaceService";
 
 function resolveInitialWorkspacePath(): string {
@@ -23,6 +24,9 @@ function resolveInitialWorkspacePath(): string {
 const workspaceService = new WorkspaceService({
   initialRootPath: resolveInitialWorkspacePath(),
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
+});
+const pluginRegistry = new PluginRegistry({
+  installRootPath: resolvePluginInstallRootPath(app.getPath("userData"))
 });
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -90,6 +94,7 @@ function registerIpcHandlers(): void {
 
     return snapshot;
   });
+  ipcMain.handle("plugins:listInstalled", async () => pluginRegistry.listInstalledPlugins());
   ipcMain.handle("workspace:readNote", async (_event, relativePath: string) =>
     workspaceService.readNote(relativePath)
   );
