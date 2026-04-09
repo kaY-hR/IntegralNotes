@@ -1,15 +1,18 @@
 {
   "files.watcherExclude": {
+    "**/.cache/**": true,
     "**/dist/**": true,
     "**/out/**": true,
     "**/*.asar": true
   },
   "search.exclude": {
+    "**/.cache/**": true,
     "**/dist/**": true,
     "**/out/**": true,
     "**/*.asar": true
   },
   "files.exclude": {
+    "**/.cache/**": true,
     "**/*.asar": true
   }
 }

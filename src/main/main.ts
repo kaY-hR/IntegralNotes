@@ -3,15 +3,25 @@ import path from "node:path";
 
 import type {
   CreateEntryRequest,
+  DeleteEntryRequest,
   ExecuteIntegralActionRequest,
   ExecuteIntegralActionResult,
-  DeleteEntryRequest,
   RenameEntryRequest
 } from "../shared/workspace";
 import { WorkspaceService } from "./workspaceService";
 
+function resolveInitialWorkspacePath(): string {
+  const configuredRootPath = process.env.INTEGRALNOTES_DEFAULT_WORKSPACE?.trim();
+
+  if (configuredRootPath) {
+    return path.resolve(configuredRootPath);
+  }
+
+  return path.join(app.getPath("documents"), "IntegralNotes");
+}
+
 const workspaceService = new WorkspaceService({
-  initialRootPath: path.resolve(process.cwd(), "Notes"),
+  initialRootPath: resolveInitialWorkspacePath(),
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
