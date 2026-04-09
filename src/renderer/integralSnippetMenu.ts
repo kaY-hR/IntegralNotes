@@ -3,6 +3,8 @@ import { commandsCtx } from "@milkdown/kit/core";
 import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
 import { insert } from "@milkdown/kit/utils";
 
+import { INTEGRAL_BLOCK_LANGUAGE } from "./integralBlockRegistry";
+
 interface IntegralSnippetTemplate {
   key: string;
   label: string;
@@ -20,15 +22,15 @@ const SNIPPET_ICON = `
 </svg>
 `.trim();
 
-function toJsonCodeBlock(value: unknown): string {
-  return ["```json", JSON.stringify(value, null, 2), "```"].join("\n");
+function toIntegralCodeBlock(value: unknown): string {
+  return [`\`\`\`${INTEGRAL_BLOCK_LANGUAGE}`, JSON.stringify(value, null, 2), "```"].join("\n");
 }
 
 const INTEGRAL_SNIPPETS: readonly IntegralSnippetTemplate[] = [
   {
     key: "integral-lc-gradient",
     label: "LCのグラジエント設定",
-    markdown: toJsonCodeBlock({
+    markdown: toIntegralCodeBlock({
       type: "LC.Method.Gradient",
       params: {
         "analysis-time": 8,
@@ -42,7 +44,7 @@ const INTEGRAL_SNIPPETS: readonly IntegralSnippetTemplate[] = [
   {
     key: "integral-standard-chromatogram",
     label: "クロマトグラム表示",
-    markdown: toJsonCodeBlock({
+    markdown: toIntegralCodeBlock({
       type: "StandardGraphs.Chromatogram",
       params: {
         data: ["lc1.lcd", "lc2.lcd"]

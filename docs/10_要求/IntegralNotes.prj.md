@@ -16,14 +16,14 @@ IntegralNotesは「考察支援プラットフォームソフト」のELN(電子
 Obsidianと違うのは下記
 
 例えば、
-```json
+```itg-notes
 {
   "type":"LC.Method.GradientEditor"
 }
 ```
 を挿入することで、IntegralNotes上ではグラジエント設定パネルが挿入されて見える
 
-```json
+```itg-notes
 {
   "type":"StandardGraphs.Chromatogram",
   "params":{

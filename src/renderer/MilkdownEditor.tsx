@@ -33,7 +33,8 @@ export function MilkdownEditor({
       root: rootElement,
       defaultValue: initialValue
     });
-    editor.addFeature(installIntegralCodeBlockFeature);
+
+    installIntegralCodeBlockFeature(editor);
 
     editor.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {

@@ -2,6 +2,8 @@ interface JsonRecord {
   [key: string]: unknown;
 }
 
+export const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
+
 export interface IntegralJsonBlock extends JsonRecord {
   params?: JsonRecord;
   type: string;
@@ -56,8 +58,12 @@ export function getIntegralBlockDefinition(type: string): IntegralBlockDefinitio
   return INTEGRAL_BLOCK_DEFINITIONS[type] ?? null;
 }
 
+export function isIntegralBlockLanguage(language: string): boolean {
+  return language.trim().toLowerCase() === INTEGRAL_BLOCK_LANGUAGE;
+}
+
 export function parseIntegralJsonBlock(language: string, content: string): IntegralJsonBlock | null {
-  if (language.trim().toLowerCase() !== "json") {
+  if (!isIntegralBlockLanguage(language)) {
     return null;
   }
 
