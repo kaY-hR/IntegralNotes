@@ -10,7 +10,7 @@ LC 系 block を提供する sample external plugin source です。
   - `host/index.cjs`
 
 現在は `LC.Method.Gradient` を提供します。
-renderer は `gradient.png` をテンプレート画像として参照しつつ、`analysis-time` と `time-prog` を GUI 編集できる sample です。
+renderer は `詳細` / `シンプル` を切り替えられる sample で、`シンプル` は `gradient.png` をそのまま使う画像ベース表示、`詳細` は `analysis-time` と `time-prog` を GUI 編集できます。
 
 ローカル install:
 

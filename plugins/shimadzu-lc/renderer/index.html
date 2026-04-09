@@ -74,7 +74,8 @@
       .field-label,
       .table th,
       .pill,
-      .sync {
+      .sync,
+      .mode-note {
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
@@ -178,6 +179,7 @@
         margin-top: 6px;
         color: #6f859b;
         font-size: 11px;
+        line-height: 1.5;
       }
 
       .metrics {
@@ -217,6 +219,31 @@
         padding: 0 2px;
       }
 
+      .mode-switch {
+        display: inline-flex;
+        gap: 6px;
+        padding: 4px;
+        border: 1px solid #cbdceb;
+        border-radius: 999px;
+        background: rgba(239, 245, 251, 0.92);
+      }
+
+      .mode-button {
+        padding: 6px 12px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #5d7790;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .mode-button.is-active {
+        background: linear-gradient(180deg, #ffffff, #e3f0fb);
+        color: #11629f;
+        box-shadow: 0 1px 2px rgba(63, 110, 147, 0.12);
+      }
+
       .panel-shell {
         display: grid;
         grid-template-columns: 116px minmax(0, 1fr);
@@ -242,6 +269,13 @@
         color: #2c7096;
         font-size: 11px;
         font-weight: 700;
+      }
+
+      .panel-helper {
+        margin-top: 10px;
+        color: #5d7690;
+        font-size: 11px;
+        line-height: 1.5;
       }
 
       .radio-line {
@@ -381,6 +415,85 @@
         font-size: 14px;
       }
 
+      .simple-shell {
+        display: grid;
+        gap: 10px;
+      }
+
+      .simple-frame {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid #bfd2e3;
+        border-radius: 12px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(235, 241, 247, 0.94)),
+          #ffffff;
+      }
+
+      .simple-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .simple-header p {
+        margin: 6px 0 0;
+        color: #5b7690;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .simple-figure {
+        display: grid;
+        place-items: center;
+        min-height: 250px;
+        margin: 0;
+        padding: 18px;
+        border: 1px solid #d2dfeb;
+        border-radius: 12px;
+        background:
+          radial-gradient(circle at top, rgba(210, 228, 244, 0.4), transparent 55%),
+          linear-gradient(180deg, #f6f9fc, #e8eef4);
+      }
+
+      .simple-image {
+        display: block;
+        max-width: min(100%, 640px);
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        box-shadow: 0 14px 30px rgba(34, 61, 88, 0.18);
+        background: #000000;
+      }
+
+      .simple-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .simple-chip {
+        padding: 7px 10px;
+        border: 1px solid #d2dfeb;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #47647d;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .mode-note {
+        padding: 10px 12px;
+        border: 1px solid #cfdde9;
+        border-radius: 12px;
+        background: rgba(240, 246, 252, 0.88);
+        color: #5b7690;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
       .editor {
         display: grid;
         gap: 8px;
@@ -518,8 +631,10 @@
       const root = document.getElementById("root");
       const SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
       const UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
+      const DEFAULT_VIEW_MODE = "detail";
 
       let currentModel = null;
+      let currentViewMode = DEFAULT_VIEW_MODE;
 
       window.addEventListener("message", (event) => {
         if (!event.data || event.data.type !== SET_BLOCK_MESSAGE_TYPE) {
@@ -532,6 +647,7 @@
 
       function renderCurrentModel() {
         if (!currentModel) {
+          currentViewMode = DEFAULT_VIEW_MODE;
           root.innerHTML = '<div class="empty">Shimadzu LC renderer is ready.</div>';
           return;
         }
@@ -540,11 +656,11 @@
         const params = isRecord(block.params) ? { ...block.params } : {};
         const points = readGradientPoints(params["time-prog"]);
         const analysisTime = readNumber(params["analysis-time"]) ?? inferAnalysisTime(points);
+        const viewMode = currentViewMode === "simple" ? "simple" : DEFAULT_VIEW_MODE;
         const segments = buildSegments(points, analysisTime);
         const polyline = buildPolyline(points, analysisTime);
         const startConc = points[0]?.conc ?? null;
         const endConc = points.length > 0 ? Math.max(...points.map((point) => point.conc)) : null;
-        const finalConc = points.at(-1)?.conc ?? null;
 
         root.innerHTML = `
           <div class="heading">
@@ -552,7 +668,7 @@
               <span class="eyebrow">LC Method Renderer</span>
               <h1 class="title">グラジエント設定</h1>
               <p class="subtitle">
-                plugin GUI から値を変更すると、IntegralNotes 本体が \`itg-notes\` JSON を更新します。
+                詳細モードでは編集、シンプルモードでは画像ベースの簡易表示を行います。
               </p>
             </div>
             <div class="pills">
@@ -563,36 +679,7 @@
           </div>
 
           <div class="workspace">
-            <div class="sidebar">
-              <div class="field-card">
-                <label class="field-label" for="analysis-time-input">Analysis Time</label>
-                <input
-                  class="field-input"
-                  data-role="analysis-time"
-                  id="analysis-time-input"
-                  min="0"
-                  step="0.1"
-                  type="number"
-                  value="${formatInputValue(analysisTime)}"
-                />
-                <div class="field-suffix">minutes</div>
-              </div>
-
-              <div class="metrics">
-                <div class="metric">
-                  <span class="field-label">Start B.Conc</span>
-                  <strong>${formatDisplayNumber(startConc, "%")}</strong>
-                </div>
-                <div class="metric">
-                  <span class="field-label">Peak B.Conc</span>
-                  <strong>${formatDisplayNumber(endConc, "%")}</strong>
-                </div>
-                <div class="metric">
-                  <span class="field-label">Final B.Conc</span>
-                  <strong>${formatDisplayNumber(finalConc, "%")}</strong>
-                </div>
-              </div>
-            </div>
+            ${renderSidebarMarkup({ analysisTime, points, viewMode })}
 
             <div class="chart-panel">
               <div class="chart-toolbar">
@@ -600,80 +687,204 @@
                   <span class="eyebrow">Preview</span>
                   <div class="panel-title">グラジエント</div>
                 </div>
-                <div class="pills">
-                  <span class="pill">${points.length} points</span>
-                  <span class="pill">${formatDisplayNumber(analysisTime, "min")}</span>
-                </div>
+                ${renderModeSwitchMarkup(viewMode, points, analysisTime)}
               </div>
 
-              <div class="panel-shell">
-                <div class="panel-sidebar">
-                  <div class="panel-title">グラジエント</div>
-                  <div class="radio-line">
-                    <span class="is-active">詳細</span>
-                    <span>シングル</span>
-                  </div>
+              ${
+                viewMode === "detail"
+                  ? renderDetailPanelMarkup({
+                      endConc,
+                      polyline,
+                      segments,
+                      startConc
+                    })
+                  : renderSimplePanelMarkup({
+                      analysisTime,
+                      points,
+                      segments
+                    })
+              }
+            </div>
+          </div>
 
-                  <div class="axis-field">
-                    <span class="axis-caption">End B.Conc</span>
+          ${
+            viewMode === "detail"
+              ? renderEditorMarkup(points)
+              : `
+                <div class="mode-note">
+                  シンプルモードは表示専用です。値の編集は詳細モードへ切り替えて行います。
+                </div>
+              `
+          }
+
+          <div class="footer-note">
+            Relative asset paths are resolved from <code>renderer/index.html</code>, so this renderer can use
+            <code>../gradient.png</code> for simple preview mode.
+          </div>
+        `;
+
+        bindInteractions(params, points, analysisTime, viewMode);
+      }
+
+      function renderSidebarMarkup({ analysisTime, points, viewMode }) {
+        return `
+          <div class="sidebar">
+            ${
+              viewMode === "detail"
+                ? `
+                  <div class="field-card">
+                    <label class="field-label" for="analysis-time-input">Analysis Time</label>
                     <input
-                      data-role="end-conc"
+                      class="field-input"
+                      data-role="analysis-time"
+                      id="analysis-time-input"
                       min="0"
                       step="0.1"
                       type="number"
-                      value="${formatInputValue(endConc)}"
+                      value="${formatInputValue(analysisTime)}"
                     />
+                    <div class="field-suffix">minutes</div>
                   </div>
+                `
+                : `
+                  <div class="field-card">
+                    <span class="field-label">Display</span>
+                    <strong>Simple Mode</strong>
+                    <div class="field-suffix">
+                      渡した <code>gradient.png</code> を使った画像ベースの簡易表示です。
+                    </div>
+                  </div>
+                `
+            }
 
-                  <div class="axis-field">
-                    <span class="axis-caption">Start B.Conc</span>
-                    <input
-                      data-role="start-conc"
-                      min="0"
-                      step="0.1"
-                      type="number"
-                      value="${formatInputValue(startConc)}"
-                    />
-                  </div>
-                </div>
+            <div class="metrics">
+              <div class="metric">
+                <span class="field-label">Analysis Time</span>
+                <strong>${formatDisplayNumber(analysisTime, "min")}</strong>
+              </div>
+              <div class="metric">
+                <span class="field-label">Points</span>
+                <strong>${escapeHtml(String(points.length))}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+      }
 
-                <div class="graph-area">
-                  <div class="graph-axis-top">
-                    <span>95.0</span>
-                    <span>B.Conc</span>
-                    <span>0.0</span>
-                  </div>
-                  <div class="graph-grid"></div>
-                  <img alt="" class="graph-template" src="../gradient.png" />
-                  <svg class="graph-line" preserveAspectRatio="none" viewBox="0 0 100 100">
-                    <polyline points="${polyline}"></polyline>
-                  </svg>
-                  <div class="graph-axis-bottom">
-                    ${segments
-                      .map(
-                        (segment) =>
-                          `<span>${escapeHtml(formatSegmentValue(segment.duration))}</span>`
-                      )
-                      .join("")}
-                  </div>
-                </div>
+      function renderModeSwitchMarkup(viewMode, points, analysisTime) {
+        return `
+          <div class="pills">
+            <span class="pill">${points.length} points</span>
+            <span class="pill">${formatDisplayNumber(analysisTime, "min")}</span>
+            <div class="mode-switch">
+              <button class="mode-button${viewMode === "detail" ? " is-active" : ""}" data-view-mode="detail" type="button">
+                詳細
+              </button>
+              <button class="mode-button${viewMode === "simple" ? " is-active" : ""}" data-view-mode="simple" type="button">
+                シンプル
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderDetailPanelMarkup({ endConc, polyline, segments, startConc }) {
+        return `
+          <div class="panel-shell">
+            <div class="panel-sidebar">
+              <div class="panel-title">詳細モード</div>
+              <div class="panel-helper">
+                time-prog と濃度を編集し、preview と JSON を同期します。
               </div>
 
-              <div class="segment-strip">
+              <div class="axis-field">
+                <span class="axis-caption">End B.Conc</span>
+                <input
+                  data-role="end-conc"
+                  min="0"
+                  step="0.1"
+                  type="number"
+                  value="${formatInputValue(endConc)}"
+                />
+              </div>
+
+              <div class="axis-field">
+                <span class="axis-caption">Start B.Conc</span>
+                <input
+                  data-role="start-conc"
+                  min="0"
+                  step="0.1"
+                  type="number"
+                  value="${formatInputValue(startConc)}"
+                />
+              </div>
+            </div>
+
+            <div class="graph-area">
+              <div class="graph-axis-top">
+                <span>${escapeHtml(formatSegmentValue(endConc ?? 95))}</span>
+                <span>B.Conc</span>
+                <span>${escapeHtml(formatSegmentValue(startConc ?? 0))}</span>
+              </div>
+              <div class="graph-grid"></div>
+              <img alt="" class="graph-template" src="../gradient.png" />
+              <svg class="graph-line" preserveAspectRatio="none" viewBox="0 0 100 100">
+                <polyline points="${polyline}"></polyline>
+              </svg>
+              <div class="graph-axis-bottom">
                 ${segments
                   .map(
-                    (segment) => `
-                      <div class="segment">
-                        <span class="field-label">${escapeHtml(segment.label)}</span>
-                        <strong>${escapeHtml(formatSegmentValue(segment.duration))}</strong>
-                      </div>
-                    `
+                    (segment) => `<span>${escapeHtml(formatSegmentValue(segment.duration))}</span>`
                   )
                   .join("")}
               </div>
             </div>
           </div>
 
+          <div class="segment-strip">
+            ${segments
+              .map(
+                (segment) => `
+                  <div class="segment">
+                    <span class="field-label">${escapeHtml(segment.label)}</span>
+                    <strong>${escapeHtml(formatSegmentValue(segment.duration))}</strong>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        `;
+      }
+
+      function renderSimplePanelMarkup({ analysisTime, points, segments }) {
+        return `
+          <div class="simple-shell">
+            <div class="simple-frame">
+              <div class="simple-header">
+                <div>
+                  <span class="eyebrow">Simple Preview</span>
+                  <div class="panel-title">シンプルモード</div>
+                  <p>渡した画像をそのまま使う簡易表示です。見た目確認に寄せています。</p>
+                </div>
+              </div>
+
+              <figure class="simple-figure">
+                <img alt="Gradient simple preview" class="simple-image" src="../gradient.png" />
+              </figure>
+
+              <div class="simple-summary">
+                <span class="simple-chip">Analysis ${escapeHtml(formatDisplayNumber(analysisTime, "min"))}</span>
+                <span class="simple-chip">Points ${escapeHtml(String(points.length))}</span>
+                <span class="simple-chip">Ramp ${escapeHtml(formatSegmentValue(segments[1]?.duration ?? 0))} min</span>
+                <span class="simple-chip">Plateau ${escapeHtml(formatSegmentValue(segments[2]?.duration ?? 0))} min</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderEditorMarkup(points) {
+        return `
           <div class="editor">
             <div class="editor-header">
               <p>time-prog を編集すると、Preview と Markdown の両方に反映されます。</p>
@@ -741,17 +952,28 @@
               </table>
             </div>
           </div>
-
-          <div class="footer-note">
-            Relative asset paths are resolved from <code>renderer/index.html</code>, so this preview can use
-            <code>../gradient.png</code> as a template image.
-          </div>
         `;
-
-        bindInteractions(params, points, analysisTime);
       }
 
-      function bindInteractions(params, points, analysisTime) {
+      function bindInteractions(params, points, analysisTime, viewMode) {
+        root.querySelectorAll("[data-view-mode]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const nextViewMode =
+              button.getAttribute("data-view-mode") === "simple" ? "simple" : DEFAULT_VIEW_MODE;
+
+            if (nextViewMode === currentViewMode) {
+              return;
+            }
+
+            currentViewMode = nextViewMode;
+            renderCurrentModel();
+          });
+        });
+
+        if (viewMode !== "detail") {
+          return;
+        }
+
         const analysisInput = root.querySelector('[data-role="analysis-time"]');
         const startConcInput = root.querySelector('[data-role="start-conc"]');
         const endConcInput = root.querySelector('[data-role="end-conc"]');
