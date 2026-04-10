@@ -42,8 +42,8 @@ interface TreeContextMenuState {
 }
 
 const MAIN_TABSET_ID = "editor-main";
-const NEW_FILE_ICON_URL = new URL("../../docs/00_履歴/ファイル追加.png", import.meta.url).href;
-const NEW_FOLDER_ICON_URL = new URL("../../docs/00_履歴/フォルダアイコン15.png", import.meta.url).href;
+const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
+const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
 
 function createLayoutModel(): FlexLayout.Model {
   return FlexLayout.Model.fromJson({
