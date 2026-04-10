@@ -1,6 +1,6 @@
 ---
 name: start
-description: docs\00_履歴\yyyyMMddHHmm_UserReq.mdを元に、作業を開始するスキル。
+description: docs/Issues.mdを元に、作業を開始するスキル。
 ---
 
-`docs\00_履歴\yyyyMMddHHmm_UserReq.md`を元に、作業を開始するスキルです。
+`docs\Issues.md`を元に、作業を開始するスキルです。複数のタスクがある場合は、優先重みの大きいものから順に作業してください。タスクの内容が不明な場合は、ユーザーに確認してください。
