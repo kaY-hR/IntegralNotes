@@ -1,0 +1,11 @@
+# Exclude repo-relative paths from the tracked-file export.
+docs/00_履歴
+docs/10_要求/IntegralNotes.prj.md
+Notes
+.vscode
+.codex
+AGENTS.md
+scripts/.copyexclude
+scripts/.copyexport-manifest
+scripts/copy-git-files.bat
+scripts/export-tracked-files.ps1
