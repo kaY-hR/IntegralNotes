@@ -5,7 +5,8 @@ import type {
   CreateEntryRequest,
   DeleteEntryRequest,
   ExecuteIntegralActionRequest,
-  RenameEntryRequest
+  RenameEntryRequest,
+  WorkspaceSnapshot
 } from "../shared/workspace";
 import {
   PluginRegistry,
@@ -13,14 +14,18 @@ import {
 } from "./pluginRegistry";
 import { WorkspaceService } from "./workspaceService";
 
-function resolveInitialWorkspacePath(): string {
+function resolveInitialWorkspacePath(): string | undefined {
   const configuredRootPath = process.env.INTEGRALNOTES_DEFAULT_WORKSPACE?.trim();
 
   if (configuredRootPath) {
     return path.resolve(configuredRootPath);
   }
 
-  return path.join(app.getPath("documents"), "IntegralNotes");
+  return undefined;
+}
+
+function formatWindowTitle(snapshot: WorkspaceSnapshot | null): string {
+  return snapshot ? `${snapshot.rootName} - IntegralNotes` : "IntegralNotes";
 }
 
 const workspaceService = new WorkspaceService({
@@ -79,7 +84,7 @@ async function createMainWindow(): Promise<void> {
   }
 
   const snapshot = await workspaceService.getSnapshot();
-  mainWindow.setTitle(`${snapshot.rootName} - IntegralNotes`);
+  mainWindow.setTitle(formatWindowTitle(snapshot));
 
   if (process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -101,7 +106,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("workspace:getSnapshot", async () => {
     const snapshot = await workspaceService.getSnapshot();
-    mainWindow?.setTitle(`${snapshot.rootName} - IntegralNotes`);
+    mainWindow?.setTitle(formatWindowTitle(snapshot));
     return snapshot;
   });
   ipcMain.handle("workspace:openFolder", async () => {
@@ -111,7 +116,7 @@ function registerIpcHandlers(): void {
 
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "ワークスペースフォルダを開く",
-      defaultPath: workspaceService.currentRootPath,
+      defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
       properties: ["openDirectory"]
     });
 
@@ -120,7 +125,7 @@ function registerIpcHandlers(): void {
     }
 
     const snapshot = await workspaceService.setRootPath(result.filePaths[0]);
-    mainWindow.setTitle(`${snapshot.rootName} - IntegralNotes`);
+    mainWindow.setTitle(formatWindowTitle(snapshot));
 
     return snapshot;
   });

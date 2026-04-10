@@ -15,7 +15,7 @@ import type {
 } from "../shared/workspace";
 
 interface WorkspaceServiceOptions {
-  initialRootPath: string;
+  initialRootPath?: string;
   stateFilePath: string;
 }
 
@@ -24,17 +24,17 @@ interface PersistedWorkspaceState {
 }
 
 export class WorkspaceService {
-  private rootPath: string;
-  private readonly fallbackRootPath: string;
+  private rootPath: string | undefined;
+  private readonly initialRootPath: string | undefined;
   private readonly stateFilePath: string;
 
   constructor(options: WorkspaceServiceOptions) {
-    this.fallbackRootPath = path.resolve(options.initialRootPath);
-    this.rootPath = this.fallbackRootPath;
+    this.initialRootPath = options.initialRootPath ? path.resolve(options.initialRootPath) : undefined;
+    this.rootPath = this.initialRootPath;
     this.stateFilePath = options.stateFilePath;
   }
 
-  get currentRootPath(): string {
+  get currentRootPath(): string | undefined {
     return this.rootPath;
   }
 
@@ -43,9 +43,13 @@ export class WorkspaceService {
 
     if (persistedRootPath) {
       this.rootPath = persistedRootPath;
+    } else {
+      this.rootPath = this.initialRootPath;
     }
 
-    await this.ensureWorkspaceReady();
+    if (this.rootPath) {
+      await this.ensureWorkspaceReady();
+    }
   }
 
   async setRootPath(nextRootPath: string): Promise<WorkspaceSnapshot> {
@@ -53,24 +57,37 @@ export class WorkspaceService {
     await this.ensureWorkspaceReady();
     await this.persistState();
 
-    return this.getSnapshot();
+    const snapshot = await this.getSnapshot();
+
+    if (!snapshot) {
+      throw new Error("ワークスペースフォルダが未設定です。");
+    }
+
+    return snapshot;
   }
 
   async ensureWorkspaceReady(): Promise<void> {
-    await fs.mkdir(this.rootPath, { recursive: true });
+    await fs.mkdir(this.getConfiguredRootPath(), { recursive: true });
   }
 
-  async getSnapshot(): Promise<WorkspaceSnapshot> {
+  async getSnapshot(): Promise<WorkspaceSnapshot | null> {
+    const rootPath = this.rootPath;
+
+    if (!rootPath) {
+      return null;
+    }
+
     await this.ensureWorkspaceReady();
 
     return {
-      rootName: path.basename(this.rootPath) || this.rootPath,
-      rootPath: this.rootPath,
+      rootName: path.basename(rootPath) || rootPath,
+      rootPath,
       entries: await this.readDirectoryEntries("")
     };
   }
 
   async readNote(relativePath: string): Promise<NoteDocument> {
+    this.getConfiguredRootPath();
     await this.ensureWorkspaceReady();
 
     const absolutePath = this.resolveWorkspacePath(relativePath);
@@ -89,6 +106,7 @@ export class WorkspaceService {
   }
 
   async saveNote(relativePath: string, content: string): Promise<NoteDocument> {
+    this.getConfiguredRootPath();
     await this.ensureWorkspaceReady();
 
     const absolutePath = this.resolveWorkspacePath(relativePath);
@@ -98,6 +116,7 @@ export class WorkspaceService {
   }
 
   async createEntry(request: CreateEntryRequest): Promise<CreateEntryResult> {
+    this.getConfiguredRootPath();
     await this.ensureWorkspaceReady();
 
     const parentPath = this.resolveWorkspacePath(request.parentPath);
@@ -116,13 +135,16 @@ export class WorkspaceService {
       await fs.writeFile(absolutePath, `# ${path.basename(nextName, ".md")}\n`, "utf8");
     }
 
+    const snapshot = await this.getRequiredSnapshot();
+
     return {
-      snapshot: await this.getSnapshot(),
+      snapshot,
       entry: await this.getEntryByPath(this.toRelativePath(absolutePath))
     };
   }
 
   async renameEntry(request: RenameEntryRequest): Promise<RenameEntryResult> {
+    this.getConfiguredRootPath();
     await this.ensureWorkspaceReady();
 
     const sourcePath = this.resolveWorkspacePath(request.targetPath);
@@ -132,8 +154,10 @@ export class WorkspaceService {
     const destinationPath = path.join(path.dirname(sourcePath), nextName);
 
     if (destinationPath === sourcePath) {
+      const snapshot = await this.getRequiredSnapshot();
+
       return {
-        snapshot: await this.getSnapshot(),
+        snapshot,
         entry: await this.getEntryByPath(this.toRelativePath(destinationPath)),
         previousRelativePath: request.targetPath
       };
@@ -141,14 +165,17 @@ export class WorkspaceService {
 
     await fs.rename(sourcePath, destinationPath);
 
+    const snapshot = await this.getRequiredSnapshot();
+
     return {
-      snapshot: await this.getSnapshot(),
+      snapshot,
       entry: await this.getEntryByPath(this.toRelativePath(destinationPath)),
       previousRelativePath: request.targetPath
     };
   }
 
   async deleteEntry(request: DeleteEntryRequest): Promise<DeleteEntryResult> {
+    this.getConfiguredRootPath();
     await this.ensureWorkspaceReady();
 
     const absolutePath = this.resolveWorkspacePath(request.targetPath);
@@ -156,8 +183,10 @@ export class WorkspaceService {
 
     await fs.rm(absolutePath, { recursive: true, force: false });
 
+    const snapshot = await this.getRequiredSnapshot();
+
     return {
-      snapshot: await this.getSnapshot(),
+      snapshot,
       deletedRelativePath: request.targetPath,
       deletedKind: stats.isDirectory() ? "directory" : "file"
     };
@@ -249,11 +278,12 @@ export class WorkspaceService {
   }
 
   private resolveWorkspacePath(relativePath: string): string {
+    const rootPath = this.getConfiguredRootPath();
     const parts = relativePath
       .split(/[\\/]+/u)
       .filter(Boolean);
-    const absolutePath = path.resolve(this.rootPath, ...parts);
-    const normalizedRelative = path.relative(this.rootPath, absolutePath);
+    const absolutePath = path.resolve(rootPath, ...parts);
+    const normalizedRelative = path.relative(rootPath, absolutePath);
 
     if (normalizedRelative.startsWith("..") || path.isAbsolute(normalizedRelative)) {
       throw new Error("ワークスペース外のパスにはアクセスできません。");
@@ -263,7 +293,7 @@ export class WorkspaceService {
   }
 
   private toRelativePath(absolutePath: string): string {
-    return path.relative(this.rootPath, absolutePath).split(path.sep).join("/");
+    return path.relative(this.getConfiguredRootPath(), absolutePath).split(path.sep).join("/");
   }
 
   private combineRelativePath(parentPath: string, name: string): string {
@@ -304,9 +334,27 @@ export class WorkspaceService {
     await fs.mkdir(path.dirname(this.stateFilePath), { recursive: true });
 
     const state: PersistedWorkspaceState = {
-      rootPath: this.rootPath
+      rootPath: this.getConfiguredRootPath()
     };
 
     await fs.writeFile(this.stateFilePath, JSON.stringify(state, null, 2), "utf8");
+  }
+
+  private async getRequiredSnapshot(): Promise<WorkspaceSnapshot> {
+    const snapshot = await this.getSnapshot();
+
+    if (!snapshot) {
+      throw new Error("ワークスペースフォルダが未設定です。");
+    }
+
+    return snapshot;
+  }
+
+  private getConfiguredRootPath(): string {
+    if (!this.rootPath) {
+      throw new Error("ワークスペースフォルダが未設定です。");
+    }
+
+    return this.rootPath;
   }
 }

@@ -164,6 +164,33 @@ input:focus-visible {
   font-size: 0.82rem;
 }
 
+.sidebar__empty-state {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.sidebar__empty-state h2 {
+  margin: 0;
+  color: var(--text-0);
+  font-size: 0.98rem;
+}
+
+.sidebar__empty-state p:last-of-type {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.sidebar__empty-state .button {
+  justify-self: start;
+}
+
 .workspace {
   grid-column: 2;
   grid-row: 2;
@@ -510,14 +537,6 @@ input:focus-visible {
   margin: 0;
   max-width: 34ch;
   font-size: 0.84rem;
-}
-
-.layout-placeholder__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 16px;
 }
 
 .editor-shell,

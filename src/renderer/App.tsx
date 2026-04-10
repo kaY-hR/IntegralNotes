@@ -324,6 +324,18 @@ export function App(): JSX.Element {
     setSelectedTabId(undefined);
   };
 
+  const clearWorkspace = (nextStatusMessage: string): void => {
+    shouldAutoOpenInitialNoteRef.current = false;
+    setInlineEditor(null);
+    setContextMenu(null);
+    setDeleteDialog(null);
+    resetOpenTabs();
+    setWorkspace(null);
+    setSelectedEntryPath("");
+    setExpandedPaths(new Set());
+    setStatusMessage(nextStatusMessage);
+  };
+
   const applyWorkspaceSnapshot = (
     snapshot: WorkspaceSnapshot,
     options: {
@@ -360,6 +372,12 @@ export function App(): JSX.Element {
 
     try {
       const snapshot = await window.integralNotes.getWorkspaceSnapshot();
+
+      if (!snapshot) {
+        clearWorkspace(nextStatus ?? "ワークスペースフォルダが未設定です。フォルダを開いてください。");
+        return;
+      }
+
       applyWorkspaceSnapshot(snapshot, {
         resetTabs: workspace === null,
         statusMessage: nextStatus
@@ -873,7 +891,7 @@ export function App(): JSX.Element {
 
   const startCreateInline = (kind: WorkspaceEntryKind, targetEntry?: WorkspaceEntry): void => {
     if (!workspace) {
-      setStatusMessage("ワークスペースを読み込み中です。");
+      setStatusMessage("ワークスペースフォルダを開いてください。");
       return;
     }
 
@@ -1106,41 +1124,43 @@ export function App(): JSX.Element {
 
       <aside className="sidebar" ref={sidebarRef}>
         <div className="sidebar__panel">
-          <div className="sidebar__panel-header">
-            <div className="sidebar__panel-actions">
-              <button
-                aria-label="New note"
-                className="button button--icon"
-                onClick={() => {
-                  startCreateInline("file");
-                }}
-                title="New note"
-                type="button"
-              >
-                <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FILE_ICON_URL} />
-              </button>
-              <button
-                aria-label="New folder"
-                className="button button--icon"
-                onClick={() => {
-                  startCreateInline("directory");
-                }}
-                title="New folder"
-                type="button"
-              >
-                <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FOLDER_ICON_URL} />
-              </button>
-              <button
-                className="button button--ghost sidebar__action-text"
-                onClick={() => {
-                  void refreshWorkspace("ワークスペースを更新しました");
-                }}
-                type="button"
-              >
-                Sync
-              </button>
+          {workspace ? (
+            <div className="sidebar__panel-header">
+              <div className="sidebar__panel-actions">
+                <button
+                  aria-label="New note"
+                  className="button button--icon"
+                  onClick={() => {
+                    startCreateInline("file");
+                  }}
+                  title="New note"
+                  type="button"
+                >
+                  <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FILE_ICON_URL} />
+                </button>
+                <button
+                  aria-label="New folder"
+                  className="button button--icon"
+                  onClick={() => {
+                    startCreateInline("directory");
+                  }}
+                  title="New folder"
+                  type="button"
+                >
+                  <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FOLDER_ICON_URL} />
+                </button>
+                <button
+                  className="button button--ghost sidebar__action-text"
+                  onClick={() => {
+                    void refreshWorkspace("ワークスペースを更新しました");
+                  }}
+                  type="button"
+                >
+                  Sync
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div
             className="sidebar__tree"
@@ -1210,7 +1230,20 @@ export function App(): JSX.Element {
                 }}
               />
             ) : (
-              <div className="sidebar__placeholder">Workspace の取得に失敗しました。</div>
+              <div className="sidebar__empty-state">
+                <p className="sidebar__section-title">Workspace</p>
+                <h2>ワークスペースが未設定です</h2>
+                <p>ノートを表示するフォルダを選ぶと、ここにエクスプローラーを表示します。</p>
+                <button
+                  className="button button--primary"
+                  onClick={() => {
+                    void openWorkspaceFolder();
+                  }}
+                  type="button"
+                >
+                  フォルダを開く
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1225,32 +1258,12 @@ export function App(): JSX.Element {
             onTabSetPlaceHolder={() => (
               <div className="layout-placeholder">
                 <p className="layout-placeholder__eyebrow">Editor</p>
-                <h3>Open a note to start editing</h3>
-                <p>Use the explorer on the left or choose Open Folder.</p>
-                <div className="layout-placeholder__actions">
-                  <button
-                    className="button button--primary"
-                    onClick={() => {
-                      const firstNote = workspace ? findFirstNote(workspace.entries) : undefined;
-
-                      if (firstNote) {
-                        void openNote(firstNote.relativePath);
-                      }
-                    }}
-                    type="button"
-                  >
-                    Open first note
-                  </button>
-                  <button
-                    className="button button--ghost"
-                    onClick={() => {
-                      startCreateInline("file");
-                    }}
-                    type="button"
-                  >
-                    New note
-                  </button>
-                </div>
+                <h3>{workspace ? "ノートを選択してください" : "ワークスペースを開いてください"}</h3>
+                <p>
+                  {workspace
+                    ? "左のエクスプローラーからノートを開くか、新しいノートを作成してください。"
+                    : "左のパネルからフォルダを開くと、ここにエディターを表示します。"}
+                </p>
               </div>
             )}
           />
