@@ -57,9 +57,10 @@ export class PluginRegistry {
       throw new Error(`plugin renderer が見つかりません: ${pluginId}`);
     }
 
-    return prepareRendererDocument(
+    return await prepareRendererDocument(
       await fs.readFile(plugin.rendererEntryPath, "utf8"),
-      path.dirname(plugin.rendererEntryPath)
+      path.dirname(plugin.rendererEntryPath),
+      plugin.rootPath
     );
   }
 
@@ -415,7 +416,21 @@ function toPowerShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function prepareRendererDocument(document: string, rendererDirectoryPath: string): string {
+async function prepareRendererDocument(
+  document: string,
+  rendererDirectoryPath: string,
+  pluginRootPath: string
+): Promise<string> {
+  const inlinedDocument = await inlineLocalAssetReferences(
+    injectRendererBaseTag(document, rendererDirectoryPath),
+    rendererDirectoryPath,
+    pluginRootPath
+  );
+
+  return inlinedDocument;
+}
+
+function injectRendererBaseTag(document: string, rendererDirectoryPath: string): string {
   if (/<base\s/iu.test(document)) {
     return document;
   }
@@ -432,6 +447,172 @@ function prepareRendererDocument(document: string, rendererDirectoryPath: string
   }
 
   return `${baseTag}\n${document}`;
+}
+
+async function inlineLocalAssetReferences(
+  document: string,
+  rendererDirectoryPath: string,
+  pluginRootPath: string
+): Promise<string> {
+  const assetCache = new Map<string, Promise<string>>();
+  let nextDocument = document;
+
+  nextDocument = await replaceAsync(
+    nextDocument,
+    /\b(src|href|poster)=("([^"]+)"|'([^']+)')/giu,
+    async (match, attributeName: string, quotedValue: string, doubleQuotedValue: string, singleQuotedValue: string) => {
+      const assetPath = doubleQuotedValue || singleQuotedValue;
+      const dataUrl = await tryReadAssetAsDataUrl(
+        assetPath,
+        rendererDirectoryPath,
+        pluginRootPath,
+        assetCache
+      );
+
+      if (dataUrl === null) {
+        return match;
+      }
+
+      const quote = quotedValue.startsWith("'") ? "'" : '"';
+      return `${attributeName}=${quote}${dataUrl}${quote}`;
+    }
+  );
+
+  nextDocument = await replaceAsync(
+    nextDocument,
+    /url\(\s*(['"]?)([^'")]+)\1\s*\)/giu,
+    async (match, _quote: string, assetPath: string) => {
+      const dataUrl = await tryReadAssetAsDataUrl(
+        assetPath,
+        rendererDirectoryPath,
+        pluginRootPath,
+        assetCache
+      );
+
+      if (dataUrl === null) {
+        return match;
+      }
+
+      return `url("${dataUrl}")`;
+    }
+  );
+
+  return nextDocument;
+}
+
+async function tryReadAssetAsDataUrl(
+  assetPath: string,
+  rendererDirectoryPath: string,
+  pluginRootPath: string,
+  assetCache: Map<string, Promise<string>>
+): Promise<string | null> {
+  if (!shouldInlineAssetReference(assetPath)) {
+    return null;
+  }
+
+  const normalizedAssetPath = assetPath.split(/[?#]/u, 1)[0];
+
+  if (normalizedAssetPath.length === 0) {
+    return null;
+  }
+
+  const resolvedAssetPath = path.resolve(rendererDirectoryPath, normalizedAssetPath);
+
+  try {
+    assertPathInsideRoot(pluginRootPath, resolvedAssetPath);
+  } catch {
+    return null;
+  }
+
+  if (!(await pathExists(resolvedAssetPath))) {
+    return null;
+  }
+
+  let pendingDataUrl = assetCache.get(resolvedAssetPath);
+
+  if (!pendingDataUrl) {
+    pendingDataUrl = fs.readFile(resolvedAssetPath).then((buffer) => {
+      const mimeType = inferMimeType(resolvedAssetPath);
+      return `data:${mimeType};base64,${buffer.toString("base64")}`;
+    });
+    assetCache.set(resolvedAssetPath, pendingDataUrl);
+  }
+
+  return await pendingDataUrl;
+}
+
+function shouldInlineAssetReference(assetPath: string): boolean {
+  const trimmed = assetPath.trim();
+
+  if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("//")) {
+    return false;
+  }
+
+  return !/^(?:[a-z][a-z0-9+\-.]*:|[a-z]:[\\/])/iu.test(trimmed);
+}
+
+function inferMimeType(assetPath: string): string {
+  switch (path.extname(assetPath).toLowerCase()) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    case ".bmp":
+      return "image/bmp";
+    case ".ico":
+      return "image/x-icon";
+    case ".css":
+      return "text/css";
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+      return "text/javascript";
+    case ".json":
+      return "application/json";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    case ".ttf":
+      return "font/ttf";
+    case ".otf":
+      return "font/otf";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function replaceAsync(
+  input: string,
+  pattern: RegExp,
+  replacer: (...args: string[]) => Promise<string>
+): Promise<string> {
+  const matches = [...input.matchAll(pattern)];
+
+  if (matches.length === 0) {
+    return input;
+  }
+
+  let cursor = 0;
+  let output = "";
+
+  for (const match of matches) {
+    const matchText = match[0];
+    const matchIndex = match.index ?? 0;
+    output += input.slice(cursor, matchIndex);
+    output += await replacer(...(match as unknown as string[]));
+    cursor = matchIndex + matchText.length;
+  }
+
+  output += input.slice(cursor);
+  return output;
 }
 
 function assertPathInsideRoot(rootPath: string, targetPath: string): void {

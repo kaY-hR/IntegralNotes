@@ -133,6 +133,59 @@
         justify-items: end;
       }
 
+      .note-shell {
+        display: grid;
+        min-height: 100%;
+        background: #ffffff;
+      }
+
+      .note-doc {
+        display: grid;
+        gap: 14px;
+        padding: 22px 24px 26px;
+      }
+
+      .note-doc__figure {
+        display: grid;
+        gap: 8px;
+        justify-items: start;
+      }
+
+      .note-doc__figure-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: min(100%, 520px);
+      }
+
+      .note-doc__figure-label {
+        color: #0078d4;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .note-doc__figure-accent {
+        flex: 1 1 auto;
+        height: 2px;
+        background: #59b7ff;
+      }
+
+      .note-doc__figure-frame {
+        width: min(100%, 520px);
+      }
+
+      .note-doc__result {
+        display: grid;
+        gap: 4px;
+      }
+
+      .note-doc__result p {
+        margin: 0;
+        color: #2d2d2d;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
       .pills {
         display: flex;
         flex-wrap: wrap;
@@ -249,6 +302,7 @@
         border: 1px solid var(--vscode-border);
         border-radius: 0;
         background: var(--vscode-panel);
+        margin-left: auto;
       }
 
       .mode-button {
@@ -278,6 +332,7 @@
         gap: 0;
         overflow: hidden;
         background: var(--vscode-panel);
+        border: 1px solid #d7d7d7;
       }
 
       .panel-sidebar {
@@ -440,9 +495,9 @@
 
       .simple-frame {
         display: grid;
-        gap: 12px;
-        padding: 14px;
-        background: var(--vscode-panel);
+        gap: 0;
+        padding: 0;
+        background: transparent;
       }
 
       .simple-header {
@@ -462,19 +517,19 @@
       .simple-figure {
         display: grid;
         place-items: center;
-        min-height: 250px;
+        min-height: 0;
         margin: 0;
-        padding: 18px;
-        border: 1px solid var(--vscode-border);
+        padding: 0;
+        border: 1px solid #d7d7d7;
         border-radius: 0;
-        background: #fafafa;
+        background: #ffffff;
       }
 
       .simple-image {
         display: block;
-        width: min(100%, 640px);
+        width: 100%;
         height: auto;
-        border: 1px solid var(--vscode-border-strong);
+        border: 0;
         border-radius: 0;
         box-shadow: none;
         background: #ffffff;
@@ -680,6 +735,43 @@
         margin-top: 3px;
       }
 
+      .suggest-card {
+        width: min(100%, 200px);
+        padding: 10px 12px;
+        border: 1px solid #a8a8a8;
+        border-radius: 16px;
+        background: #ffffff;
+        color: #2d2d2d;
+        text-align: left;
+      }
+
+      .suggest-card:hover {
+        background: #f8fbff;
+      }
+
+      .suggest-card__eyebrow {
+        display: block;
+        margin-bottom: 4px;
+        color: #444444;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .suggest-card__title {
+        display: block;
+        color: #222222;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.4;
+      }
+
+      .suggest-card__caption {
+        display: block;
+        margin-top: 2px;
+        color: #6f6f6f;
+        font-size: 11px;
+      }
+
       @media (max-width: 860px) {
         body {
           padding: 0;
@@ -716,6 +808,12 @@
           border-bottom: 1px solid var(--vscode-border);
         }
 
+        .note-doc {
+          padding: 16px;
+        }
+
+        .note-doc__figure-header,
+        .note-doc__figure-frame,
         .chart-toolbar,
         .editor-header {
           flex-direction: column;
@@ -740,7 +838,7 @@
       const ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
       const SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
       const UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
-      const DEFAULT_VIEW_MODE = "detail";
+      const DEFAULT_VIEW_MODE = "simple";
 
       let currentModel = null;
       let currentActionState = createIdleActionState();
@@ -774,75 +872,57 @@
         const params = isRecord(block.params) ? { ...block.params } : {};
         const points = readGradientPoints(params["time-prog"]);
         const analysisTime = readNumber(params["analysis-time"]) ?? inferAnalysisTime(points);
-        const viewMode = currentViewMode === "simple" ? "simple" : DEFAULT_VIEW_MODE;
+        const viewMode = currentViewMode === "detail" ? "detail" : DEFAULT_VIEW_MODE;
         const segments = buildSegments(points, analysisTime);
         const polyline = buildPolyline(points, analysisTime);
         const startConc = points[0]?.conc ?? null;
         const endConc = points.length > 0 ? Math.max(...points.map((point) => point.conc)) : null;
 
         root.innerHTML = `
-          <div class="heading">
-            <div>
-              <span class="eyebrow">LC Method Renderer</span>
-              <h1 class="title">グラジエント設定</h1>
-              <p class="subtitle">
-                詳細モードでは編集、シンプルモードでは画像ベースの簡易表示を行います。
-              </p>
-            </div>
-            <div class="heading-actions">
-              <div class="pills">
-                <span class="sync">Markdown synced</span>
-                <span class="pill">${escapeHtml(block.type ?? "unknown")}</span>
-                <span class="pill">${escapeHtml(currentModel.plugin?.displayName ?? "Shimadzu LC")}</span>
-              </div>
-              ${renderPrimaryActionMarkup()}
-            </div>
-          </div>
-
-          <div class="workspace">
-            ${renderSidebarMarkup({ analysisTime, points, viewMode })}
-
-            <div class="chart-panel">
-              <div class="chart-toolbar">
-                <div>
-                  <span class="eyebrow">Preview</span>
-                  <div class="panel-title">グラジエント</div>
+          <div class="note-shell">
+            <div class="note-doc">
+              <div class="note-doc__figure">
+                <div class="note-doc__figure-header">
+                  <span class="note-doc__figure-label">グラジエント</span>
+                  <span class="note-doc__figure-accent"></span>
+                  ${renderModeSwitchMarkup(viewMode, points, analysisTime)}
                 </div>
-                ${renderModeSwitchMarkup(viewMode, points, analysisTime)}
+                <div class="note-doc__figure-frame">
+                  ${
+                    viewMode === "detail"
+                      ? renderDetailPanelMarkup({
+                          endConc,
+                          polyline,
+                          segments,
+                          startConc
+                        })
+                      : renderSimplePanelMarkup({
+                          analysisTime,
+                          points,
+                          segments
+                        })
+                  }
+                </div>
               </div>
 
               ${
                 viewMode === "detail"
-                  ? renderDetailPanelMarkup({
-                      endConc,
-                      polyline,
-                      segments,
-                      startConc
-                    })
-                  : renderSimplePanelMarkup({
-                      analysisTime,
-                      points,
-                      segments
-                    })
+                  ? renderEditorMarkup(points)
+                  : `
+                    <div class="mode-note">
+                      シンプルモードは報告書向けの表示です。値の編集は詳細モードへ切り替えて行います。
+                    </div>
+                  `
               }
+
+              <div class="note-doc__result">
+                <p><strong>結果確認:</strong></p>
+                <p>ロットAとBのクロマトグラムを比較</p>
+              </div>
+
+              ${renderSuggestionCardMarkup()}
+              ${renderActionStatusMarkup()}
             </div>
-          </div>
-
-          ${
-            viewMode === "detail"
-              ? renderEditorMarkup(points)
-              : `
-                <div class="mode-note">
-                  シンプルモードは表示専用です。値の編集は詳細モードへ切り替えて行います。
-                </div>
-              `
-          }
-
-          ${renderActionStatusMarkup()}
-
-          <div class="footer-note">
-            Relative asset paths are resolved from <code>renderer/index.html</code>, so this renderer can use
-            <code>../gradient.png</code> for simple preview mode.
           </div>
         `;
 
@@ -896,22 +976,20 @@
 
       function renderModeSwitchMarkup(viewMode, points, analysisTime) {
         return `
-          <div class="pills">
-            <span class="pill">${points.length} points</span>
-            <span class="pill">${formatDisplayNumber(analysisTime, "min")}</span>
-            <div class="mode-switch">
-              <button class="mode-button${viewMode === "detail" ? " is-active" : ""}" data-view-mode="detail" type="button">
-                詳細
-              </button>
-              <button class="mode-button${viewMode === "simple" ? " is-active" : ""}" data-view-mode="simple" type="button">
-                シンプル
-              </button>
-            </div>
+          <div class="mode-switch" title="${escapeHtml(
+            `${points.length} points / ${formatDisplayNumber(analysisTime, "min")}`
+          )}">
+            <button class="mode-button${viewMode === "detail" ? " is-active" : ""}" data-view-mode="detail" type="button">
+              詳細
+            </button>
+            <button class="mode-button${viewMode === "simple" ? " is-active" : ""}" data-view-mode="simple" type="button">
+              シンプル
+            </button>
           </div>
         `;
       }
 
-      function renderPrimaryActionMarkup() {
+      function renderSuggestionCardMarkup() {
         const actions = readPluginActions();
 
         if (actions.length === 0) {
@@ -919,7 +997,7 @@
         }
 
         return `
-          <div class="editor-actions">
+          <div>
             ${actions
               .map((action) => {
                 const isRunning =
@@ -928,13 +1006,15 @@
 
                 return `
                   <button
-                    class="button button--accent"
+                    class="suggest-card"
                     data-action="request-plugin-action"
                     data-action-id="${escapeHtmlAttribute(action.id)}"
                     type="button"
                     ${currentActionState.status === "running" ? "disabled" : ""}
                   >
-                    ${escapeHtml(label)}
+                    <span class="suggest-card__eyebrow">suggest</span>
+                    <span class="suggest-card__title">${escapeHtml(label)}</span>
+                    <span class="suggest-card__caption">plugin host へ現在条件を渡して実行</span>
                   </button>
                 `;
               })
@@ -1048,24 +1128,9 @@
         return `
           <div class="simple-shell">
             <div class="simple-frame">
-              <div class="simple-header">
-                <div>
-                  <span class="eyebrow">Simple Preview</span>
-                  <div class="panel-title">シンプルモード</div>
-                  <p>渡した画像をそのまま使う簡易表示です。見た目確認に寄せています。</p>
-                </div>
-              </div>
-
               <figure class="simple-figure">
                 <img alt="Gradient simple preview" class="simple-image" src="../gradient.png" />
               </figure>
-
-              <div class="simple-summary">
-                <span class="simple-chip">Analysis ${escapeHtml(formatDisplayNumber(analysisTime, "min"))}</span>
-                <span class="simple-chip">Points ${escapeHtml(String(points.length))}</span>
-                <span class="simple-chip">Ramp ${escapeHtml(formatSegmentValue(segments[1]?.duration ?? 0))} min</span>
-                <span class="simple-chip">Plateau ${escapeHtml(formatSegmentValue(segments[2]?.duration ?? 0))} min</span>
-              </div>
             </div>
           </div>
         `;
@@ -1171,7 +1236,7 @@
         root.querySelectorAll("[data-view-mode]").forEach((button) => {
           button.addEventListener("click", () => {
             const nextViewMode =
-              button.getAttribute("data-view-mode") === "simple" ? "simple" : DEFAULT_VIEW_MODE;
+              button.getAttribute("data-view-mode") === "detail" ? "detail" : DEFAULT_VIEW_MODE;
 
             if (nextViewMode === currentViewMode) {
               return;

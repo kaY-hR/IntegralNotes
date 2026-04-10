@@ -114,7 +114,7 @@ manifest 例:
 
 - `iframe` mode のみ
 - main process が `renderer/index.html` を読み、renderer process が `iframe srcDoc` に渡す
-- `renderer/index.html` からの相対 asset path は、その HTML の配置ディレクトリ基準で解決する
+- `renderer/index.html` 内の相対 asset path は app 側で plugin install directory から解決し、可能なものは data URL として `srcDoc` に埋め込む
 - app -> plugin は `postMessage` で block 情報を渡す
 - message type
   - app -> plugin
