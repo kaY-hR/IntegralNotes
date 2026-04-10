@@ -1,13 +1,11 @@
-param(
-  [string]$TargetRoot = ('C:\Users\shimadzu\OneDrive - SHIMADZU\' + [char]0x5171 + [char]0x6709 + '\test')
-)
-
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $PSCommandPath
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
-$targetRoot = [System.IO.Path]::GetFullPath($TargetRoot)
+# Change this path when reusing the script.
+# Keep this file encoded as UTF-8 with BOM if TargetRoot contains non-ASCII characters.
+$targetRoot = [System.IO.Path]::GetFullPath('C:\Users\shimadzu\OneDrive - SHIMADZU\共有\test')
 $excludeFilePath = Join-Path $scriptRoot '.copyexclude'
 $manifestRelativePath = 'scripts/.copyexport-manifest'
 $manifestPath = Join-Path $targetRoot ($manifestRelativePath.Replace('/', '\'))
@@ -132,6 +130,37 @@ function Read-ManifestEntries {
   return @()
 }
 
+function Get-GitTrackedFiles {
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = 'git'
+  $startInfo.Arguments = '-c safe.directory=* -c core.quotepath=false ls-files -z'
+  $startInfo.RedirectStandardError = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.UseShellExecute = $false
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $startInfo
+  [void]$process.Start()
+
+  $stdoutStream = New-Object System.IO.MemoryStream
+  $process.StandardOutput.BaseStream.CopyTo($stdoutStream)
+  $stderr = $process.StandardError.ReadToEnd()
+  $process.WaitForExit()
+
+  if ($process.ExitCode -ne 0) {
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+      throw $stderr.Trim()
+    }
+
+    throw 'Failed to read tracked files from git.'
+  }
+
+  $outputText = [System.Text.Encoding]::UTF8.GetString($stdoutStream.ToArray())
+
+  return $outputText.Split([char]0) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+}
+
 function Remove-EmptyDirectories {
   param(
     [Parameter(Mandatory = $true)]
@@ -162,17 +191,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   throw 'git command was not found.'
 }
 
-$gitArguments = @(
-  '-c',
-  'safe.directory=*',
-  'ls-files'
-)
-
-$trackedFiles = @(git @gitArguments)
-
-if ($LASTEXITCODE -ne 0) {
-  throw 'Failed to read tracked files from git.'
-}
+$trackedFiles = @(Get-GitTrackedFiles)
 
 $excludePatterns = @(Get-ExcludePatterns)
 $previousManifestEntries = @(Read-ManifestEntries -CandidatePaths @($manifestPath, $legacyManifestPath))

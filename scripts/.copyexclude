@@ -1,4 +1,3 @@
-# Exclude repo-relative paths from the tracked-file export.
 docs/00_履歴
 docs/10_要求/IntegralNotes.prj.md
 Notes
