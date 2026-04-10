@@ -15,5 +15,9 @@ renderer helper の主な用途:
 
 - `bindIntegralPluginRenderer(render)`
   - app -> plugin の `integral:set-block` を受ける
+- `bindIntegralPluginActionState(render)`
+  - app -> plugin の `integral:action-state` を受ける
 - `postIntegralPluginParamsUpdate(params)`
   - plugin -> app の `integral:update-params` を送る
+- `postIntegralPluginActionRequest(actionId)`
+  - plugin -> app の `integral:request-action` を送る

@@ -119,18 +119,21 @@ manifest 例:
 - message type
   - app -> plugin
     - `integral:set-block`
+    - `integral:action-state`
   - plugin -> app
     - `integral:update-params`
+    - `integral:request-action`
 
 ### interactive renderer に向けた方針
 
 - renderer を read-only preview に固定しない。block 固有の設定 UI は plugin renderer 側へ寄せる。
+- plugin renderer が block 全体の UI を持つ。IntegralNotes 本体は plugin block の外側 toolbar / action button を常設しない。
 - Markdown 上の `itg-notes` JSON を唯一の正とする。plugin renderer 内の state は一時 state であり、保存責務は app 本体の node view が持つ。
 - 現在の MVP として `iframe postMessage` の reverse bridge を実装し、plugin renderer から app 本体へ `params` 更新を返せるようにした。
 - 現在の MVP では plugin renderer が更新できるのは基本的に `params` のみとし、`type` や plugin manifest 由来の情報は app 側が保持する。
 - app は更新を受けたら node の `value` を JSON 文字列として再 serialize し、保存対象 Markdown を更新する。
 - app は正規化後の block を再度 `integral:set-block` で iframe に返し、plugin renderer と Markdown の内容を同期させる。
-- action button は当面 app 本体側に残してよい。最優先は「専用 GUI で値を変更すると JSON へ反映される」経路の確立。
+- privileged action の見た目は plugin renderer 側が持ってよいが、実行権限そのものは app / host 側に残す。
 
 #### reverse bridge MVP
 
@@ -161,9 +164,34 @@ plugin -> app:
 }
 ```
 
-- まずは full block 差し替えではなく `params` 更新に絞る。
+- action request:
+
+```json
+{
+  "type": "integral:request-action",
+  "payload": {
+    "actionId": "execute"
+  }
+}
+```
+
+- action state:
+
+```json
+{
+  "type": "integral:action-state",
+  "payload": {
+    "actionId": "execute",
+    "status": "running",
+    "summary": "装置操作を送信中..."
+  }
+}
+```
+
+- full block 差し替えではなく `params` 更新に絞る方針は維持する。
 - block JSON の整形、validation、unknown field の保持は app 本体側で行う。
-- 将来的に必要なら `integral:request-action` や `integral:resize` を追加する。
+- plugin renderer は外部プログラムや main process を直接叩かず、`integral:request-action` を通じて app 側へ委譲する。
+- 将来的に必要なら `integral:resize` などを追加する。
 
 ### host
 
@@ -179,6 +207,8 @@ flowchart LR
   Renderer --> NodeView["integralCodeBlockFeature.tsx"]
   NodeView --> Iframe["plugin renderer iframe"]
   Iframe -->|integral:update-params| NodeView
+  Iframe -->|integral:request-action| NodeView
+  NodeView -->|integral:action-state| Iframe
   NodeView -->|setNodeMarkup| Note
   NodeView --> Runtime["integralPluginRuntime.ts"]
   Runtime --> Main["pluginRegistry.ts"]
@@ -262,7 +292,8 @@ flowchart LR
 
 - plugin renderer が返せる更新は現在 `params` 全体の差し替えのみ
 - raw JSON textarea は通常 UI から外し、編集導線は plugin renderer 側へ寄せた
-- action button と validation / serialize は本体 renderer に残っている
+- plugin renderer は UI 内ボタンから privileged action を要求できるが、実行権限自体は app / host 側が保持する
+- validation / serialize は本体 renderer に残っている
 - `type` や top-level field の編集権限は app 側に残している
 - host は `stdio executable` ではなく module load の MVP
 - GUI install は zip import のみで、store / server 連携はまだない
@@ -272,7 +303,7 @@ flowchart LR
 
 1. `LC.Method.Gradient` 以外の block でも plugin renderer の専用 GUI 編集を広げる
 2. `integral:update-params` の先で validation / normalization / error UI を強化する
-3. 必要に応じて `integral:request-action` や `integral:resize` などの renderer bridge を追加する
+3. `integral:request-action` の権限確認や監査 UI を追加する
 4. plugin ごとの schema / snippet / menu contribution を追加する
 5. host runtime を `stdio executable` に拡張する
 6. plugin store 用 catalog / download API を設計し、既存 install engine に接続する

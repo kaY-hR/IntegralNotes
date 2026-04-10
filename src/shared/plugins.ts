@@ -8,6 +8,8 @@ export const PLUGIN_HOST_RUNTIME = "module";
 export const PLUGIN_MANIFEST_FILENAME = "integral-plugin.json";
 export const PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
 export const PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
+export const PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE = "integral:request-action";
+export const PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
 export const PLUGIN_RENDER_MESSAGE_TYPE = PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE;
 
 export type InstalledPluginOrigin = "external";
@@ -86,6 +88,31 @@ export interface PluginRenderUpdateParamsPayload {
 export interface PluginRenderUpdateParamsMessage {
   payload: PluginRenderUpdateParamsPayload;
   type: typeof PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE;
+}
+
+export interface PluginRenderRequestActionPayload {
+  actionId: string;
+}
+
+export interface PluginRenderRequestActionMessage {
+  payload: PluginRenderRequestActionPayload;
+  type: typeof PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE;
+}
+
+export type PluginRenderActionStatus = "error" | "idle" | "running" | "success";
+
+export interface PluginRenderActionStatePayload {
+  actionId: string | null;
+  finishedAt: string | null;
+  logLines: string[];
+  startedAt: string | null;
+  status: PluginRenderActionStatus;
+  summary: string | null;
+}
+
+export interface PluginRenderActionStateMessage {
+  payload: PluginRenderActionStatePayload;
+  type: typeof PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE;
 }
 
 export interface PluginHostActionContext {

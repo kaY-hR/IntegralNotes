@@ -127,6 +127,12 @@
         line-height: 1.5;
       }
 
+      .heading-actions {
+        display: grid;
+        gap: 8px;
+        justify-items: end;
+      }
+
       .pills {
         display: flex;
         flex-wrap: wrap;
@@ -550,6 +556,12 @@
         background: #106ebe;
       }
 
+      .button--ghost {
+        border-color: var(--vscode-border);
+        background: var(--vscode-panel);
+        color: var(--vscode-muted);
+      }
+
       .table-shell {
         overflow: hidden;
         background: var(--vscode-panel);
@@ -618,6 +630,56 @@
         line-height: 1.5;
       }
 
+      .action-status {
+        display: grid;
+        gap: 6px;
+        padding: 12px 14px;
+        border-top: 1px solid var(--vscode-border);
+        background: var(--vscode-panel);
+      }
+
+      .action-status--running {
+        background: #f7fbff;
+      }
+
+      .action-status--success {
+        background: #f3fbf6;
+      }
+
+      .action-status--error {
+        background: #fdf4f2;
+      }
+
+      .action-status__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .action-status__title {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .action-status__meta {
+        color: var(--vscode-subtle);
+        font-size: 11px;
+      }
+
+      .action-status__log {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--vscode-muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .action-status__log li + li {
+        margin-top: 3px;
+      }
+
       @media (max-width: 860px) {
         body {
           padding: 0;
@@ -660,8 +722,10 @@
           align-items: stretch;
         }
 
+        .heading-actions,
         .pills {
           justify-content: flex-start;
+          justify-items: stretch;
         }
       }
     </style>
@@ -672,20 +736,31 @@
     </div>
     <script>
       const root = document.getElementById("root");
+      const ACTION_REQUEST_MESSAGE_TYPE = "integral:request-action";
+      const ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
       const SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
       const UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
       const DEFAULT_VIEW_MODE = "detail";
 
       let currentModel = null;
+      let currentActionState = createIdleActionState();
       let currentViewMode = DEFAULT_VIEW_MODE;
 
       window.addEventListener("message", (event) => {
-        if (!event.data || event.data.type !== SET_BLOCK_MESSAGE_TYPE) {
+        if (!event.data) {
           return;
         }
 
-        currentModel = event.data.payload;
-        renderCurrentModel();
+        if (event.data.type === SET_BLOCK_MESSAGE_TYPE) {
+          currentModel = event.data.payload;
+          renderCurrentModel();
+          return;
+        }
+
+        if (event.data.type === ACTION_STATE_MESSAGE_TYPE) {
+          currentActionState = readActionState(event.data.payload);
+          renderCurrentModel();
+        }
       });
 
       function renderCurrentModel() {
@@ -714,10 +789,13 @@
                 詳細モードでは編集、シンプルモードでは画像ベースの簡易表示を行います。
               </p>
             </div>
-            <div class="pills">
-              <span class="sync">Markdown synced</span>
-              <span class="pill">${escapeHtml(block.type ?? "unknown")}</span>
-              <span class="pill">${escapeHtml(currentModel.plugin?.displayName ?? "Shimadzu LC")}</span>
+            <div class="heading-actions">
+              <div class="pills">
+                <span class="sync">Markdown synced</span>
+                <span class="pill">${escapeHtml(block.type ?? "unknown")}</span>
+                <span class="pill">${escapeHtml(currentModel.plugin?.displayName ?? "Shimadzu LC")}</span>
+              </div>
+              ${renderPrimaryActionMarkup()}
             </div>
           </div>
 
@@ -759,6 +837,8 @@
                 </div>
               `
           }
+
+          ${renderActionStatusMarkup()}
 
           <div class="footer-note">
             Relative asset paths are resolved from <code>renderer/index.html</code>, so this renderer can use
@@ -827,6 +907,71 @@
                 シンプル
               </button>
             </div>
+          </div>
+        `;
+      }
+
+      function renderPrimaryActionMarkup() {
+        const actions = readPluginActions();
+
+        if (actions.length === 0) {
+          return "";
+        }
+
+        return `
+          <div class="editor-actions">
+            ${actions
+              .map((action) => {
+                const isRunning =
+                  currentActionState.status === "running" && currentActionState.actionId === action.id;
+                const label = isRunning ? action.busyLabel : action.label;
+
+                return `
+                  <button
+                    class="button button--accent"
+                    data-action="request-plugin-action"
+                    data-action-id="${escapeHtmlAttribute(action.id)}"
+                    type="button"
+                    ${currentActionState.status === "running" ? "disabled" : ""}
+                  >
+                    ${escapeHtml(label)}
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      }
+
+      function renderActionStatusMarkup() {
+        if (currentActionState.status === "idle" || !currentActionState.summary) {
+          return "";
+        }
+
+        const meta =
+          currentActionState.status === "running"
+            ? "plugin host を呼び出し中"
+            : currentActionState.finishedAt
+              ? `finished ${escapeHtml(formatShortTimestamp(currentActionState.finishedAt))}`
+              : `status ${escapeHtml(currentActionState.status)}`;
+
+        return `
+          <div class="action-status action-status--${escapeHtmlAttribute(currentActionState.status)}">
+            <div class="action-status__header">
+              <p class="action-status__title">${escapeHtml(currentActionState.summary)}</p>
+              <span class="action-status__meta">${meta}</span>
+            </div>
+            ${
+              currentActionState.logLines.length > 0
+                ? `
+                  <ul class="action-status__log">
+                    ${currentActionState.logLines
+                      .map((line) => `<li>${escapeHtml(line)}</li>`)
+                      .join("")}
+                  </ul>
+                `
+                : ""
+            }
           </div>
         `;
       }
@@ -999,6 +1144,30 @@
       }
 
       function bindInteractions(params, points, analysisTime, viewMode) {
+        root.querySelectorAll('[data-action="request-plugin-action"]').forEach((button) => {
+          button.addEventListener("click", () => {
+            const actionId = button.getAttribute("data-action-id");
+
+            if (!actionId || currentActionState.status === "running") {
+              return;
+            }
+
+            const action = readPluginActions().find((candidate) => candidate.id === actionId);
+            currentActionState = createPendingActionState(action);
+            renderCurrentModel();
+
+            window.parent.postMessage(
+              {
+                payload: {
+                  actionId
+                },
+                type: ACTION_REQUEST_MESSAGE_TYPE
+              },
+              "*"
+            );
+          });
+        });
+
         root.querySelectorAll("[data-view-mode]").forEach((button) => {
           button.addEventListener("click", () => {
             const nextViewMode =
@@ -1287,6 +1456,104 @@
         return [...points].sort((left, right) => left.time - right.time);
       }
 
+      function readPluginActions() {
+        const actions = currentModel?.blockDefinition?.actions;
+
+        if (!Array.isArray(actions)) {
+          return [];
+        }
+
+        return actions
+          .map((action) => {
+            if (!isRecord(action)) {
+              return null;
+            }
+
+            const id = typeof action.id === "string" ? action.id.trim() : "";
+            const label = typeof action.label === "string" ? action.label.trim() : "";
+            const busyLabel = typeof action.busyLabel === "string" ? action.busyLabel.trim() : "";
+
+            if (!id || !label || !busyLabel) {
+              return null;
+            }
+
+            return { busyLabel, id, label };
+          })
+          .filter(Boolean);
+      }
+
+      function readActionState(value) {
+        if (!isRecord(value)) {
+          return createIdleActionState();
+        }
+
+        const actionId = typeof value.actionId === "string" && value.actionId.trim() ? value.actionId : null;
+        const status = readActionStatus(value.status);
+        const summary = typeof value.summary === "string" && value.summary.trim() ? value.summary : null;
+        const startedAt =
+          typeof value.startedAt === "string" && value.startedAt.trim() ? value.startedAt : null;
+        const finishedAt =
+          typeof value.finishedAt === "string" && value.finishedAt.trim() ? value.finishedAt : null;
+        const logLines = Array.isArray(value.logLines)
+          ? value.logLines
+              .map((line) => (typeof line === "string" ? line : null))
+              .filter(Boolean)
+          : [];
+
+        return {
+          actionId,
+          finishedAt,
+          logLines,
+          startedAt,
+          status,
+          summary
+        };
+      }
+
+      function readActionStatus(value) {
+        switch (value) {
+          case "running":
+          case "success":
+          case "error":
+            return value;
+          default:
+            return "idle";
+        }
+      }
+
+      function createIdleActionState() {
+        return {
+          actionId: null,
+          finishedAt: null,
+          logLines: [],
+          startedAt: null,
+          status: "idle",
+          summary: null
+        };
+      }
+
+      function createPendingActionState(action) {
+        if (!action) {
+          return {
+            actionId: null,
+            finishedAt: null,
+            logLines: [],
+            startedAt: new Date().toISOString(),
+            status: "running",
+            summary: "plugin host を呼び出しています。"
+          };
+        }
+
+        return {
+          actionId: action.id,
+          finishedAt: null,
+          logLines: [],
+          startedAt: new Date().toISOString(),
+          status: "running",
+          summary: action.busyLabel
+        };
+      }
+
       function readNumber(value) {
         if (typeof value === "number" && Number.isFinite(value)) {
           return value;
@@ -1325,6 +1592,20 @@
         return normalized.replace(/\.?0+$/, "");
       }
 
+      function formatShortTimestamp(value) {
+        const timestamp = new Date(value);
+
+        if (Number.isNaN(timestamp.getTime())) {
+          return value;
+        }
+
+        return timestamp.toLocaleTimeString("ja-JP", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
+      }
+
       function roundNumber(value) {
         return Math.round(value * 100) / 100;
       }
@@ -1344,6 +1625,10 @@
           .replaceAll(">", "&gt;")
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#39;");
+      }
+
+      function escapeHtmlAttribute(value) {
+        return escapeHtml(value);
       }
     </script>
   </body>
