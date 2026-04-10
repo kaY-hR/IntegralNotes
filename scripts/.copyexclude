@@ -8,3 +8,4 @@ scripts/.copyexclude
 scripts/.copyexport-manifest
 scripts/copy-git-files.bat
 scripts/export-tracked-files.ps1
+scripts\copy-installers-to-onedrive.ps1
