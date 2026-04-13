@@ -388,6 +388,47 @@ function IntegralBlockPanel({
     );
   }
 
+  if (isDisplayBlock) {
+    return (
+      <div className={`integral-code-block integral-code-block--display${selected ? " integral-code-block--selected" : ""}`}>
+        <div className="integral-display-block">
+          <button
+            className="integral-code-block__button integral-code-block__button--ghost integral-display-block__picker"
+            onClick={() => {
+              setInlineError(null);
+              setSlotDialogState({ kind: "chunk", slotName: "source" });
+            }}
+            type="button"
+          >
+            {parsed.block.inputs.source ?? "chunk を選択"}
+          </button>
+
+          <ChunkRenderableView chunkId={parsed.block.inputs.source ?? null} />
+        </div>
+
+        {inlineError ? (
+          <div className="integral-code-block__result integral-code-block__result--error">
+            <strong>{inlineError}</strong>
+          </div>
+        ) : null}
+
+        {slotDialogState?.kind === "chunk" ? (
+          <ChunkPickerDialog
+            acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
+            onClose={() => {
+              setSlotDialogState(null);
+            }}
+            onError={setInlineError}
+            onSelect={(chunkId) => {
+              onAssignChunk(slotDialogState.slotName, chunkId);
+              setSlotDialogState(null);
+            }}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
       <div className="integral-json-preview">
@@ -403,66 +444,48 @@ function IntegralBlockPanel({
 
         <p className="integral-json-preview__description">{blockDefinition.description}</p>
 
-        {!isDisplayBlock ? renderIntegralBlockBody(parsed.block) : null}
+        {renderIntegralBlockBody(parsed.block)}
 
-        {isDisplayBlock ? (
-          <section className="integral-json-preview__section">
-            <div className="integral-display-toolbar">
-              <button
-                className="integral-code-block__button integral-code-block__button--ghost"
-                onClick={() => {
-                  setInlineError(null);
-                  setSlotDialogState({ kind: "chunk", slotName: "source" });
-                }}
-                type="button"
-              >
-                {parsed.block.inputs.source ?? "select chunk"}
-              </button>
-            </div>
-            <ChunkRenderableView chunkId={parsed.block.inputs.source ?? null} />
-          </section>
-        ) : (
-          <section className="integral-json-preview__section">
-            <div className="integral-json-preview__section-header">
-              <span>Slot Assignments</span>
-              <span>{blockDefinition.executionMode === "manual" ? "editable" : "display"}</span>
-            </div>
+        <section className="integral-json-preview__section">
+          <div className="integral-json-preview__section-header">
+            <span>Slot Assignments</span>
+            <span>{blockDefinition.executionMode === "manual" ? "editable" : "display"}</span>
+          </div>
 
-            <div className="integral-slot-list">
-              {blockDefinition.inputSlots.map((slot) => (
-                <div className="integral-slot-row" key={slot.name}>
-                  <div className="integral-slot-row__meta">
-                    <strong>{slot.name}</strong>
-                    <span>{parsed.block.inputs[slot.name] ?? "未設定"}</span>
-                  </div>
-                  <div className="integral-slot-row__actions">
-                    <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
-                      setInlineError(null);
-                      setSlotDialogState({ kind: "chunk", slotName: slot.name });
-                    }} type="button">
-                      Chunk
-                    </button>
-                    <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
-                      setInlineError(null);
-                      setSlotDialogState({ kind: "blobs", slotName: slot.name });
-                    }} type="button">
-                      Blob
-                    </button>
-                  </div>
+          <div className="integral-slot-list">
+            {blockDefinition.inputSlots.map((slot) => (
+              <div className="integral-slot-row" key={slot.name}>
+                <div className="integral-slot-row__meta">
+                  <strong>{slot.name}</strong>
+                  <span>{parsed.block.inputs[slot.name] ?? "未設定"}</span>
                 </div>
-              ))}
-
-              {blockDefinition.outputSlots.map((slot) => (
-                <div className="integral-slot-row integral-slot-row--output" key={slot.name}>
-                  <div className="integral-slot-row__meta">
-                    <strong>{slot.name}</strong>
-                    <span>{parsed.block.outputs[slot.name] ?? "null"}</span>
-                  </div>
+                <div className="integral-slot-row__actions">
+                  <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
+                    setInlineError(null);
+                    setSlotDialogState({ kind: "chunk", slotName: slot.name });
+                  }} type="button">
+                    Chunk
+                  </button>
+                  <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
+                    setInlineError(null);
+                    setSlotDialogState({ kind: "blobs", slotName: slot.name });
+                  }} type="button">
+                    Blob
+                  </button>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              </div>
+            ))}
+
+            {blockDefinition.outputSlots.map((slot) => (
+              <div className="integral-slot-row integral-slot-row--output" key={slot.name}>
+                <div className="integral-slot-row__meta">
+                  <strong>{slot.name}</strong>
+                  <span>{parsed.block.outputs[slot.name] ?? "null"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {blockDefinition.executionMode === "manual" ? (
           <div className="integral-code-block__runbar">
