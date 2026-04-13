@@ -1,34 +1,32 @@
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
-import type { EditorView, NodeView, NodeViewConstructor, ViewMutationRecord } from "@milkdown/kit/prose/view";
+import type {
+  EditorView,
+  NodeView,
+  NodeViewConstructor,
+  ViewMutationRecord
+} from "@milkdown/kit/prose/view";
 import type { Crepe } from "@milkdown/crepe";
 import type { Root } from "react-dom/client";
 
 import { codeBlockSchema } from "@milkdown/kit/preset/commonmark";
 import { $nodeSchema, $view } from "@milkdown/kit/utils";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import {
-  PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE,
-  PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE,
-  PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE,
-  PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE,
-  type PluginRenderActionStateMessage,
-  type PluginRenderActionStatePayload,
-  type PluginRenderRequestActionMessage,
-  type PluginRenderSetBlockMessage,
-  type PluginRenderUpdateParamsMessage
-} from "../shared/plugins";
-import type { ExecuteIntegralActionResult } from "../shared/workspace";
+import type { ExecuteIntegralBlockResult, IntegralBlockDocument } from "../shared/integral";
 
 import {
+  ChunkPickerDialog,
+  BlobPickerDialog,
+  ChunkRenderableView
+} from "./IntegralAssetDialogs";
+import {
   INTEGRAL_BLOCK_LANGUAGE,
-  type IntegralJsonBlock,
   getIntegralBlockDefinition,
   parseIntegralJsonBlock,
-  renderIntegralBlockBody
+  renderIntegralBlockBody,
+  type IntegralJsonBlock
 } from "./integralBlockRegistry";
-import { loadIntegralPluginRendererDocument } from "./integralPluginRuntime";
 
 type MarkdownCodeNode = {
   lang?: string | null;
@@ -36,25 +34,24 @@ type MarkdownCodeNode = {
   value?: unknown;
 };
 
-type TraceEntry = {
-  at: string;
-  detail?: Record<string, unknown>;
-  event: string;
-  seq: number;
-  viewId: number;
+type RunState = {
+  finishedAt: string | null;
+  logLines: string[];
+  startedAt: string | null;
+  status: "error" | "idle" | "running" | "success";
+  summary: string | null;
 };
 
-type PanelMessage =
+type SlotDialogState =
   | {
-      kind: "error";
-      logLines: string[];
-      summary: string;
+      kind: "blobs";
+      slotName: string;
     }
   | {
-      kind: "success";
-      logLines: string[];
-      summary: string;
-    };
+      kind: "chunk";
+      slotName: string;
+    }
+  | null;
 
 type ParsedIntegralDraft =
   | {
@@ -67,9 +64,6 @@ type ParsedIntegralDraft =
     };
 
 const INTEGRAL_NOTES_NODE_ID = "integral_notes_block";
-
-let nextTraceSeq = 0;
-let nextViewId = 0;
 
 const standardCodeBlockSchema = codeBlockSchema.extendSchema((prev) => (ctx) => {
   const schema = prev(ctx);
@@ -142,22 +136,15 @@ export function installIntegralCodeBlockFeature(editor: Crepe): void {
   editor.editor.use(standardCodeBlockSchema);
   editor.editor.use(integralNotesBlockSchema);
   editor.editor.use(INTEGRAL_NOTES_VIEW);
-
-  traceIntegralCodeBlock({
-    event: "install-dedicated-node",
-    viewId: 0
-  });
 }
 
 class IntegralNotesBlockView implements NodeView {
   readonly dom: HTMLElement;
 
-  private actionState: PluginRenderActionStatePayload = createIdleActionState();
   private destroyed = false;
-  private panelMessage: PanelMessage | null = null;
   private readonly root: Root;
+  private runState: RunState = createIdleRunState();
   private selected = false;
-  private readonly viewId = ++nextViewId;
 
   constructor(
     public node: ProseNode,
@@ -168,12 +155,6 @@ class IntegralNotesBlockView implements NodeView {
     this.dom.dataset.integralCodeBlock = "true";
     this.root = createRoot(this.dom);
     this.render();
-
-    traceIntegralCodeBlock({
-      detail: toTraceDetail(node, getPos),
-      event: "create-integral-node-view",
-      viewId: this.viewId
-    });
   }
 
   update(node: ProseNode): boolean {
@@ -183,28 +164,18 @@ class IntegralNotesBlockView implements NodeView {
 
     const previousText = readIntegralNodeValue(this.node);
     const nextText = readIntegralNodeValue(node);
-    const previousBlockType = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, previousText)?.type ?? null;
-    const nextBlockType = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, nextText)?.type ?? null;
-    const textChanged = previousText !== nextText;
+    const previousBlock = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, previousText);
+    const nextBlock = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, nextText);
     this.node = node;
 
-    if (previousBlockType !== nextBlockType) {
-      this.actionState = createIdleActionState();
-      this.panelMessage = null;
-    } else if (textChanged && this.panelMessage?.kind === "error") {
-      this.panelMessage = null;
+    if (
+      previousBlock?.plugin !== nextBlock?.plugin ||
+      previousBlock?.["block-type"] !== nextBlock?.["block-type"]
+    ) {
+      this.runState = createIdleRunState();
     }
 
     this.render();
-
-    traceIntegralCodeBlock({
-      detail: {
-        textChanged
-      },
-      event: "update-integral-node-view",
-      viewId: this.viewId
-    });
-
     return true;
   }
 
@@ -235,12 +206,6 @@ class IntegralNotesBlockView implements NodeView {
   destroy(): void {
     this.destroyed = true;
     this.root.unmount();
-
-    traceIntegralCodeBlock({
-      detail: toTraceDetail(this.node, this.getPos),
-      event: "destroy-integral-node-view",
-      viewId: this.viewId
-    });
   }
 
   private render(): void {
@@ -252,18 +217,35 @@ class IntegralNotesBlockView implements NodeView {
     const parsed = parseIntegralDraft(rawText);
 
     this.root.render(
-      <IntegralCodeBlockPanel
-        actionState={this.actionState}
-        onParamsChange={this.handleParamsChange}
-        onRequestAction={this.handleActionRequest}
-        panelMessage={this.panelMessage}
+      <IntegralBlockPanel
+        onAssignChunk={(slotName, chunkId) => {
+          const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
+            ...currentBlock,
+            inputs: {
+              ...currentBlock.inputs,
+              [slotName]: chunkId
+            }
+          }));
+
+          if (result.error) {
+            this.runState = createErrorRunState(result.error);
+            this.render();
+            return;
+          }
+
+          this.applyTextChange(result.nextText);
+        }}
+        onRun={() => {
+          void this.handleRun();
+        }}
         parsed={parsed}
+        runState={this.runState}
         selected={this.selected}
       />
     );
   }
 
-  private handleTextChange = (nextText: string): void => {
+  private applyTextChange(nextText: string): void {
     const currentText = readIntegralNodeValue(this.node);
 
     if (currentText === nextText) {
@@ -273,13 +255,6 @@ class IntegralNotesBlockView implements NodeView {
     const position = this.getPos();
 
     if (position === undefined) {
-      traceIntegralCodeBlock({
-        detail: {
-          reason: "missing-position"
-        },
-        event: "edit-skipped",
-        viewId: this.viewId
-      });
       return;
     }
 
@@ -289,49 +264,10 @@ class IntegralNotesBlockView implements NodeView {
         value: nextText
       })
     );
+  }
 
-    traceIntegralCodeBlock({
-      detail: {
-        nextLength: nextText.length
-      },
-      event: "edit-apply",
-      viewId: this.viewId
-    });
-  };
-
-  private handleParamsChange = (nextParams: Record<string, unknown>): void => {
-    const rawText = readIntegralNodeValue(this.node);
-    const result = applyIntegralBlockParamsUpdate(rawText, nextParams);
-
-    if (result.error) {
-      this.panelMessage = {
-        kind: "error",
-        logLines: [result.error],
-        summary: "plugin renderer の変更を JSON に反映できませんでした。"
-      };
-      this.render();
-      return;
-    }
-
-    if (!result.changed) {
-      return;
-    }
-
-    this.panelMessage = null;
-    this.handleTextChange(result.nextText);
-
-    traceIntegralCodeBlock({
-      detail: {
-        blockType: parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, result.nextText)?.type ?? null,
-        paramKeys: Object.keys(nextParams)
-      },
-      event: "plugin-params-update",
-      viewId: this.viewId
-    });
-  };
-
-  private handleActionRequest = async (actionId: string): Promise<void> => {
-    if (!actionId.trim() || this.actionState.status === "running") {
+  private async handleRun(): Promise<void> {
+    if (this.runState.status === "running") {
       return;
     }
 
@@ -339,419 +275,266 @@ class IntegralNotesBlockView implements NodeView {
     const parsed = parseIntegralDraft(rawText);
 
     if (!parsed.block) {
-      this.actionState = createActionErrorState(
-        actionId,
-        "JSON が不正なため実行できません。",
-        [parsed.error]
-      );
+      this.runState = createErrorRunState(parsed.error);
       this.render();
       return;
     }
 
-    const actions = getIntegralBlockDefinition(parsed.block.type)?.actions ?? [];
-    const action = actions.find((candidate) => candidate.id === actionId);
+    const blockDefinition = getIntegralBlockDefinition(
+      parsed.block.plugin,
+      parsed.block["block-type"]
+    );
 
-    if (!action) {
-      this.actionState = createActionErrorState(
-        actionId,
-        "このブロックには実行アクションがありません。",
-        [`未対応の Integral action です: ${parsed.block.type}`]
-      );
+    if (!blockDefinition) {
+      this.runState = createErrorRunState("block 定義が見つかりません。");
       this.render();
       return;
     }
 
-    this.actionState = {
-      actionId: action.id,
+    if (blockDefinition.executionMode !== "manual") {
+      this.runState = {
+        finishedAt: new Date().toISOString(),
+        logLines: [],
+        startedAt: new Date().toISOString(),
+        status: "success",
+        summary: "表示 block は実行不要です。"
+      };
+      this.render();
+      return;
+    }
+
+    this.runState = {
       finishedAt: null,
       logLines: [],
       startedAt: new Date().toISOString(),
       status: "running",
-      summary: action.busyLabel
+      summary: "実行中..."
     };
-    this.panelMessage = null;
     this.render();
 
-    traceIntegralCodeBlock({
-      detail: {
-        actionId: action.id,
-        blockType: parsed.block.type
-      },
-      event: "execute-start",
-      viewId: this.viewId
-    });
-
     try {
-      const result = await window.integralNotes.executeIntegralAction({
-        actionId: action.id,
-        blockType: parsed.block.type,
-        params: parsed.block.params,
-        payload: rawText
+      const result = await window.integralNotes.executeIntegralBlock({
+        block: parsed.block
       });
 
       if (this.destroyed) {
         return;
       }
 
-      this.actionState = toActionState(result);
-
-      traceIntegralCodeBlock({
-        detail: {
-          actionId: result.actionId,
-          status: result.status
-        },
-        event: "execute-success",
-        viewId: this.viewId
-      });
+      this.runState = toRunState(result);
+      this.applyTextChange(JSON.stringify(result.block, null, 2));
     } catch (error) {
       if (this.destroyed) {
         return;
       }
 
-      this.actionState = createActionErrorState(action.id, "Integral action の実行に失敗しました。", [
-        formatErrorMessage(error)
-      ]);
-
-      traceIntegralCodeBlock({
-        detail: {
-          error: formatErrorMessage(error)
-        },
-        event: "execute-error",
-        viewId: this.viewId
-      });
+      this.runState = createErrorRunState(formatErrorMessage(error));
     }
 
     if (!this.destroyed) {
       this.render();
     }
-  };
+  }
 }
 
-function IntegralCodeBlockPanel({
-  actionState,
-  onParamsChange,
-  onRequestAction,
-  panelMessage,
+function IntegralBlockPanel({
+  onAssignChunk,
+  onRun,
   parsed,
+  runState,
   selected
 }: {
-  actionState: PluginRenderActionStatePayload;
-  onParamsChange: (nextParams: Record<string, unknown>) => void;
-  onRequestAction: (actionId: string) => void;
-  panelMessage: PanelMessage | null;
+  onAssignChunk: (slotName: string, chunkId: string) => void;
+  onRun: () => void;
   parsed: ParsedIntegralDraft;
+  runState: RunState;
   selected: boolean;
 }): JSX.Element {
-  const blockDefinition = parsed.block ? getIntegralBlockDefinition(parsed.block.type) : null;
+  const [slotDialogState, setSlotDialogState] = useState<SlotDialogState>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
-  return (
-    <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
-      {parsed.block ? (
-        blockDefinition?.hasRenderer ? (
-          <>
-            <PluginRendererPanel
-              actionState={actionState}
-              block={parsed.block}
-              blockDefinition={blockDefinition}
-              onParamsChange={onParamsChange}
-              onRequestAction={onRequestAction}
-            />
-            {panelMessage ? <PanelMessageView message={panelMessage} /> : null}
-          </>
-        ) : (
-          <IntegralBlockFallbackPanel
-            actionState={actionState}
-            block={parsed.block}
-            blockDefinition={blockDefinition}
-            onRequestAction={onRequestAction}
-            panelMessage={panelMessage}
-          />
-        )
-      ) : (
+  if (!parsed.block) {
+    return (
+      <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
         <div className="integral-code-block__result integral-code-block__result--error">
           <strong>Invalid Integral block</strong>
           <span>{parsed.error}</span>
         </div>
-      )}
-    </div>
-  );
-}
-
-function PluginRendererPanel({
-  actionState,
-  block,
-  blockDefinition,
-  onParamsChange,
-  onRequestAction
-}: {
-  actionState: PluginRenderActionStatePayload;
-  block: IntegralJsonBlock;
-  blockDefinition: NonNullable<ReturnType<typeof getIntegralBlockDefinition>>;
-  onParamsChange: (nextParams: Record<string, unknown>) => void;
-  onRequestAction: (actionId: string) => void;
-}): JSX.Element {
-  const [rendererDocument, setRendererDocument] = useState<string | null>(null);
-  const [rendererError, setRendererError] = useState<string | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-
-  const postRenderModel = (): void => {
-    const frameWindow = iframeRef.current?.contentWindow;
-
-    if (!frameWindow) {
-      return;
-    }
-
-    const message: PluginRenderSetBlockMessage = {
-      payload: {
-        block,
-        blockDefinition: {
-          actions: blockDefinition.actions,
-          description: blockDefinition.description,
-          title: blockDefinition.title,
-          type: blockDefinition.type
-        },
-        plugin: {
-          description: blockDefinition.pluginDescription,
-          displayName: blockDefinition.pluginDisplayName,
-          id: blockDefinition.pluginId,
-          namespace: blockDefinition.pluginNamespace,
-          origin: blockDefinition.pluginOrigin,
-          version: blockDefinition.pluginVersion
-        }
-      },
-      type: PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE
-    };
-
-    frameWindow.postMessage(message, "*");
-  };
-
-  const postActionState = (): void => {
-    const frameWindow = iframeRef.current?.contentWindow;
-
-    if (!frameWindow) {
-      return;
-    }
-
-    const message: PluginRenderActionStateMessage = {
-      payload: actionState,
-      type: PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE
-    };
-
-    frameWindow.postMessage(message, "*");
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    setRendererDocument(null);
-    setRendererError(null);
-
-    void loadIntegralPluginRendererDocument(blockDefinition.pluginId)
-      .then((document) => {
-        if (cancelled) {
-          return;
-        }
-
-        if (document === null) {
-          setRendererError("plugin renderer が未登録です。");
-          return;
-        }
-
-        setRendererDocument(document);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setRendererError(formatErrorMessage(error));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [blockDefinition.pluginId]);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent): void => {
-      const frameWindow = iframeRef.current?.contentWindow;
-
-      if (!frameWindow || event.source !== frameWindow) {
-        return;
-      }
-
-      if (isPluginRenderUpdateParamsMessage(event.data)) {
-        onParamsChange(event.data.payload.params);
-        return;
-      }
-
-      if (isPluginRenderRequestActionMessage(event.data)) {
-        onRequestAction(event.data.payload.actionId);
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-
-    return () => {
-      window.removeEventListener("message", handleMessage);
-    };
-  }, [onParamsChange, onRequestAction]);
-
-  useEffect(() => {
-    if (!rendererDocument) {
-      return;
-    }
-
-    postRenderModel();
-  }, [block, blockDefinition, rendererDocument]);
-
-  useEffect(() => {
-    if (!rendererDocument) {
-      return;
-    }
-
-    postActionState();
-  }, [actionState, rendererDocument]);
-
-  if (rendererError) {
-    return (
-      <IntegralBlockFallbackPanel
-        actionState={actionState}
-        block={block}
-        blockDefinition={blockDefinition}
-        onRequestAction={onRequestAction}
-        panelMessage={{
-          kind: "error",
-          logLines: [rendererError],
-          summary: "Plugin renderer の読込に失敗しました。"
-        }}
-      />
+      </div>
     );
   }
 
-  if (!rendererDocument) {
+  const blockDefinition = getIntegralBlockDefinition(parsed.block.plugin, parsed.block["block-type"]);
+  const isDisplayBlock =
+    blockDefinition?.pluginId === "core-display" &&
+    blockDefinition.blockType === "chunk-view";
+
+  if (!blockDefinition) {
     return (
-      <div className="integral-plugin-frame-shell integral-plugin-frame-shell--loading">
-        <span>Plugin renderer を読み込み中...</span>
+      <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
+        <div className="integral-json-preview">
+          <div className="integral-json-preview__header">
+            <div>
+              <p className="integral-json-preview__eyebrow">Integral Block</p>
+              <h3 className="integral-json-preview__title">Unknown Block</h3>
+            </div>
+            <code className="integral-json-preview__type">
+              {parsed.block.plugin}/{parsed.block["block-type"]}
+            </code>
+          </div>
+          {renderIntegralBlockBody(parsed.block)}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="integral-plugin-frame-shell">
-      <iframe
-        className="integral-plugin-frame"
-        onLoad={() => {
-          postRenderModel();
-          postActionState();
-        }}
-        ref={iframeRef}
-        sandbox="allow-scripts"
-        srcDoc={rendererDocument}
-        title={`${blockDefinition.title} plugin renderer`}
-      />
-    </div>
-  );
-}
-
-function IntegralBlockFallbackPanel({
-  actionState,
-  block,
-  blockDefinition,
-  onRequestAction,
-  panelMessage
-}: {
-  actionState: PluginRenderActionStatePayload;
-  block: IntegralJsonBlock;
-  blockDefinition: ReturnType<typeof getIntegralBlockDefinition>;
-  onRequestAction: (actionId: string) => void;
-  panelMessage: PanelMessage | null;
-}): JSX.Element {
-  const actionDefinitions = blockDefinition?.actions ?? [];
-
-  return (
-    <>
+    <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
       <div className="integral-json-preview">
         <div className="integral-json-preview__header">
           <div>
-            <p className="integral-json-preview__eyebrow">Integral Block</p>
-            <h3 className="integral-json-preview__title">
-              {blockDefinition?.title ?? block.type}
-            </h3>
+            <p className="integral-json-preview__eyebrow">{blockDefinition.pluginDisplayName}</p>
+            <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
           </div>
-          <code className="integral-json-preview__type">{block.type}</code>
+          <code className="integral-json-preview__type">
+            {parsed.block.plugin}/{parsed.block["block-type"]}
+          </code>
         </div>
 
-        <p className="integral-json-preview__description">
-          {blockDefinition?.description ??
-            "専用 renderer 未登録のため、汎用 Integral preview を表示しています。"}
-        </p>
+        <p className="integral-json-preview__description">{blockDefinition.description}</p>
 
-        {renderIntegralBlockBody(block)}
+        {!isDisplayBlock ? renderIntegralBlockBody(parsed.block) : null}
 
-        {actionDefinitions.length > 0 ? (
-          <div className="integral-code-block__runbar">
-            <div className="integral-code-block__actions">
-              {actionDefinitions.map((actionDefinition) => (
-                <button
-                  className="integral-code-block__button integral-code-block__button--primary"
-                  disabled={actionState.status === "running"}
-                  key={actionDefinition.id}
-                  onClick={() => onRequestAction(actionDefinition.id)}
-                  type="button"
-                >
-                  {actionState.status === "running" && actionState.actionId === actionDefinition.id
-                    ? actionDefinition.busyLabel
-                    : actionDefinition.label}
-                </button>
+        {isDisplayBlock ? (
+          <section className="integral-json-preview__section">
+            <div className="integral-display-toolbar">
+              <button
+                className="integral-code-block__button integral-code-block__button--ghost"
+                onClick={() => {
+                  setInlineError(null);
+                  setSlotDialogState({ kind: "chunk", slotName: "source" });
+                }}
+                type="button"
+              >
+                {parsed.block.inputs.source ?? "select chunk"}
+              </button>
+            </div>
+            <ChunkRenderableView chunkId={parsed.block.inputs.source ?? null} />
+          </section>
+        ) : (
+          <section className="integral-json-preview__section">
+            <div className="integral-json-preview__section-header">
+              <span>Slot Assignments</span>
+              <span>{blockDefinition.executionMode === "manual" ? "editable" : "display"}</span>
+            </div>
+
+            <div className="integral-slot-list">
+              {blockDefinition.inputSlots.map((slot) => (
+                <div className="integral-slot-row" key={slot.name}>
+                  <div className="integral-slot-row__meta">
+                    <strong>{slot.name}</strong>
+                    <span>{parsed.block.inputs[slot.name] ?? "未設定"}</span>
+                  </div>
+                  <div className="integral-slot-row__actions">
+                    <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
+                      setInlineError(null);
+                      setSlotDialogState({ kind: "chunk", slotName: slot.name });
+                    }} type="button">
+                      Chunk
+                    </button>
+                    <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
+                      setInlineError(null);
+                      setSlotDialogState({ kind: "blobs", slotName: slot.name });
+                    }} type="button">
+                      Blob
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {blockDefinition.outputSlots.map((slot) => (
+                <div className="integral-slot-row integral-slot-row--output" key={slot.name}>
+                  <div className="integral-slot-row__meta">
+                    <strong>{slot.name}</strong>
+                    <span>{parsed.block.outputs[slot.name] ?? "null"}</span>
+                  </div>
+                </div>
               ))}
             </div>
+          </section>
+        )}
+
+        {blockDefinition.executionMode === "manual" ? (
+          <div className="integral-code-block__runbar">
+            <button
+              className="integral-code-block__button integral-code-block__button--primary"
+              disabled={runState.status === "running"}
+              onClick={onRun}
+              type="button"
+            >
+              {runState.status === "running" ? "実行中..." : "Run"}
+            </button>
             <p className="integral-code-block__runhint">
-              実行ボタンは plugin host module 経由で main process に処理を渡します。
+              `analysis-args.json` を生成し、`.py-scripts/PYS-.../` で Python を実行します。
             </p>
           </div>
         ) : null}
+
       </div>
 
-      {panelMessage ? <PanelMessageView message={panelMessage} /> : null}
-      {actionState.status !== "idle" ? <ActionStateView actionState={actionState} /> : null}
-    </>
-  );
-}
+      {inlineError ? (
+        <div className="integral-code-block__result integral-code-block__result--error">
+          <strong>{inlineError}</strong>
+        </div>
+      ) : null}
 
-function PanelMessageView({ message }: { message: PanelMessage }): JSX.Element {
-  return (
-    <div className={`integral-code-block__result integral-code-block__result--${message.kind}`}>
-      <strong>{message.summary}</strong>
+      {runState.status !== "idle" ? <RunStateView runState={runState} /> : null}
 
-      {message.logLines.length > 0 ? (
-        <ul className="integral-code-block__log">
-          {message.logLines.map((line, index) => (
-            <li key={`${index}-${line}`}>{line}</li>
-          ))}
-        </ul>
+      {slotDialogState?.kind === "chunk" ? (
+        <ChunkPickerDialog
+          acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
+          onClose={() => {
+            setSlotDialogState(null);
+          }}
+          onError={setInlineError}
+          onSelect={(chunkId) => {
+            onAssignChunk(slotDialogState.slotName, chunkId);
+            setSlotDialogState(null);
+          }}
+        />
+      ) : null}
+
+      {slotDialogState?.kind === "blobs" ? (
+        <BlobPickerDialog
+          onClose={() => {
+            setSlotDialogState(null);
+          }}
+          onError={setInlineError}
+          onSelectChunk={(chunkId) => {
+            onAssignChunk(slotDialogState.slotName, chunkId);
+            setSlotDialogState(null);
+          }}
+        />
       ) : null}
     </div>
   );
 }
 
-function ActionStateView({
-  actionState
-}: {
-  actionState: PluginRenderActionStatePayload;
-}): JSX.Element {
+function RunStateView({ runState }: { runState: RunState }): JSX.Element {
   const kind =
-    actionState.status === "success"
+    runState.status === "success"
       ? "success"
-      : actionState.status === "running"
+      : runState.status === "running"
         ? "success"
         : "error";
 
   return (
     <div className={`integral-code-block__result integral-code-block__result--${kind}`}>
-      <strong>{actionState.summary ?? "Integral action を実行しました。"}</strong>
+      <strong>{runState.summary ?? "block を実行しました。"}</strong>
 
-      {actionState.logLines.length > 0 ? (
+      {runState.logLines.length > 0 ? (
         <ul className="integral-code-block__log">
-          {actionState.logLines.map((line, index) => (
+          {runState.logLines.map((line, index) => (
             <li key={`${index}-${line}`}>{line}</li>
           ))}
         </ul>
@@ -793,42 +576,25 @@ function parseIntegralDraft(content: string): ParsedIntegralDraft {
   };
 }
 
-function applyIntegralBlockParamsUpdate(
+function applyIntegralBlockMutation(
   content: string,
-  nextParams: Record<string, unknown>
+  mutator: (block: IntegralBlockDocument) => IntegralBlockDocument
 ): {
-  changed: boolean;
   error: string | null;
   nextText: string;
 } {
-  const parsedRecord = parseIntegralRecord(content);
+  const parsedDraft = parseIntegralDraft(content);
 
-  if (!parsedRecord.record) {
+  if (!parsedDraft.block) {
     return {
-      changed: false,
-      error: parsedRecord.error ?? "Unknown error",
-      nextText: content
-    };
-  }
-
-  const currentParams = isJsonRecord(parsedRecord.record.params) ? parsedRecord.record.params : {};
-  const normalizedParams = { ...nextParams };
-
-  if (JSON.stringify(currentParams) === JSON.stringify(normalizedParams)) {
-    return {
-      changed: false,
-      error: null,
+      error: parsedDraft.error,
       nextText: content
     };
   }
 
   return {
-    changed: true,
     error: null,
-    nextText: formatIntegralJson({
-      ...parsedRecord.record,
-      params: normalizedParams
-    })
+    nextText: JSON.stringify(mutator(parsedDraft.block), null, 2)
   };
 }
 
@@ -846,9 +612,16 @@ function parseIntegralRecord(content: string): {
       };
     }
 
-    if (typeof parsed.type !== "string" || parsed.type.trim().length === 0) {
+    if (typeof parsed.plugin !== "string" || parsed.plugin.trim().length === 0) {
       return {
-        error: "`type` を持つ Integral block JSON が必要です。",
+        error: "`plugin` を持つ Integral block JSON が必要です。",
+        record: null
+      };
+    }
+
+    if (typeof parsed["block-type"] !== "string" || parsed["block-type"].trim().length === 0) {
+      return {
+        error: "`block-type` を持つ Integral block JSON が必要です。",
         record: null
       };
     }
@@ -865,62 +638,8 @@ function parseIntegralRecord(content: string): {
   }
 }
 
-function isPluginRenderUpdateParamsMessage(
-  value: unknown
-): value is PluginRenderUpdateParamsMessage {
-  return (
-    isJsonRecord(value) &&
-    value.type === PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE &&
-    isJsonRecord(value.payload) &&
-    isJsonRecord(value.payload.params)
-  );
-}
-
-function isPluginRenderRequestActionMessage(
-  value: unknown
-): value is PluginRenderRequestActionMessage {
-  return (
-    isJsonRecord(value) &&
-    value.type === PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE &&
-    isJsonRecord(value.payload) &&
-    typeof value.payload.actionId === "string" &&
-    value.payload.actionId.trim().length > 0
-  );
-}
-
-function formatIntegralJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-function toActionState(result: ExecuteIntegralActionResult): PluginRenderActionStatePayload {
+function createIdleRunState(): RunState {
   return {
-    actionId: result.actionId,
-    finishedAt: result.finishedAt,
-    logLines: result.logLines,
-    startedAt: result.startedAt,
-    status: "success",
-    summary: result.summary
-  };
-}
-
-function createActionErrorState(
-  actionId: string | null,
-  summary: string,
-  logLines: string[]
-): PluginRenderActionStatePayload {
-  return {
-    actionId,
-    finishedAt: new Date().toISOString(),
-    logLines,
-    startedAt: null,
-    status: "error",
-    summary
-  };
-}
-
-function createIdleActionState(): PluginRenderActionStatePayload {
-  return {
-    actionId: null,
     finishedAt: null,
     logLines: [],
     startedAt: null,
@@ -929,48 +648,24 @@ function createIdleActionState(): PluginRenderActionStatePayload {
   };
 }
 
-function toTraceDetail(
-  node: ProseNode,
-  getPos: () => number | undefined
-): Record<string, unknown> {
-  const value = readIntegralNodeValue(node);
-
+function createErrorRunState(message: string): RunState {
   return {
-    blockType: parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, value)?.type ?? null,
-    pos: getPos(),
-    textLength: value.length
+    finishedAt: new Date().toISOString(),
+    logLines: [message],
+    startedAt: null,
+    status: "error",
+    summary: "Integral block の処理に失敗しました。"
   };
 }
 
-function traceIntegralCodeBlock({
-  detail,
-  event,
-  viewId
-}: Omit<TraceEntry, "at" | "seq">): void {
-  if (!import.meta.env.DEV) {
-    return;
-  }
-
-  const entry: TraceEntry = {
-    at: new Date().toISOString(),
-    detail,
-    event,
-    seq: ++nextTraceSeq,
-    viewId
+function toRunState(result: ExecuteIntegralBlockResult): RunState {
+  return {
+    finishedAt: result.finishedAt,
+    logLines: result.logLines,
+    startedAt: result.startedAt,
+    status: "success",
+    summary: result.summary
   };
-
-  const traceWindow = window as Window & {
-    __integralMilkdownTrace__?: TraceEntry[];
-  };
-
-  traceWindow.__integralMilkdownTrace__ ??= [];
-  traceWindow.__integralMilkdownTrace__.push(entry);
-
-  if (traceWindow.__integralMilkdownTrace__.length > 200) {
-    traceWindow.__integralMilkdownTrace__.shift();
-  }
-
-  console.debug("[IntegralMilkdownTrace]", entry);
 }
 
 function formatErrorMessage(error: unknown): string {

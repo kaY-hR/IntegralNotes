@@ -1,6 +1,7 @@
 import * as FlexLayout from "flexlayout-react";
 import { useEffect, useRef, useState } from "react";
 
+import type { RegisterPythonScriptResult } from "../shared/integral";
 import type {
   CreateEntryResult,
   DeleteEntryResult,
@@ -15,7 +16,12 @@ import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { PluginManagerDialog } from "./PluginManagerDialog";
+import { PythonScriptDialog } from "./PythonScriptDialog";
 import { WorkspaceDialog } from "./WorkspaceDialog";
+import {
+  INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT,
+  OPEN_PYTHON_SCRIPT_DIALOG_EVENT
+} from "./integralSnippetMenu";
 
 interface OpenNoteTab {
   content: string;
@@ -284,6 +290,7 @@ export function App(): JSX.Element {
   const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
   const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
+  const [pythonScriptDialogOpen, setPythonScriptDialogOpen] = useState(false);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
   const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
@@ -435,9 +442,65 @@ export function App(): JSX.Element {
     await refreshInstalledPluginState(nextStatusMessage);
   };
 
+  const refreshIntegralBlockCatalog = (nextStatusMessage?: string): void => {
+    resetIntegralPluginRuntime();
+    setPluginCatalogRevision((current) => current + 1);
+
+    if (nextStatusMessage) {
+      setStatusMessage(nextStatusMessage);
+    }
+  };
+
   const openPluginManager = (): void => {
     setPluginDialogOpen(true);
     void refreshInstalledPluginState();
+  };
+
+  const openPythonScriptDialog = (): void => {
+    setPythonScriptDialogOpen(true);
+  };
+
+  const importBlobFiles = async (): Promise<void> => {
+    try {
+      const result = await window.integralNotes.importBlobFiles();
+
+      if (!result) {
+        setStatusMessage("blob 登録をキャンセルしました。");
+        return;
+      }
+
+      await refreshWorkspace(`${result.blobs.length} 件のファイル blob を登録しました。`);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
+  const importBlobDirectories = async (): Promise<void> => {
+    try {
+      const result = await window.integralNotes.importBlobDirectories();
+
+      if (!result) {
+        setStatusMessage("blob 登録をキャンセルしました。");
+        return;
+      }
+
+      await refreshWorkspace(`${result.blobs.length} 件のフォルダ blob を登録しました。`);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
+  const handlePythonScriptRegistered = (
+    result: RegisterPythonScriptResult,
+    blockMarkdown: string
+  ): void => {
+    setPythonScriptDialogOpen(false);
+    refreshIntegralBlockCatalog(`${result.script.displayName} を登録しました。`);
+    window.dispatchEvent(
+      new CustomEvent(INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT, {
+        detail: blockMarkdown
+      })
+    );
   };
 
   const installPluginFromZip = async (): Promise<void> => {
@@ -490,6 +553,24 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshWorkspace();
+  }, []);
+
+  useEffect(() => {
+    const handleOpenPythonScriptDialog = (): void => {
+      setPythonScriptDialogOpen(true);
+    };
+
+    window.addEventListener(
+      OPEN_PYTHON_SCRIPT_DIALOG_EVENT,
+      handleOpenPythonScriptDialog as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        OPEN_PYTHON_SCRIPT_DIALOG_EVENT,
+        handleOpenPythonScriptDialog as EventListener
+      );
+    };
   }, []);
 
   useEffect(() => {
@@ -1093,6 +1174,7 @@ export function App(): JSX.Element {
     return (
       <MilkdownEditor
         initialValue={tab.content}
+        isActive={selectedTabPath === relativePath}
         key={`${relativePath}:${pluginCatalogRevision}`}
         onChange={(markdown) => {
           updateTabContent(relativePath, markdown);
@@ -1112,6 +1194,31 @@ export function App(): JSX.Element {
           type="button"
         >
           Open Folder
+        </button>
+        <button
+          className="button button--ghost button--menu"
+          onClick={() => {
+            void importBlobFiles();
+          }}
+          type="button"
+        >
+          Import Files
+        </button>
+        <button
+          className="button button--ghost button--menu"
+          onClick={() => {
+            void importBlobDirectories();
+          }}
+          type="button"
+        >
+          Import Folders
+        </button>
+        <button
+          className="button button--ghost button--menu"
+          onClick={openPythonScriptDialog}
+          type="button"
+        >
+          Python Scripts
         </button>
         <button
           className="button button--ghost button--menu"
@@ -1346,6 +1453,16 @@ export function App(): JSX.Element {
           pending={deleteDialogPending}
           requireInput={false}
           title={deleteDialog.title}
+        />
+      ) : null}
+
+      {pythonScriptDialogOpen ? (
+        <PythonScriptDialog
+          onClose={() => {
+            setPythonScriptDialogOpen(false);
+          }}
+          onError={setStatusMessage}
+          onRegistered={handlePythonScriptRegistered}
         />
       ) : null}
 

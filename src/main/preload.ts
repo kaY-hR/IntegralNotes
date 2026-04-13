@@ -22,15 +22,24 @@ function adjustZoomLevel(direction: "in" | "out" | "reset"): void {
 }
 
 const api: IntegralNotesApi = {
+  browsePythonEntryFile: () => ipcRenderer.invoke("integral:browsePythonEntryFile"),
+  browsePythonSupportFiles: (entryAbsolutePath) =>
+    ipcRenderer.invoke("integral:browsePythonSupportFiles", entryAbsolutePath),
+  createSourceChunk: (request) => ipcRenderer.invoke("integral:createSourceChunk", request),
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
   zoomIn: () => adjustZoomLevel("in"),
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),
+  getIntegralAssetCatalog: () => ipcRenderer.invoke("integral:getAssetCatalog"),
+  importBlobDirectories: () => ipcRenderer.invoke("integral:importBlobDirectories"),
+  importBlobFiles: () => ipcRenderer.invoke("integral:importBlobFiles"),
+  inspectChunk: (chunkId) => ipcRenderer.invoke("integral:inspectChunk", chunkId),
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
+  registerPythonScript: (request) => ipcRenderer.invoke("integral:registerPythonScript", request),
   readNote: (relativePath) => ipcRenderer.invoke("workspace:readNote", relativePath),
   saveNote: (relativePath, content) =>
     ipcRenderer.invoke("workspace:saveNote", relativePath, content),
@@ -38,6 +47,7 @@ const api: IntegralNotesApi = {
   renameEntry: (request) => ipcRenderer.invoke("workspace:renameEntry", request),
   deleteEntry: (request) => ipcRenderer.invoke("workspace:deleteEntry", request),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("plugins:uninstall", pluginId),
+  executeIntegralBlock: (request) => ipcRenderer.invoke("integral:executeBlock", request),
   executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request)
 };
 

@@ -1,45 +1,31 @@
-import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
+import type {
+  IntegralBlockDocument,
+  IntegralBlockTypeDefinition
+} from "../shared/integral";
 
-interface JsonRecord {
-  [key: string]: unknown;
-}
+import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
 
 export const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
 
-export interface IntegralJsonBlock extends JsonRecord {
-  params?: JsonRecord;
-  type: string;
-}
+export interface IntegralJsonBlock extends IntegralBlockDocument {}
 
-export interface IntegralBlockActionDefinition {
-  busyLabel: string;
-  id: string;
-  label: string;
-}
+export type IntegralBlockDefinition = IntegralBlockTypeDefinition;
 
-export interface IntegralBlockDefinition {
-  actions?: IntegralBlockActionDefinition[];
-  description: string;
-  hasRenderer: boolean;
-  pluginDescription: string;
-  pluginDisplayName: string;
-  pluginId: string;
-  pluginNamespace: string;
-  pluginOrigin: "external";
-  pluginVersion: string;
-  title: string;
-  type: string;
-}
-
-export function getIntegralBlockDefinition(type: string): IntegralBlockDefinition | null {
-  return getInstalledIntegralBlockDefinition(type);
+export function getIntegralBlockDefinition(
+  pluginId: string,
+  blockType: string
+): IntegralBlockDefinition | null {
+  return getInstalledIntegralBlockDefinition(pluginId, blockType);
 }
 
 export function isIntegralBlockLanguage(language: string): boolean {
   return language.trim().toLowerCase() === INTEGRAL_BLOCK_LANGUAGE;
 }
 
-export function parseIntegralJsonBlock(language: string, content: string): IntegralJsonBlock | null {
+export function parseIntegralJsonBlock(
+  language: string,
+  content: string
+): IntegralJsonBlock | null {
   if (!isIntegralBlockLanguage(language)) {
     return null;
   }
@@ -51,63 +37,88 @@ export function parseIntegralJsonBlock(language: string, content: string): Integ
       return null;
     }
 
-    const type = parsed.type;
+    const plugin = readRequiredString(parsed.plugin);
+    const blockType = readRequiredString(parsed["block-type"]);
 
-    if (typeof type !== "string" || type.trim().length === 0) {
+    if (plugin === null || blockType === null) {
       return null;
     }
 
-    const params = isJsonRecord(parsed.params) ? parsed.params : undefined;
-
     return {
-      ...parsed,
-      params,
-      type
+      "block-type": blockType,
+      id: readOptionalString(parsed.id) ?? undefined,
+      inputs: normalizeSlotMap(parsed.inputs),
+      outputs: normalizeSlotMap(parsed.outputs),
+      params: isJsonRecord(parsed.params) ? parsed.params : {},
+      plugin
     };
   } catch {
     return null;
   }
 }
 
-export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
-  return <GenericBlockBody block={block} />;
+export function createInitialIntegralBlock(
+  definition: IntegralBlockDefinition
+): IntegralJsonBlock {
+  return {
+    "block-type": definition.blockType,
+    id: createBlockId(),
+    inputs: Object.fromEntries(definition.inputSlots.map((slot) => [slot.name, null])),
+    outputs: Object.fromEntries(definition.outputSlots.map((slot) => [slot.name, null])),
+    params: {},
+    plugin: definition.pluginId
+  };
 }
 
-function GenericBlockBody({ block }: { block: IntegralJsonBlock }): JSX.Element {
-  const params = block.params ?? {};
-  const paramKeys = Object.keys(params);
-  const typeSegments = block.type.split(".");
+export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
+  const inputEntries = Object.entries(block.inputs);
+  const outputEntries = Object.entries(block.outputs);
 
   return (
     <>
       <div className="integral-json-preview__stats">
-        <StatCard label="Type" value={typeSegments[typeSegments.length - 1] ?? block.type} />
-        <StatCard label="Params" value={`${paramKeys.length}`} />
-        <StatCard label="State" value="Fallback" />
+        <StatCard label="Plugin" value={block.plugin} />
+        <StatCard label="Inputs" value={`${inputEntries.length}`} />
+        <StatCard label="Outputs" value={`${outputEntries.length}`} />
       </div>
 
       <section className="integral-json-preview__section">
         <div className="integral-json-preview__section-header">
-          <span>Registered Keys</span>
-          <span>{paramKeys.length > 0 ? "generic preview" : "empty"}</span>
+          <span>Input Slots</span>
+          <span>{inputEntries.length > 0 ? "chunk refs" : "empty"}</span>
         </div>
 
         <div className="integral-json-preview__chips">
-          {paramKeys.length > 0 ? (
-            paramKeys.map((key) => (
-              <span className="integral-json-preview__chip" key={key}>
-                {key}
+          {inputEntries.length > 0 ? (
+            inputEntries.map(([slotName, chunkId]) => (
+              <span className="integral-json-preview__chip" key={`input-${slotName}`}>
+                {slotName}: {chunkId ?? "null"}
               </span>
             ))
           ) : (
-            <span className="integral-json-preview__empty-chip">params なし</span>
+            <span className="integral-json-preview__empty-chip">input なし</span>
           )}
         </div>
       </section>
 
-      <p className="integral-json-preview__note">
-        plugin renderer が未登録または読込失敗のため、汎用 preview を表示しています。
-      </p>
+      <section className="integral-json-preview__section">
+        <div className="integral-json-preview__section-header">
+          <span>Output Slots</span>
+          <span>{outputEntries.length > 0 ? "latest chunks" : "empty"}</span>
+        </div>
+
+        <div className="integral-json-preview__chips">
+          {outputEntries.length > 0 ? (
+            outputEntries.map(([slotName, chunkId]) => (
+              <span className="integral-json-preview__chip" key={`output-${slotName}`}>
+                {slotName}: {chunkId ?? "null"}
+              </span>
+            ))
+          ) : (
+            <span className="integral-json-preview__empty-chip">output なし</span>
+          )}
+        </div>
+      </section>
     </>
   );
 }
@@ -121,6 +132,31 @@ function StatCard({ label, value }: { label: string; value: string }): JSX.Eleme
   );
 }
 
-function isJsonRecord(value: unknown): value is JsonRecord {
+function normalizeSlotMap(value: unknown): Record<string, string | null> {
+  if (!isJsonRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, candidate]) => [
+      key,
+      typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : null
+    ])
+  );
+}
+
+function readRequiredString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function createBlockId(): string {
+  return `BLK-${crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -67,7 +67,16 @@ export class WorkspaceService {
   }
 
   async ensureWorkspaceReady(): Promise<void> {
-    await fs.mkdir(this.getConfiguredRootPath(), { recursive: true });
+    const rootPath = this.getConfiguredRootPath();
+
+    await fs.mkdir(rootPath, { recursive: true });
+    await Promise.all([
+      fs.mkdir(path.join(rootPath, "Notes"), { recursive: true }),
+      fs.mkdir(path.join(rootPath, "Artifacts"), { recursive: true }),
+      fs.mkdir(path.join(rootPath, "blob"), { recursive: true }),
+      fs.mkdir(path.join(rootPath, ".chunk"), { recursive: true }),
+      fs.mkdir(path.join(rootPath, ".py-scripts"), { recursive: true })
+    ]);
   }
 
   async getSnapshot(): Promise<WorkspaceSnapshot | null> {

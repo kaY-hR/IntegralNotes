@@ -2,6 +2,11 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 
 import type {
+  CreateSourceChunkRequest,
+  ExecuteIntegralBlockRequest,
+  RegisterPythonScriptRequest
+} from "../shared/integral";
+import type {
   CreateEntryRequest,
   DeleteEntryRequest,
   ExecuteIntegralActionRequest,
@@ -12,6 +17,7 @@ import {
   PluginRegistry,
   resolveInstalledPluginRootPath
 } from "./pluginRegistry";
+import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { WorkspaceService } from "./workspaceService";
 
 function resolveInitialWorkspacePath(): string | undefined {
@@ -37,6 +43,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 let pluginRegistry: PluginRegistry | null = null;
+let integralWorkspaceService: IntegralWorkspaceService | null = null;
 const MIN_ZOOM_LEVEL = -3;
 const MAX_ZOOM_LEVEL = 3;
 const ZOOM_LEVEL_STEP = 0.5;
@@ -129,6 +136,98 @@ function registerIpcHandlers(): void {
 
     return snapshot;
   });
+  ipcMain.handle("integral:getAssetCatalog", async () => getIntegralWorkspaceService().listAssetCatalog());
+  ipcMain.handle("integral:importBlobFiles", async () => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
+      properties: ["openFile", "multiSelections"],
+      title: "Import Files as Blobs"
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return getIntegralWorkspaceService().importBlobPaths(result.filePaths);
+  });
+  ipcMain.handle("integral:importBlobDirectories", async () => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
+      properties: ["openDirectory", "multiSelections"],
+      title: "Import Folders as Blobs"
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return getIntegralWorkspaceService().importBlobPaths(result.filePaths);
+  });
+  ipcMain.handle("integral:createSourceChunk", async (_event, request: CreateSourceChunkRequest) =>
+    getIntegralWorkspaceService().createSourceChunk(request)
+  );
+  ipcMain.handle("integral:inspectChunk", async (_event, chunkId: string) =>
+    getIntegralWorkspaceService().inspectChunk(chunkId)
+  );
+  ipcMain.handle("integral:browsePythonEntryFile", async () => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
+      filters: [
+        {
+          extensions: ["py"],
+          name: "Python"
+        }
+      ],
+      properties: ["openFile"],
+      title: "Select Python Entry"
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return getIntegralWorkspaceService().describePythonEntryFile(result.filePaths[0]);
+  });
+  ipcMain.handle("integral:browsePythonSupportFiles", async (_event, entryAbsolutePath: string | null) => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      defaultPath:
+        entryAbsolutePath && entryAbsolutePath.trim().length > 0
+          ? path.dirname(entryAbsolutePath)
+          : workspaceService.currentRootPath ?? app.getPath("documents"),
+      properties: ["openFile", "multiSelections"],
+      title: "Select Additional Bundled Files"
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return result.filePaths;
+  });
+  ipcMain.handle(
+    "integral:registerPythonScript",
+    async (_event, request: RegisterPythonScriptRequest) =>
+      getIntegralWorkspaceService().registerPythonScript(request)
+  );
+  ipcMain.handle("integral:executeBlock", async (_event, request: ExecuteIntegralBlockRequest) =>
+    getIntegralWorkspaceService().executeBlock(request)
+  );
   ipcMain.handle("plugins:getInstallRootPath", async () => getPluginRegistry().getInstallRootPath());
   ipcMain.handle("plugins:listInstalled", async () => getPluginRegistry().listInstalledPlugins());
   ipcMain.handle("plugins:installFromZip", async () => {
@@ -189,6 +288,14 @@ function getPluginRegistry(): PluginRegistry {
   return pluginRegistry;
 }
 
+function getIntegralWorkspaceService(): IntegralWorkspaceService {
+  if (integralWorkspaceService === null) {
+    throw new Error("integral workspace service is not ready.");
+  }
+
+  return integralWorkspaceService;
+}
+
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
@@ -209,6 +316,7 @@ if (!hasSingleInstanceLock) {
     pluginRegistry = new PluginRegistry({
       installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
     });
+    integralWorkspaceService = new IntegralWorkspaceService(workspaceService);
     registerIpcHandlers();
     await createMainWindow();
 

@@ -3,10 +3,16 @@ import { commandsCtx } from "@milkdown/kit/core";
 import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
 import { insert } from "@milkdown/kit/utils";
 
-import type { PluginBlockContribution } from "../shared/plugins";
+import type { IntegralBlockTypeDefinition } from "../shared/integral";
 
-import { INTEGRAL_BLOCK_LANGUAGE } from "./integralBlockRegistry";
-import { getInstalledIntegralPlugins } from "./integralPluginRuntime";
+import {
+  INTEGRAL_BLOCK_LANGUAGE,
+  createInitialIntegralBlock
+} from "./integralBlockRegistry";
+import { getAvailableIntegralBlockTypes } from "./integralPluginRuntime";
+
+export const OPEN_PYTHON_SCRIPT_DIALOG_EVENT = "integral:open-python-script-dialog";
+export const INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT = "integral:insert-block-markdown";
 
 interface IntegralSnippetTemplate {
   key: string;
@@ -29,42 +35,20 @@ function toIntegralCodeBlock(value: unknown): string {
   return [`\`\`\`${INTEGRAL_BLOCK_LANGUAGE}`, JSON.stringify(value, null, 2), "```"].join("\n");
 }
 
-const KNOWN_SNIPPET_TEMPLATES: Readonly<Record<string, { label: string; value: unknown }>> = {
-  "LC.Method.Gradient": {
-    label: "LCのグラジエント設定",
-    value: {
-      type: "LC.Method.Gradient",
-      params: {
-        "analysis-time": 8,
-        "time-prog": [
-          { time: 0, Conc: 10 },
-          { time: 8, Conc: 100 }
-        ]
-      }
-    }
-  },
-  "StandardGraphs.Chromatogram": {
-    label: "クロマトグラム表示",
-    value: {
-      type: "StandardGraphs.Chromatogram",
-      params: {
-        data: ["lc1.lcd", "lc2.lcd"]
-      }
-    }
-  }
-};
-
 export function createIntegralSnippetFeatureConfigs(): NonNullable<CrepeConfig["featureConfigs"]> {
   return {
     [Crepe.Feature.BlockEdit]: {
       buildMenu: (builder) => {
         const snippets = createIntegralSnippetTemplates();
-
-        if (snippets.length === 0) {
-          return;
-        }
-
         const integralGroup = builder.addGroup("integral", "Integral");
+
+        integralGroup.addItem("integral-register-python-script", {
+          icon: SNIPPET_ICON,
+          label: "Python Script を登録",
+          onRun: () => {
+            window.dispatchEvent(new CustomEvent(OPEN_PYTHON_SCRIPT_DIALOG_EVENT));
+          }
+        });
 
         for (const snippet of snippets) {
           integralGroup.addItem(snippet.key, {
@@ -84,24 +68,21 @@ export function createIntegralSnippetFeatureConfigs(): NonNullable<CrepeConfig["
 }
 
 function createIntegralSnippetTemplates(): IntegralSnippetTemplate[] {
-  const snippets: IntegralSnippetTemplate[] = [];
-
-  for (const plugin of getInstalledIntegralPlugins()) {
-    for (const block of plugin.blocks) {
-      snippets.push(toIntegralSnippetTemplate(block));
-    }
-  }
-
-  return snippets;
+  return getAvailableIntegralBlockTypes()
+    .map((definition) => toIntegralSnippetTemplate(definition))
+    .sort((left, right) => left.label.localeCompare(right.label, "ja"));
 }
 
-function toIntegralSnippetTemplate(block: PluginBlockContribution): IntegralSnippetTemplate {
-  const knownTemplate = KNOWN_SNIPPET_TEMPLATES[block.type];
-
+function toIntegralSnippetTemplate(
+  definition: IntegralBlockTypeDefinition
+): IntegralSnippetTemplate {
   return {
-    key: `integral-${toSnippetKeySegment(block.type)}`,
-    label: knownTemplate?.label ?? block.title,
-    markdown: toIntegralCodeBlock(knownTemplate?.value ?? { type: block.type })
+    key: `integral-${toSnippetKeySegment(`${definition.pluginId}-${definition.blockType}`)}`,
+    label:
+      definition.pluginId === "general-analysis"
+        ? `${definition.title} [Python]`
+        : definition.title,
+    markdown: toIntegralCodeBlock(createInitialIntegralBlock(definition))
   };
 }
 

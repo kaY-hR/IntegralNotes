@@ -1,4 +1,16 @@
 import type { InstalledPluginDefinition } from "./plugins";
+import type {
+  CreateSourceChunkRequest,
+  CreateSourceChunkResult,
+  ExecuteIntegralBlockRequest,
+  ExecuteIntegralBlockResult,
+  ImportBlobsResult,
+  IntegralAssetCatalog,
+  IntegralChunkInspection,
+  PythonEntrySelection,
+  RegisterPythonScriptRequest,
+  RegisterPythonScriptResult
+} from "./integral";
 
 export type WorkspaceEntryKind = "directory" | "file";
 
@@ -87,21 +99,34 @@ export interface UninstallPluginResult {
 }
 
 export interface IntegralNotesApi {
+  browsePythonEntryFile: () => Promise<PythonEntrySelection | null>;
+  browsePythonSupportFiles: (entryAbsolutePath: string | null) => Promise<string[] | null>;
+  createSourceChunk: (request: CreateSourceChunkRequest) => Promise<CreateSourceChunkResult>;
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot | null>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
+  getIntegralAssetCatalog: () => Promise<IntegralAssetCatalog>;
+  importBlobDirectories: () => Promise<ImportBlobsResult | null>;
+  importBlobFiles: () => Promise<ImportBlobsResult | null>;
+  inspectChunk: (chunkId: string) => Promise<IntegralChunkInspection>;
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
   loadPluginRendererDocument: (pluginId: string) => Promise<string>;
+  registerPythonScript: (
+    request: RegisterPythonScriptRequest
+  ) => Promise<RegisterPythonScriptResult>;
   readNote: (relativePath: string) => Promise<NoteDocument>;
   saveNote: (relativePath: string, content: string) => Promise<NoteDocument>;
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;
   renameEntry: (request: RenameEntryRequest) => Promise<RenameEntryResult>;
   deleteEntry: (request: DeleteEntryRequest) => Promise<DeleteEntryResult>;
   uninstallPlugin: (pluginId: string) => Promise<UninstallPluginResult>;
+  executeIntegralBlock: (
+    request: ExecuteIntegralBlockRequest
+  ) => Promise<ExecuteIntegralBlockResult>;
   executeIntegralAction: (
     request: ExecuteIntegralActionRequest
   ) => Promise<ExecuteIntegralActionResult>;
