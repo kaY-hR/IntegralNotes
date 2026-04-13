@@ -164,10 +164,10 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.chunk\\CNK-7K2M9Q4D"
+    "samples": "C:\\Workspace\\chunk\\CNK-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\.chunk\\CNK-9X4Q2M1A"
+    "result": "C:\\Workspace\\chunk\\CNK-9X4Q2M1A"
   },
   "params": {}
 }

@@ -591,6 +591,16 @@ input:focus-visible {
   box-shadow: 0 0 0 1px rgba(15, 108, 189, 0.18);
 }
 
+.editor-surface .milkdown .ProseMirror [data-integral-code-block="true"].ProseMirror-selectednode {
+  background: transparent;
+  outline: none;
+}
+
+.editor-surface .milkdown .ProseMirror [data-integral-code-block="true"].ProseMirror-selectednode::selection,
+.editor-surface .milkdown .ProseMirror [data-integral-code-block="true"].ProseMirror-selectednode ::selection {
+  background: transparent;
+}
+
 .editor-surface .milkdown .integral-code-block--display {
   gap: 8px;
 }
@@ -1016,6 +1026,7 @@ input:focus-visible {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 200;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -1023,6 +1034,7 @@ input:focus-visible {
 }
 
 .dialog-card {
+  position: relative;
   width: min(420px, 100%);
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1041,6 +1053,16 @@ input:focus-visible {
 .dialog-card--data-registration {
   width: min(760px, 100%);
   max-height: min(760px, calc(100vh - 40px));
+}
+
+body.integral-dialog-open .milkdown .milkdown-block-handle,
+body.integral-dialog-open .milkdown .milkdown-slash-menu {
+  display: none !important;
+  pointer-events: none;
+}
+
+body.integral-dialog-open .milkdown .crepe-placeholder::before {
+  content: none !important;
 }
 
 .tree-context-menu {

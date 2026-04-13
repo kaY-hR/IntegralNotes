@@ -42,3 +42,9 @@
 * source chunk は `kind=source-bundle`、derived chunk は既定で `block-type.slotName` kind にしたい
 * renderable な `html / image / text` は標準表示 block で描画し、可視化 plugin は renderable chunk を生成する処理 plugin とみなしたい
 * 再実行時は新しい output chunk を生成し、未参照の古い chunk は GC できるようにしたい
+
+## 6. shimadzu-lc migration を進めたい
+優先重み:6
+
+* `shimadzu-lc` の migration を進めたい
+* `standard-graphs` は一旦削除してもよい

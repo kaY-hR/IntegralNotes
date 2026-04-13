@@ -29,8 +29,8 @@ import { WorkspaceService } from "./workspaceService";
 const execFileAsync = promisify(execFile);
 
 const ARTIFACTS_DIRECTORY = "Artifacts";
-const BLOBS_DIRECTORY = "blob";
-const CHUNKS_DIRECTORY = ".chunk";
+const BLOBS_DIRECTORY = ".blob";
+const CHUNKS_DIRECTORY = "chunk";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
 
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
@@ -527,7 +527,9 @@ export class IntegralWorkspaceService {
   }
 
   private async writeBlobArtifactNote(metadata: BlobMetadata): Promise<void> {
-    const artifactPath = this.resolveWorkspacePath(`${ARTIFACTS_DIRECTORY}/${metadata.blobId}.md`);
+    const artifactPath = this.resolveWorkspacePath(
+      `${ARTIFACTS_DIRECTORY}/${createBlobArtifactFileName(metadata.originalName, metadata.blobId)}`
+    );
     const payloadRelativePath = path
       .relative(path.dirname(artifactPath), path.join(this.resolveBlobRootPath(metadata.blobId), "payload"))
       .split(path.sep)
@@ -745,7 +747,7 @@ export class IntegralWorkspaceService {
 
   private toBlobSummary(metadata: BlobMetadata): IntegralBlobSummary {
     return {
-      artifactRelativePath: `${ARTIFACTS_DIRECTORY}/${metadata.blobId}.md`,
+      artifactRelativePath: `${ARTIFACTS_DIRECTORY}/${createBlobArtifactFileName(metadata.originalName, metadata.blobId)}`,
       blobId: metadata.blobId,
       createdAt: metadata.createdAt,
       originalName: metadata.originalName,
@@ -896,6 +898,20 @@ function normalizeSlotNames(slotNames: string[], label: string): string[] {
 
 function createOpaqueId(prefix: "BLB" | "BLK" | "CNK" | "PYS"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+function createBlobArtifactFileName(originalName: string, blobId: string): string {
+  const normalizedOriginalName = sanitizeFileNameSegment(originalName);
+  return `${normalizedOriginalName}_${blobId}.md`;
+}
+
+function sanitizeFileNameSegment(value: string): string {
+  const sanitized = value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
+    .replace(/[. ]+$/gu, "");
+
+  return sanitized.length > 0 ? sanitized : "blob";
 }
 
 async function collectRelativeFiles(rootPath: string, basePath = rootPath): Promise<string[]> {

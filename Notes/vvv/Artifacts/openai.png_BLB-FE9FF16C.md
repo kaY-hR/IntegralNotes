@@ -4,4 +4,4 @@
 - Blob ID: BLB-FE9FF16C
 - Source Kind: file
 - Created At: 2026-04-13T07:22:27.374Z
-- Payload: `../blob/BLB-FE9FF16C/payload`
+- Payload: `../.blob/BLB-FE9FF16C/payload`

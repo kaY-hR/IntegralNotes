@@ -23,6 +23,32 @@ interface PersistedWorkspaceState {
   rootPath?: string;
 }
 
+interface BlobArtifactMetadata {
+  blobId: string;
+  createdAt?: string;
+  originalName?: string;
+  sourceKind?: "directory" | "file";
+}
+
+interface ChunkArtifactMetadata {
+  kind?: string;
+}
+
+interface SourceChunkLinks {
+  members?: Array<{
+    blobId: string;
+    target: string;
+  }>;
+}
+
+const NOTES_DIRECTORY = "Notes";
+const ARTIFACTS_DIRECTORY = "Artifacts";
+const BLOBS_DIRECTORY = ".blob";
+const LEGACY_BLOBS_DIRECTORY = "blob";
+const CHUNKS_DIRECTORY = "chunk";
+const LEGACY_CHUNKS_DIRECTORY = ".chunk";
+const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
+
 export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
@@ -70,12 +96,18 @@ export class WorkspaceService {
     const rootPath = this.getConfiguredRootPath();
 
     await fs.mkdir(rootPath, { recursive: true });
+    await this.migrateLegacyIntegralStorageLayout(rootPath);
     await Promise.all([
-      fs.mkdir(path.join(rootPath, "Notes"), { recursive: true }),
-      fs.mkdir(path.join(rootPath, "Artifacts"), { recursive: true }),
-      fs.mkdir(path.join(rootPath, "blob"), { recursive: true }),
-      fs.mkdir(path.join(rootPath, ".chunk"), { recursive: true }),
-      fs.mkdir(path.join(rootPath, ".py-scripts"), { recursive: true })
+      fs.mkdir(path.join(rootPath, NOTES_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, ARTIFACTS_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, BLOBS_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, CHUNKS_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
+    ]);
+    await this.migrateLegacyBlobArtifactNotes(rootPath);
+    await Promise.all([
+      this.syncBlobArtifactNotes(rootPath),
+      this.syncSourceChunkLinks(rootPath)
     ]);
   }
 
@@ -317,6 +349,183 @@ export class WorkspaceService {
     return isDirectory || path.extname(name).toLowerCase() === ".md";
   }
 
+  private async migrateLegacyIntegralStorageLayout(rootPath: string): Promise<void> {
+    await this.migrateDirectory(path.join(rootPath, LEGACY_BLOBS_DIRECTORY), path.join(rootPath, BLOBS_DIRECTORY));
+    await this.migrateDirectory(path.join(rootPath, LEGACY_CHUNKS_DIRECTORY), path.join(rootPath, CHUNKS_DIRECTORY));
+  }
+
+  private async migrateDirectory(legacyPath: string, nextPath: string): Promise<void> {
+    if (!(await this.pathExists(legacyPath))) {
+      return;
+    }
+
+    if (!(await this.pathExists(nextPath))) {
+      await fs.rename(legacyPath, nextPath);
+      return;
+    }
+
+    const entries = await fs.readdir(legacyPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const sourcePath = path.join(legacyPath, entry.name);
+      const destinationPath = path.join(nextPath, entry.name);
+
+      if (await this.pathExists(destinationPath)) {
+        continue;
+      }
+
+      await fs.rename(sourcePath, destinationPath);
+    }
+
+    const remainingEntries = await fs.readdir(legacyPath);
+
+    if (remainingEntries.length === 0) {
+      await fs.rmdir(legacyPath);
+    }
+  }
+
+  private async migrateLegacyBlobArtifactNotes(rootPath: string): Promise<void> {
+    const blobsRootPath = path.join(rootPath, BLOBS_DIRECTORY);
+    const artifactsRootPath = path.join(rootPath, ARTIFACTS_DIRECTORY);
+    const entries = await fs.readdir(blobsRootPath, { withFileTypes: true });
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const metadata = await this.readJsonFile<BlobArtifactMetadata>(
+            path.join(blobsRootPath, entry.name, "blob.json")
+          );
+
+          if (!metadata?.blobId) {
+            return;
+          }
+
+          const nextArtifactPath = path.join(
+            artifactsRootPath,
+            createBlobArtifactFileName(metadata.originalName ?? metadata.blobId, metadata.blobId)
+          );
+
+          if (await this.pathExists(nextArtifactPath)) {
+            return;
+          }
+
+          const legacyArtifactPath = path.join(artifactsRootPath, `${metadata.blobId}.md`);
+
+          if (!(await this.pathExists(legacyArtifactPath))) {
+            return;
+          }
+
+          await fs.rename(legacyArtifactPath, nextArtifactPath);
+        })
+    );
+  }
+
+  private async syncBlobArtifactNotes(rootPath: string): Promise<void> {
+    const blobsRootPath = path.join(rootPath, BLOBS_DIRECTORY);
+    const artifactsRootPath = path.join(rootPath, ARTIFACTS_DIRECTORY);
+    const entries = await fs.readdir(blobsRootPath, { withFileTypes: true });
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const metadata = await this.readJsonFile<BlobArtifactMetadata>(
+            path.join(blobsRootPath, entry.name, "blob.json")
+          );
+
+          if (!metadata?.blobId) {
+            return;
+          }
+
+          const originalName = metadata.originalName?.trim() || metadata.blobId;
+          const artifactPath = path.join(
+            artifactsRootPath,
+            createBlobArtifactFileName(originalName, metadata.blobId)
+          );
+          const payloadRelativePath = path
+            .relative(path.dirname(artifactPath), path.join(blobsRootPath, metadata.blobId, "payload"))
+            .split(path.sep)
+            .join("/");
+          const lines = [
+            `# ${originalName}_${metadata.blobId}`,
+            "",
+            `- Original Name: ${originalName}`,
+            `- Blob ID: ${metadata.blobId}`,
+            `- Source Kind: ${metadata.sourceKind ?? "file"}`,
+            metadata.createdAt ? `- Created At: ${metadata.createdAt}` : null,
+            `- Payload: \`${payloadRelativePath}\``
+          ].filter((line): line is string => line !== null);
+
+          await fs.writeFile(artifactPath, `${lines.join("\n")}\n`, "utf8");
+        })
+    );
+  }
+
+  private async syncSourceChunkLinks(rootPath: string): Promise<void> {
+    const chunksRootPath = path.join(rootPath, CHUNKS_DIRECTORY);
+    const entries = await fs.readdir(chunksRootPath, { withFileTypes: true });
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const chunkRootPath = path.join(chunksRootPath, entry.name);
+          const metadata = await this.readJsonFile<ChunkArtifactMetadata>(
+            path.join(chunkRootPath, "chunk.json")
+          );
+
+          if (metadata?.kind !== "source-bundle") {
+            return;
+          }
+
+          const links = await this.readJsonFile<SourceChunkLinks>(path.join(chunkRootPath, "links.json"));
+
+          if (!links?.members || links.members.length === 0) {
+            return;
+          }
+
+          const nextLinks: SourceChunkLinks = {
+            members: links.members.map((member) => ({
+              blobId: member.blobId,
+              target: path
+                .relative(chunkRootPath, path.join(rootPath, BLOBS_DIRECTORY, member.blobId, "payload"))
+                .split(path.sep)
+                .join("/")
+            }))
+          };
+
+          if (JSON.stringify(nextLinks) === JSON.stringify(links)) {
+            return;
+          }
+
+          await fs.writeFile(
+            path.join(chunkRootPath, "links.json"),
+            JSON.stringify(nextLinks, null, 2),
+            "utf8"
+          );
+        })
+    );
+  }
+
+  private async readJsonFile<T>(filePath: string): Promise<T | null> {
+    try {
+      const content = await fs.readFile(filePath, "utf8");
+      return JSON.parse(content) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  private async pathExists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.access(targetPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async readPersistedRootPath(): Promise<string | undefined> {
     try {
       const stateContent = await fs.readFile(this.stateFilePath, "utf8");
@@ -366,4 +575,18 @@ export class WorkspaceService {
 
     return this.rootPath;
   }
+}
+
+function createBlobArtifactFileName(originalName: string, blobId: string): string {
+  const normalizedOriginalName = sanitizeFileNameSegment(originalName);
+  return `${normalizedOriginalName}_${blobId}.md`;
+}
+
+function sanitizeFileNameSegment(value: string): string {
+  const sanitized = value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
+    .replace(/[. ]+$/gu, "");
+
+  return sanitized.length > 0 ? sanitized : "blob";
 }

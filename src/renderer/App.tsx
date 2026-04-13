@@ -307,10 +307,27 @@ export function App(): JSX.Element {
   const selectedEntry = workspace ? findEntryByPath(workspace.entries, selectedEntryPath) : undefined;
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
   const activeTab = selectedTabPath ? openTabs[selectedTabPath] : undefined;
+  const hasBlockingDialog =
+    deleteDialog !== null ||
+    dataRegistrationDialogOpen ||
+    pythonScriptDialogOpen ||
+    pluginDialogOpen;
 
   useEffect(() => {
     openTabsRef.current = openTabs;
   }, [openTabs]);
+
+  useEffect(() => {
+    document.body.classList.toggle("integral-dialog-open", hasBlockingDialog);
+
+    if (hasBlockingDialog && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    return () => {
+      document.body.classList.remove("integral-dialog-open");
+    };
+  }, [hasBlockingDialog]);
 
   const syncTabLabel = (relativePath: string, nextName: string, dirty: boolean): void => {
     const tabId = toTabId(relativePath);
@@ -1201,7 +1218,7 @@ export function App(): JSX.Element {
   };
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-dialog-open={hasBlockingDialog ? "true" : "false"}>
       <header className="app-menubar">
         <button
           className="button button--ghost button--menu"
