@@ -196,7 +196,11 @@ class IntegralNotesBlockView implements NodeView {
       return false;
     }
 
-    return Boolean(target.closest("textarea, button, input, select, label, iframe"));
+    return Boolean(
+      target.closest(
+        "textarea, button, input, select, label, iframe, .integral-renderable-layout, .integral-renderable-card, .integral-renderable-card__image, .integral-renderable-card__text"
+      )
+    );
   }
 
   ignoreMutation(_mutation: ViewMutationRecord): boolean {
