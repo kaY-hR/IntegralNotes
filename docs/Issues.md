@@ -28,3 +28,17 @@
 * アップロードされたファイルは、設定で選ばれた保存先フォルダへ保存したい
 * マークダウン内の画像リンクは、保存先フォルダ内の実ファイルを指すパスへ更新したい
 * 相対パスで解決できるなら、マークダウンリンクは相対パスを優先したい
+
+## 5. blob/chunk/block ベースの解析基盤を設計・実装したい
+優先重み:9
+
+* すべての block を `id / plugin / block-type / params / inputs / outputs` の共通 schema に統一したい
+* 元データ登録単位は `blob`、処理入出力単位は `chunk` に分けたい
+* `1 input slot = 1 chunk`, `1 output slot = 1 chunk` を内部契約としたい
+* GUI 上だけ `1 input slot = N blobs` を許し、app が source chunk を自動生成したい
+* Python 解析は `general-analysis` plugin が `cwd/.py-scripts/` を走査して block-type を動的生成する形にしたい
+* `.py-scripts/PYS-.../` には `script.json`, entry, 同梱ファイルを置き、`block-type` はその `PYS-...` にしたい
+* Python block の `params` は MVP では `{}` 固定にし、`analysis-args.json` へ `inputs / outputs` の絶対パスだけを渡したい
+* source chunk は `kind=source-bundle`、derived chunk は既定で `block-type.slotName` kind にしたい
+* renderable な `html / image / text` は標準表示 block で描画し、可視化 plugin は renderable chunk を生成する処理 plugin とみなしたい
+* 再実行時は新しい output chunk を生成し、未参照の古い chunk は GC できるようにしたい
