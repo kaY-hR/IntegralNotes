@@ -62,6 +62,11 @@ interface SourceChunkLinks {
   }>;
 }
 
+interface InspectableFileEntry {
+  absolutePath: string;
+  relativePath: string;
+}
+
 interface PythonScriptManifest {
   createdAt: string;
   description: string;
@@ -288,13 +293,12 @@ export class IntegralWorkspaceService {
     }
 
     const chunkRootPath = this.resolveChunkRootPath(chunkId);
-    const relativeFilePaths = (await collectRelativeFiles(chunkRootPath)).filter(
-      (relativePath) => relativePath !== "chunk.json"
-    );
+    const inspectableFiles = await this.collectInspectableFiles(chunkRootPath, chunkMetadata);
+    const relativeFilePaths = inspectableFiles.map((entry) => entry.relativePath);
     const renderables = await Promise.all(
-      relativeFilePaths
-        .filter((relativePath) => isRenderableExtension(path.extname(relativePath)))
-        .map((relativePath) => this.readRenderableFile(chunkRootPath, relativePath))
+      inspectableFiles
+        .filter((entry) => isRenderableExtension(path.extname(entry.relativePath)))
+        .map((entry) => this.readRenderableFile(entry.absolutePath, entry.relativePath))
     );
 
     return {
@@ -529,9 +533,10 @@ export class IntegralWorkspaceService {
       .split(path.sep)
       .join("/");
     const lines = [
-      `# Blob ${metadata.blobId}`,
+      `# ${metadata.originalName}_${metadata.blobId}`,
       "",
       `- Original Name: ${metadata.originalName}`,
+      `- Blob ID: ${metadata.blobId}`,
       `- Source Kind: ${metadata.sourceKind}`,
       `- Created At: ${metadata.createdAt}`,
       `- Payload: \`${payloadRelativePath}\``
@@ -601,11 +606,9 @@ export class IntegralWorkspaceService {
     }
 
     const chunkRootPath = this.resolveChunkRootPath(chunkId);
-    const relativeFilePaths = (await collectRelativeFiles(chunkRootPath)).filter(
-      (relativePath) => relativePath !== "chunk.json"
-    );
-    const renderableCount = relativeFilePaths.filter((relativePath) =>
-      isRenderableExtension(path.extname(relativePath))
+    const inspectableFiles = await this.collectInspectableFiles(chunkRootPath, metadata);
+    const renderableCount = inspectableFiles.filter((entry) =>
+      isRenderableExtension(path.extname(entry.relativePath))
     ).length;
 
     return {
@@ -648,10 +651,9 @@ export class IntegralWorkspaceService {
   }
 
   private async readRenderableFile(
-    chunkRootPath: string,
+    absolutePath: string,
     relativePath: string
   ): Promise<IntegralRenderableFile> {
-    const absolutePath = path.join(chunkRootPath, relativePath);
     const extension = path.extname(relativePath).toLowerCase();
 
     if (HTML_EXTENSIONS.has(extension)) {
@@ -682,6 +684,65 @@ export class IntegralWorkspaceService {
     };
   }
 
+  private async collectInspectableFiles(
+    chunkRootPath: string,
+    metadata: ChunkMetadata
+  ): Promise<InspectableFileEntry[]> {
+    if (metadata.kind !== "source-bundle") {
+      const relativeFilePaths = (await collectRelativeFiles(chunkRootPath)).filter(
+        (relativePath) => relativePath !== "chunk.json" && relativePath !== "links.json"
+      );
+
+      return relativeFilePaths.map((relativePath) => ({
+        absolutePath: path.join(chunkRootPath, relativePath),
+        relativePath
+      }));
+    }
+
+    const links = await readJsonFile<SourceChunkLinks>(path.join(chunkRootPath, "links.json"));
+
+    if (!links) {
+      return [];
+    }
+
+    const inspectableFiles: InspectableFileEntry[] = [];
+
+    for (const member of links.members) {
+      const payloadRootPath = this.resolveSourceBundleTargetPath(chunkRootPath, member.target);
+
+      if (!(await pathExists(payloadRootPath))) {
+        continue;
+      }
+
+      const blobMetadata = await this.readBlobMetadata(member.blobId);
+      const memberLabel = blobMetadata?.originalName?.trim() || member.blobId;
+      const memberFiles = await collectRelativeFiles(payloadRootPath);
+
+      for (const relativePath of memberFiles) {
+        inspectableFiles.push({
+          absolutePath: path.join(payloadRootPath, relativePath),
+          relativePath: toInspectableSourcePath(memberLabel, relativePath)
+        });
+      }
+    }
+
+    return inspectableFiles.sort((left, right) =>
+      left.relativePath.localeCompare(right.relativePath, "ja")
+    );
+  }
+
+  private resolveSourceBundleTargetPath(chunkRootPath: string, target: string): string {
+    const absolutePath = path.resolve(chunkRootPath, target);
+    const rootPath = this.getRootPath();
+    const normalizedRelative = path.relative(rootPath, absolutePath);
+
+    if (normalizedRelative.startsWith("..") || path.isAbsolute(normalizedRelative)) {
+      throw new Error("source chunk links.json がワークスペース外を指しています。");
+    }
+
+    return absolutePath;
+  }
+
   private toBlobSummary(metadata: BlobMetadata): IntegralBlobSummary {
     return {
       artifactRelativePath: `${ARTIFACTS_DIRECTORY}/${metadata.blobId}.md`,
@@ -710,6 +771,20 @@ function buildBlockTypeCatalog(
   scripts: readonly IntegralScriptAssetSummary[]
 ): IntegralBlockTypeDefinition[] {
   return [buildDisplayBlockType(), ...scripts.map((script) => buildPythonBlockType(script))];
+}
+
+function toInspectableSourcePath(memberLabel: string, relativePath: string): string {
+  const normalizedRelativePath = relativePath.split(path.sep).join("/");
+
+  if (normalizedRelativePath === memberLabel) {
+    return memberLabel;
+  }
+
+  if (normalizedRelativePath.startsWith(`${memberLabel}/`)) {
+    return normalizedRelativePath;
+  }
+
+  return `${memberLabel}/${normalizedRelativePath}`;
 }
 
 function buildDisplayBlockType(): IntegralBlockTypeDefinition {

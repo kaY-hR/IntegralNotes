@@ -103,7 +103,7 @@ export function ChunkPickerDialog({
               }}
               type="button"
             >
-              Select
+              選択
             </button>
           </div>
         </div>
@@ -115,17 +115,48 @@ export function ChunkPickerDialog({
 interface BlobPickerDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
+  onImportedBlobs?: (
+    blobs: readonly IntegralBlobSummary[],
+    kind: "directories" | "files"
+  ) => Promise<void> | void;
   onSelectChunk: (chunkId: string) => void;
 }
 
-export function BlobPickerDialog({
+interface BlobSelectionDialogProps {
+  confirmLabel: string;
+  description: string;
+  initialSelectedBlobIds?: readonly string[];
+  onClose: () => void;
+  onError: (message: string) => void;
+  onImportedBlobs?: (
+    blobs: readonly IntegralBlobSummary[],
+    kind: "directories" | "files"
+  ) => Promise<void> | void;
+  onSelect: (blobIds: string[]) => Promise<void> | void;
+  pendingLabel?: string;
+  title: string;
+}
+
+export function BlobSelectionDialog({
+  confirmLabel,
+  description,
+  initialSelectedBlobIds = [],
   onClose,
   onError,
-  onSelectChunk
-}: BlobPickerDialogProps): JSX.Element {
+  onImportedBlobs,
+  onSelect,
+  pendingLabel,
+  title
+}: BlobSelectionDialogProps): JSX.Element {
   const [blobs, setBlobs] = useState<IntegralBlobSummary[]>([]);
-  const [selectedBlobIds, setSelectedBlobIds] = useState<Set<string>>(new Set());
+  const [selectedBlobIds, setSelectedBlobIds] = useState<Set<string>>(
+    () => new Set(initialSelectedBlobIds)
+  );
   const [pending, setPending] = useState(false);
+  const selectionSeed = useMemo(
+    () => [...initialSelectedBlobIds].sort((left, right) => left.localeCompare(right, "ja")).join("\u0000"),
+    [initialSelectedBlobIds]
+  );
 
   const reloadBlobs = async (): Promise<void> => {
     const catalog = await window.integralNotes.getIntegralAssetCatalog();
@@ -133,12 +164,16 @@ export function BlobPickerDialog({
   };
 
   useEffect(() => {
+    setSelectedBlobIds(new Set(initialSelectedBlobIds));
+  }, [selectionSeed]);
+
+  useEffect(() => {
     void reloadBlobs().catch((error) => {
       onError(toErrorMessage(error));
     });
   }, [onError]);
 
-  const importBlobs = async (kind: "files" | "directories"): Promise<void> => {
+  const importBlobs = async (kind: "directories" | "files"): Promise<void> => {
     setPending(true);
 
     try {
@@ -157,6 +192,7 @@ export function BlobPickerDialog({
         return next;
       });
       await reloadBlobs();
+      await onImportedBlobs?.(result.blobs, kind);
     } catch (error) {
       onError(toErrorMessage(error));
     } finally {
@@ -164,15 +200,11 @@ export function BlobPickerDialog({
     }
   };
 
-  const createSourceChunk = async (): Promise<void> => {
+  const commitSelection = async (): Promise<void> => {
     setPending(true);
 
     try {
-      const result = await window.integralNotes.createSourceChunk({
-        blobIds: Array.from(selectedBlobIds)
-      });
-
-      onSelectChunk(result.chunk.chunkId);
+      await onSelect(Array.from(selectedBlobIds));
     } catch (error) {
       onError(toErrorMessage(error));
     } finally {
@@ -185,23 +217,39 @@ export function BlobPickerDialog({
       <div className="dialog-card dialog-card--asset-picker">
         <div className="dialog-card__header">
           <p className="dialog-card__eyebrow">Blob Picker</p>
-          <h2>Blob から source chunk を作成</h2>
-          <p>複数 blob を選ぶと app が `source-bundle` chunk を生成します。</p>
+          <h2>{title}</h2>
+          <p>{description}</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--asset-picker">
           <div className="asset-picker__toolbar">
-            <button className="button button--ghost" disabled={pending} onClick={() => {
-              void importBlobs("files");
-            }} type="button">
+            <button
+              className="button button--ghost"
+              disabled={pending}
+              onClick={() => {
+                void importBlobs("files");
+              }}
+              type="button"
+            >
               ファイルを追加
             </button>
-            <button className="button button--ghost" disabled={pending} onClick={() => {
-              void importBlobs("directories");
-            }} type="button">
+            <button
+              className="button button--ghost"
+              disabled={pending}
+              onClick={() => {
+                void importBlobs("directories");
+              }}
+              type="button"
+            >
               フォルダを追加
             </button>
           </div>
+
+          <p className="asset-picker__hint">
+            {selectedBlobIds.size > 0
+              ? `${selectedBlobIds.size} 件の blob を選択中`
+              : "複数 blob を選択できます。"}
+          </p>
 
           <div className="asset-picker__list">
             {blobs.length > 0 ? (
@@ -228,9 +276,9 @@ export function BlobPickerDialog({
                       type="checkbox"
                     />
                     <div>
-                      <strong>{blob.blobId}</strong>
+                      <strong>{blob.originalName}</strong>
                       <div className="asset-picker__meta">
-                        <span>{blob.originalName}</span>
+                        <span>{blob.blobId}</span>
                         <span>{blob.sourceKind}</span>
                       </div>
                     </div>
@@ -250,16 +298,42 @@ export function BlobPickerDialog({
               className="button button--primary"
               disabled={pending || selectedBlobIds.size === 0}
               onClick={() => {
-                void createSourceChunk();
+                void commitSelection();
               }}
               type="button"
             >
-              {pending ? "作成中..." : "Create Source Chunk"}
+              {pending ? pendingLabel ?? confirmLabel : confirmLabel}
             </button>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export function BlobPickerDialog({
+  onClose,
+  onError,
+  onImportedBlobs,
+  onSelectChunk
+}: BlobPickerDialogProps): JSX.Element {
+  return (
+    <BlobSelectionDialog
+      confirmLabel="Create Source Chunk"
+      description="複数 blob を選ぶと app が `source-bundle` chunk を生成します。"
+      onClose={onClose}
+      onError={onError}
+      onImportedBlobs={onImportedBlobs}
+      onSelect={async (blobIds) => {
+        const result = await window.integralNotes.createSourceChunk({
+          blobIds
+        });
+
+        onSelectChunk(result.chunk.chunkId);
+      }}
+      pendingLabel="作成中..."
+      title="Blob から source chunk を作成"
+    />
   );
 }
 

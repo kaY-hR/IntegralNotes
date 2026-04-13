@@ -1,7 +1,10 @@
 import * as FlexLayout from "flexlayout-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { RegisterPythonScriptResult } from "../shared/integral";
+import type {
+  IntegralBlobSummary,
+  RegisterPythonScriptResult
+} from "../shared/integral";
 import type {
   CreateEntryResult,
   DeleteEntryResult,
@@ -12,6 +15,7 @@ import type {
   WorkspaceSnapshot
 } from "../shared/workspace";
 import type { InstalledPluginDefinition } from "../shared/plugins";
+import { DataRegistrationDialog } from "./DataRegistrationDialog";
 import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { MilkdownEditor } from "./MilkdownEditor";
@@ -290,6 +294,7 @@ export function App(): JSX.Element {
   const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
   const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
+  const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
   const [pythonScriptDialogOpen, setPythonScriptDialogOpen] = useState(false);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
   const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
@@ -456,8 +461,20 @@ export function App(): JSX.Element {
     void refreshInstalledPluginState();
   };
 
+  const openDataRegistrationDialog = (): void => {
+    setDataRegistrationDialogOpen(true);
+  };
+
   const openPythonScriptDialog = (): void => {
     setPythonScriptDialogOpen(true);
+  };
+
+  const handleImportedBlobs = async (
+    blobs: readonly IntegralBlobSummary[],
+    kind: "directories" | "files"
+  ): Promise<void> => {
+    const unit = kind === "files" ? "ファイル" : "フォルダ";
+    await refreshWorkspace(`${blobs.length} 件の${unit} blob を登録しました。`);
   };
 
   const importBlobFiles = async (): Promise<void> => {
@@ -1197,21 +1214,10 @@ export function App(): JSX.Element {
         </button>
         <button
           className="button button--ghost button--menu"
-          onClick={() => {
-            void importBlobFiles();
-          }}
+          onClick={openDataRegistrationDialog}
           type="button"
         >
-          Import Files
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          onClick={() => {
-            void importBlobDirectories();
-          }}
-          type="button"
-        >
-          Import Folders
+          データ登録
         </button>
         <button
           className="button button--ghost button--menu"
@@ -1456,12 +1462,29 @@ export function App(): JSX.Element {
         />
       ) : null}
 
+      {dataRegistrationDialogOpen ? (
+        <DataRegistrationDialog
+          onClose={() => {
+            setDataRegistrationDialogOpen(false);
+          }}
+          onError={setStatusMessage}
+          onImportDirectories={() => importBlobDirectories()}
+          onImportFiles={() => importBlobFiles()}
+          onImportedBlobs={handleImportedBlobs}
+          onSourceChunkCreated={(chunkId) => {
+            setDataRegistrationDialogOpen(false);
+            setStatusMessage(`${chunkId} を source chunk として作成しました。`);
+          }}
+        />
+      ) : null}
+
       {pythonScriptDialogOpen ? (
         <PythonScriptDialog
           onClose={() => {
             setPythonScriptDialogOpen(false);
           }}
           onError={setStatusMessage}
+          onImportedBlobs={handleImportedBlobs}
           onRegistered={handlePythonScriptRegistered}
         />
       ) : null}

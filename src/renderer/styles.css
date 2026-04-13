@@ -1017,7 +1017,8 @@ input:focus-visible {
 }
 
 .dialog-card--python-script,
-.dialog-card--asset-picker {
+.dialog-card--asset-picker,
+.dialog-card--data-registration {
   width: min(760px, 100%);
   max-height: min(760px, calc(100vh - 40px));
 }
@@ -1079,7 +1080,8 @@ input:focus-visible {
 }
 
 .dialog-card__body--python-script,
-.dialog-card__body--asset-picker {
+.dialog-card__body--asset-picker,
+.dialog-card__body--data-registration {
   display: grid;
   gap: 14px;
   max-height: min(620px, calc(100vh - 180px));
@@ -1160,6 +1162,38 @@ input:focus-visible {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
+}
+
+.dialog-card--asset-picker .dialog-actions .button--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.dialog-card--asset-picker .dialog-actions .button--primary:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.data-registration-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 251, 0.96));
+}
+
+.data-registration-card p {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 0.82rem;
+}
+
+.data-registration-card__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .plugin-manager__toolbar,
@@ -1491,7 +1525,13 @@ input:focus-visible {
 }
 
 .integral-renderable-layout {
+  position: relative;
   min-height: 360px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #d6e2ee;
+  border-radius: 12px;
+  background: #ffffff;
 }
 
 .integral-renderable-layout .flexlayout__layout {
@@ -1522,6 +1562,13 @@ input:focus-visible {
   --color-splitter-hover: var(--accent);
 }
 
+.integral-renderable-layout .flexlayout__layout,
+.integral-renderable-layout .flexlayout__tabset_container,
+.integral-renderable-layout .flexlayout__tabset_content {
+  min-width: 0;
+  min-height: 0;
+}
+
 .integral-renderable-layout .flexlayout__tabset_header {
   border-bottom: 1px solid #d6e2ee;
 }
@@ -1534,8 +1581,10 @@ input:focus-visible {
   display: grid;
   gap: 10px;
   height: 100%;
+  min-width: 0;
   padding: 10px;
   background: #ffffff;
+  overflow: auto;
 }
 
 .integral-renderable-card__header span {
@@ -1620,7 +1669,8 @@ input:focus-visible {
   }
 
   .dialog-card--python-script,
-  .dialog-card--asset-picker {
+  .dialog-card--asset-picker,
+  .dialog-card--data-registration {
     width: min(100%, 100%);
     max-height: calc(100vh - 24px);
   }
@@ -1630,6 +1680,7 @@ input:focus-visible {
   .plugin-card__blocks li,
   .python-script-dialog__actions,
   .asset-picker__toolbar,
+  .data-registration-card__actions,
   .integral-slot-row,
   .integral-renderable-card__header,
   .python-script-dialog__file-list li,

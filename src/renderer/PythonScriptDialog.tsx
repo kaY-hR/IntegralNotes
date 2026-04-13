@@ -2,20 +2,25 @@ import { useMemo, useState } from "react";
 
 import type {
   IntegralBlockDocument,
+  IntegralBlobSummary,
   RegisterPythonScriptResult
 } from "../shared/integral";
 
-import { ChunkPickerDialog } from "./IntegralAssetDialogs";
+import { BlobSelectionDialog } from "./IntegralAssetDialogs";
 import { INTEGRAL_BLOCK_LANGUAGE } from "./integralBlockRegistry";
 
 interface PythonScriptDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
+  onImportedBlobs?: (
+    blobs: readonly IntegralBlobSummary[],
+    kind: "directories" | "files"
+  ) => Promise<void> | void;
   onRegistered: (result: RegisterPythonScriptResult, blockMarkdown: string) => void;
 }
 
 interface InputSlotDraft {
-  chunkId: string | null;
+  blobIds: string[];
   id: string;
   name: string;
 }
@@ -31,7 +36,7 @@ function toErrorMessage(error: unknown): string {
 
 function createInputSlotDraft(name = ""): InputSlotDraft {
   return {
-    chunkId: null,
+    blobIds: [],
     id: crypto.randomUUID(),
     name
   };
@@ -59,6 +64,7 @@ function toIntegralCodeBlock(value: unknown): string {
 export function PythonScriptDialog({
   onClose,
   onError,
+  onImportedBlobs,
   onRegistered
 }: PythonScriptDialogProps): JSX.Element {
   const [entryAbsolutePath, setEntryAbsolutePath] = useState("");
@@ -162,14 +168,29 @@ export function PythonScriptDialog({
         inputSlotNames,
         outputSlotNames
       });
+      const inputEntries = await Promise.all(
+        inputSlots
+          .map((slot) => ({
+            blobIds: slot.blobIds,
+            name: slot.name.trim()
+          }))
+          .filter((slot) => slot.name.length > 0)
+          .map(async (slot) => {
+            if (slot.blobIds.length === 0) {
+              return [slot.name, null] as const;
+            }
+
+            const sourceChunk = await window.integralNotes.createSourceChunk({
+              blobIds: slot.blobIds
+            });
+
+            return [slot.name, sourceChunk.chunk.chunkId] as const;
+          })
+      );
       const initialBlock: IntegralBlockDocument = {
         "block-type": result.blockType.blockType,
         id: createBlockId(),
-        inputs: Object.fromEntries(
-          inputSlots
-            .map((slot) => [slot.name.trim(), slot.chunkId] as const)
-            .filter(([slotName]) => slotName.length > 0)
-        ),
+        inputs: Object.fromEntries(inputEntries),
         outputs: Object.fromEntries(
           outputSlots
             .map((slot) => [slot.name.trim(), null] as const)
@@ -327,7 +348,9 @@ export function PythonScriptDialog({
                     }}
                     type="button"
                   >
-                    {slot.chunkId ?? "chunkを選択..."}
+                    {slot.blobIds.length > 0
+                      ? `${slot.blobIds.length} 件の blob を選択中`
+                      : "blobを選択..."}
                   </button>
                   <button
                     className="button button--ghost"
@@ -425,18 +448,25 @@ export function PythonScriptDialog({
       </div>
 
       {slotPickerTargetId ? (
-        <ChunkPickerDialog
+        <BlobSelectionDialog
+          confirmLabel="この blob を使う"
+          description="選択した blob 群から、登録時に source chunk を自動作成します。"
+          initialSelectedBlobIds={
+            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.blobIds ?? []
+          }
           onClose={() => {
             setSlotPickerTargetId(null);
           }}
           onError={onError}
-          onSelect={(chunkId) => {
+          onImportedBlobs={onImportedBlobs}
+          onSelect={(blobIds) => {
             updateInputSlot(slotPickerTargetId, (current) => ({
               ...current,
-              chunkId
+              blobIds
             }));
             setSlotPickerTargetId(null);
           }}
+          title="Input 用 blob を選択"
         />
       ) : null}
     </div>
