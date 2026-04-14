@@ -55,9 +55,8 @@ export function DatasetPickerDialog({
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--asset-picker">
         <div className="dialog-card__header">
-          <p className="dialog-card__eyebrow">Dataset Picker</p>
           <h2>Dataset を選択</h2>
-          <p>slot には 1 つの dataset だけを割り当てます。</p>
+          <p>割り当てる dataset を選んでください。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--asset-picker">
@@ -94,7 +93,7 @@ export function DatasetPickerDialog({
 
           <div className="dialog-actions">
             <button className="button button--ghost" onClick={onClose} type="button">
-              Close
+              キャンセル
             </button>
             <button
               className="button button--primary"
@@ -104,7 +103,7 @@ export function DatasetPickerDialog({
               }}
               type="button"
             >
-              選択
+              割り当て
             </button>
           </div>
         </div>
@@ -241,7 +240,6 @@ export function OriginalDataSelectionDialog({
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--asset-picker">
         <div className="dialog-card__header">
-          <p className="dialog-card__eyebrow">Original Data Picker</p>
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
@@ -332,7 +330,7 @@ export function OriginalDataSelectionDialog({
 
           <div className="dialog-actions">
             <button className="button button--ghost" disabled={pending} onClick={onClose} type="button">
-              Close
+              キャンセル
             </button>
             <button
               className="button button--primary"

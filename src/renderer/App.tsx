@@ -1558,7 +1558,6 @@ export function App(): JSX.Element {
             setPythonScriptDialogOpen(false);
           }}
           onError={setStatusMessage}
-          onImportedOriginalData={handleImportedOriginalData}
           onRegistered={handlePythonScriptRegistered}
         />
       ) : null}

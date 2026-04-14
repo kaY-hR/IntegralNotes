@@ -62,20 +62,14 @@ export function DataRegistrationDialog({
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--data-registration">
         <div className="dialog-card__header">
-          <p className="dialog-card__eyebrow">Data Intake</p>
           <h2>データ登録</h2>
-          <p>元データの登録と source dataset 作成の入口をここに集約します。</p>
+          <p>元データの取り込みと dataset の作成</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--data-registration">
           <section className="data-registration-card">
-            <div>
-              <strong>元データを登録</strong>
-              <p>
-                外部の file / directory を取り込む場合は canonical 実体を `.store` にコピーし、`Data/`
-                に alias を置きます。すでに `cwd` 内にある場合は今の path を保ったまま alias 化します。
-              </p>
-            </div>
+            <strong>元データを取り込む</strong>
+            <p>外部ファイルやフォルダを workspace に登録します。</p>
             <div className="data-registration-card__actions">
               <button
                 className="button button--ghost"
@@ -85,7 +79,7 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                {pendingAction === "files" ? "登録中..." : "ファイルを取り込む"}
+                {pendingAction === "files" ? "登録中..." : "ファイル"}
               </button>
               <button
                 className="button button--ghost"
@@ -95,16 +89,14 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                {pendingAction === "directories" ? "登録中..." : "フォルダを取り込む"}
+                {pendingAction === "directories" ? "登録中..." : "フォルダ"}
               </button>
             </div>
           </section>
 
           <section className="data-registration-card">
-            <div>
-              <strong>Dataset を作成</strong>
-              <p>複数の元データから、普通の file / directory 群として扱える source dataset を作成します。</p>
-            </div>
+            <strong>Source Dataset を作成</strong>
+            <p>登録済みの元データを組み合わせて dataset を作成します。</p>
             <div className="data-registration-card__actions">
               <button
                 className="button button--primary"
@@ -114,14 +106,14 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                source dataset を作成
+                作成する
               </button>
             </div>
           </section>
 
           <div className="dialog-actions">
             <button className="button button--ghost" onClick={onClose} type="button">
-              Close
+              閉じる
             </button>
           </div>
         </div>

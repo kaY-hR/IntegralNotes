@@ -10,10 +10,10 @@ import type { Root } from "react-dom/client";
 
 import { codeBlockSchema } from "@milkdown/kit/preset/commonmark";
 import { $nodeSchema, $view } from "@milkdown/kit/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import type { ExecuteIntegralBlockResult, IntegralBlockDocument } from "../shared/integral";
+import type { ExecuteIntegralBlockResult, IntegralBlockDocument, IntegralDatasetSummary } from "../shared/integral";
 
 import {
   DatasetPickerDialog,
@@ -373,6 +373,29 @@ function IntegralBlockPanel({
 }): JSX.Element {
   const [slotDialogState, setSlotDialogState] = useState<SlotDialogState>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [datasetMap, setDatasetMap] = useState<Map<string, IntegralDatasetSummary>>(new Map());
+
+  const allDatasetIds = parsed.block
+    ? [
+        ...Object.values(parsed.block.inputs),
+        ...Object.values(parsed.block.outputs)
+      ].filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+  const datasetIdKey = allDatasetIds.sort().join("\0");
+
+  useEffect(() => {
+    if (allDatasetIds.length === 0) {
+      return;
+    }
+
+    void window.integralNotes.getIntegralAssetCatalog().then((catalog) => {
+      const map = new Map<string, IntegralDatasetSummary>();
+      for (const ds of catalog.datasets) {
+        map.set(ds.datasetId, ds);
+      }
+      setDatasetMap(map);
+    }).catch(() => {});
+  }, [datasetIdKey]);
 
   if (!parsed.block) {
     return (
@@ -453,65 +476,78 @@ function IntegralBlockPanel({
     );
   }
 
+  const formatDatasetLabel = (datasetId: string | null): string => {
+    if (!datasetId) {
+      return "未設定";
+    }
+    const ds = datasetMap.get(datasetId);
+    return ds ? `${ds.name}` : datasetId;
+  };
+
   const slotAssignments =
     blockDefinition.inputSlots.length > 0 || blockDefinition.outputSlots.length > 0 ? (
-      <section className="integral-json-preview__section">
-        <div className="integral-json-preview__section-header">
-          <span>Slot Assignments</span>
-          <span>{blockDefinition.executionMode === "manual" ? "editable" : "display"}</span>
-        </div>
+      <div className="integral-slot-list">
+        {blockDefinition.inputSlots.map((slot) => {
+          const assignedId = parsed.block.inputs[slot.name] ?? null;
+          const isAssigned = assignedId !== null;
 
-        <div className="integral-slot-list">
-          {blockDefinition.inputSlots.map((slot) => (
+          return (
             <div className="integral-slot-row" key={slot.name}>
               <div className="integral-slot-row__meta">
                 <strong>{slot.name}</strong>
-                <span>{parsed.block.inputs[slot.name] ?? "未設定"}</span>
+                <span className={isAssigned ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
+                  {formatDatasetLabel(assignedId)}
+                </span>
               </div>
-              <div className="integral-slot-row__actions">
-                <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
-                  setInlineError(null);
-                  setSlotDialogState({ kind: "dataset", slotName: slot.name });
-                }} type="button">
-                  Dataset
-                </button>
-                <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
-                  setInlineError(null);
-                  setSlotDialogState({ kind: "original-data", slotName: slot.name });
-                }} type="button">
-                  Original Data
-                </button>
-              </div>
+              {blockDefinition.executionMode === "manual" ? (
+                <div className="integral-slot-row__actions">
+                  <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
+                    setInlineError(null);
+                    setSlotDialogState({ kind: "dataset", slotName: slot.name });
+                  }} type="button">
+                    {isAssigned ? "変更" : "Dataset を割り当て"}
+                  </button>
+                  <button className="integral-slot-row__link" onClick={() => {
+                    setInlineError(null);
+                    setSlotDialogState({ kind: "original-data", slotName: slot.name });
+                  }} type="button">
+                    元データから作成
+                  </button>
+                </div>
+              ) : null}
             </div>
-          ))}
+          );
+        })}
 
-          {blockDefinition.outputSlots.map((slot) => (
+        {blockDefinition.outputSlots.map((slot) => {
+          const outputId = parsed.block.outputs[slot.name] ?? null;
+
+          return (
             <div className="integral-slot-row integral-slot-row--output" key={slot.name}>
               <div className="integral-slot-row__meta">
                 <strong>{slot.name}</strong>
-                <span>{parsed.block.outputs[slot.name] ?? "null"}</span>
+                <span>{formatDatasetLabel(outputId)}</span>
               </div>
             </div>
-          ))}
-        </div>
-      </section>
+          );
+        })}
+      </div>
     ) : null;
 
   if (hasCustomRenderer) {
     return (
       <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
-        <div className="integral-json-preview">
+        <div className="integral-json-preview integral-json-preview--compact">
           <div className="integral-json-preview__header">
-            <div>
-              <p className="integral-json-preview__eyebrow">{blockDefinition.pluginDisplayName}</p>
-              <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
-            </div>
+            <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
             <code className="integral-json-preview__type">
-              {parsed.block.plugin}/{parsed.block["block-type"]}
+              {parsed.block["block-type"]}
             </code>
           </div>
 
-          <p className="integral-json-preview__description">{blockDefinition.description}</p>
+          {blockDefinition.description ? (
+            <p className="integral-json-preview__description">{blockDefinition.description}</p>
+          ) : null}
 
           <ExternalPluginBlockRenderer
             block={parsed.block}
@@ -561,20 +597,17 @@ function IntegralBlockPanel({
 
   return (
     <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
-      <div className="integral-json-preview">
+      <div className="integral-json-preview integral-json-preview--compact">
         <div className="integral-json-preview__header">
-          <div>
-            <p className="integral-json-preview__eyebrow">{blockDefinition.pluginDisplayName}</p>
-            <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
-          </div>
+          <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
           <code className="integral-json-preview__type">
-            {parsed.block.plugin}/{parsed.block["block-type"]}
+            {parsed.block["block-type"]}
           </code>
         </div>
 
-        <p className="integral-json-preview__description">{blockDefinition.description}</p>
-
-        {renderIntegralBlockBody(parsed.block)}
+        {blockDefinition.description ? (
+          <p className="integral-json-preview__description">{blockDefinition.description}</p>
+        ) : null}
 
         {slotAssignments}
 
@@ -588,9 +621,6 @@ function IntegralBlockPanel({
             >
               {runState.status === "running" ? "実行中..." : "Run"}
             </button>
-            <p className="integral-code-block__runhint">
-              `analysis-args.json` を生成し、`.py-scripts/PYS-.../` で Python を実行します。
-            </p>
           </div>
         ) : null}
 

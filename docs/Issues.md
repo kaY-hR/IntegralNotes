@@ -162,3 +162,11 @@
 * data-note には dataset ID, kind, createdAt, createdByBlockId, sourceMembers など、検索や参照に使いたい metadata を frontmatter で保持したい
 * block 実行結果から dataset をたどるだけでなく、catalog 側から dataset を見つけてノートへ参照しやすい導線にしたい
 * dataset 再生成時の重複生成や更新方針、GC 時に data-note をどう扱うかも整理したい
+
+## [ ] 16. トップバー「データ登録」メニューからの dialog の UI を改善したい
+- 優先重み:5
+- 記載日時:2026-04-14(UTC+9)
+
+* Issue 11, 12 と同様の方針で、`DataRegistrationDialog` の UI を見直したい
+* 現状は情報密度が低く、導線が分かりにくい
+* 余白の縮小、操作の優先度の明確化、表示の簡素化を行いたい

@@ -2,28 +2,20 @@ import { useMemo, useState } from "react";
 
 import type {
   IntegralBlockDocument,
-  IntegralOriginalDataSummary,
   RegisterPythonScriptResult
 } from "../shared/integral";
 
-import { OriginalDataSelectionDialog } from "./IntegralAssetDialogs";
 import { INTEGRAL_BLOCK_LANGUAGE } from "./integralBlockRegistry";
 
 interface PythonScriptDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedOriginalData?: (
-    originalData: readonly IntegralOriginalDataSummary[],
-    kind: "directories" | "files"
-  ) => Promise<void> | void;
   onRegistered: (result: RegisterPythonScriptResult, blockMarkdown: string) => void;
 }
 
 interface InputSlotDraft {
-  originalDataIds: string[];
   id: string;
   name: string;
-  sourceDatasetName: string;
 }
 
 interface OutputSlotDraft {
@@ -37,10 +29,8 @@ function toErrorMessage(error: unknown): string {
 
 function createInputSlotDraft(name = ""): InputSlotDraft {
   return {
-    originalDataIds: [],
     id: crypto.randomUUID(),
-    name,
-    sourceDatasetName: ""
+    name
   };
 }
 
@@ -66,7 +56,6 @@ function toIntegralCodeBlock(value: unknown): string {
 export function PythonScriptDialog({
   onClose,
   onError,
-  onImportedOriginalData,
   onRegistered
 }: PythonScriptDialogProps): JSX.Element {
   const [entryAbsolutePath, setEntryAbsolutePath] = useState("");
@@ -77,7 +66,6 @@ export function PythonScriptDialog({
   const [inputSlots, setInputSlots] = useState<InputSlotDraft[]>([createInputSlotDraft("source")]);
   const [outputSlots, setOutputSlots] = useState<OutputSlotDraft[]>([createOutputSlotDraft("result")]);
   const [pending, setPending] = useState(false);
-  const [slotPickerTargetId, setSlotPickerTargetId] = useState<string | null>(null);
 
   const bundledFilePaths = useMemo(
     () =>
@@ -170,35 +158,14 @@ export function PythonScriptDialog({
         inputSlotNames,
         outputSlotNames
       });
-      const inputEntries = await Promise.all(
-        inputSlots
-          .map((slot) => ({
-            originalDataIds: slot.originalDataIds,
-            name: slot.name.trim(),
-            sourceDatasetName: slot.sourceDatasetName.trim()
-          }))
-          .filter((slot) => slot.name.length > 0)
-          .map(async (slot) => {
-            if (slot.originalDataIds.length === 0) {
-              return [slot.name, null] as const;
-            }
-
-            const sourceDataset = await window.integralNotes.createSourceDataset({
-              name: slot.sourceDatasetName || slot.name,
-              originalDataIds: slot.originalDataIds
-            });
-
-            return [slot.name, sourceDataset.dataset.datasetId] as const;
-          })
-      );
       const initialBlock: IntegralBlockDocument = {
         "block-type": result.blockType.blockType,
         id: createBlockId(),
-        inputs: Object.fromEntries(inputEntries),
+        inputs: Object.fromEntries(
+          inputSlotNames.map((name) => [name, null] as const)
+        ),
         outputs: Object.fromEntries(
-          outputSlots
-            .map((slot) => [slot.name.trim(), null] as const)
-            .filter(([slotName]) => slotName.length > 0)
+          outputSlotNames.map((name) => [name, null] as const)
         ),
         params: {},
         plugin: result.blockType.pluginId
@@ -212,15 +179,13 @@ export function PythonScriptDialog({
     }
   };
 
-  const updateInputSlot = (slotId: string, updater: (slot: InputSlotDraft) => InputSlotDraft): void => {
-    setInputSlots((current) =>
-      current.map((slot) => (slot.id === slotId ? updater(slot) : slot))
-    );
-  };
-
-  const updateOutputSlot = (slotId: string, updater: (slot: OutputSlotDraft) => OutputSlotDraft): void => {
-    setOutputSlots((current) =>
-      current.map((slot) => (slot.id === slotId ? updater(slot) : slot))
+  const updateSlotName = <T extends { id: string; name: string }>(
+    setter: React.Dispatch<React.SetStateAction<T[]>>,
+    slotId: string,
+    name: string
+  ): void => {
+    setter((current) =>
+      current.map((slot) => (slot.id === slotId ? { ...slot, name } : slot))
     );
   };
 
@@ -228,9 +193,8 @@ export function PythonScriptDialog({
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--python-script">
         <div className="dialog-card__header">
-          <p className="dialog-card__eyebrow">General Analysis</p>
           <h2>Python Script 登録</h2>
-          <p>script 資産を作成し、そのまま現在のノートへ Python block を挿入します。</p>
+          <p>スクリプトを登録してノートに block を挿入します。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--python-script">
@@ -286,7 +250,7 @@ export function PythonScriptDialog({
                 }}
                 type="button"
               >
-                追加ファイルを選択
+                追加
               </button>
             </div>
 
@@ -330,32 +294,17 @@ export function PythonScriptDialog({
 
             <div className="python-slot-editor__rows">
               {inputSlots.map((slot) => (
-                <div className="python-slot-editor__row" key={slot.id}>
+                <div className="python-slot-editor__row python-slot-editor__row--output" key={slot.id}>
                   <input
                     className="python-slot-editor__input"
                     disabled={pending}
                     onChange={(event) => {
-                      updateInputSlot(slot.id, (current) => ({
-                        ...current,
-                        name: event.target.value
-                      }));
+                      updateSlotName(setInputSlots, slot.id, event.target.value);
                     }}
                     placeholder="slot名を入力..."
                     type="text"
                     value={slot.name}
                   />
-                  <button
-                    className="button button--ghost python-slot-editor__dataset-button"
-                    disabled={pending}
-                    onClick={() => {
-                      setSlotPickerTargetId(slot.id);
-                    }}
-                    type="button"
-                  >
-                    {slot.originalDataIds.length > 0
-                      ? `${slot.originalDataIds.length} 件の元データ / ${slot.sourceDatasetName || slot.name || "dataset"}`
-                      : "元データを選択..."}
-                  </button>
                   <button
                     className="button button--ghost"
                     disabled={pending || inputSlots.length === 1}
@@ -396,10 +345,7 @@ export function PythonScriptDialog({
                     className="python-slot-editor__input"
                     disabled={pending}
                     onChange={(event) => {
-                      updateOutputSlot(slot.id, (current) => ({
-                        ...current,
-                        name: event.target.value
-                      }));
+                      updateSlotName(setOutputSlots, slot.id, event.target.value);
                     }}
                     placeholder="slot名を入力..."
                     type="text"
@@ -435,7 +381,7 @@ export function PythonScriptDialog({
 
           <div className="dialog-actions">
             <button className="button button--ghost" disabled={pending} onClick={onClose} type="button">
-              Close
+              キャンセル
             </button>
             <button
               className="button button--primary"
@@ -451,35 +397,6 @@ export function PythonScriptDialog({
         </div>
       </div>
 
-      {slotPickerTargetId ? (
-        <OriginalDataSelectionDialog
-          confirmLabel="この元データを使う"
-          defaultDatasetName={
-            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.sourceDatasetName ||
-            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.name ||
-            ""
-          }
-          description="選択した元データ群から、登録時に source dataset を自動作成します。"
-          initialSelectedOriginalDataIds={
-            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.originalDataIds ?? []
-          }
-          onClose={() => {
-            setSlotPickerTargetId(null);
-          }}
-          onError={onError}
-          onImportedOriginalData={onImportedOriginalData}
-          onSelect={({ datasetName, originalDataIds }) => {
-            updateInputSlot(slotPickerTargetId, (current) => ({
-              ...current,
-              originalDataIds,
-              sourceDatasetName: datasetName
-            }));
-            setSlotPickerTargetId(null);
-          }}
-          requireDatasetName
-          title="Input 用元データを選択"
-        />
-      ) : null}
     </div>
   );
 }
