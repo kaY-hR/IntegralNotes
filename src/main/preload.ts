@@ -40,6 +40,7 @@ const api: IntegralNotesApi = {
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
   registerPythonScript: (request) => ipcRenderer.invoke("integral:registerPythonScript", request),
+  readWorkspaceFile: (relativePath) => ipcRenderer.invoke("workspace:readFile", relativePath),
   readNote: (relativePath) => ipcRenderer.invoke("workspace:readNote", relativePath),
   saveNote: (relativePath, content) =>
     ipcRenderer.invoke("workspace:saveNote", relativePath, content),

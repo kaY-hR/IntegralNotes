@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type {
   CreateEntryRequest,
@@ -11,6 +12,7 @@ import type {
   RenameEntryResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
+  WorkspaceFileDocument,
   WorkspaceSnapshot
 } from "../shared/workspace";
 
@@ -48,6 +50,19 @@ const LEGACY_BLOBS_DIRECTORY = "blob";
 const CHUNKS_DIRECTORY = "chunk";
 const LEGACY_CHUNKS_DIRECTORY = ".chunk";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
+const HTML_EXTENSIONS = new Set([".htm", ".html"]);
+const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
+const TEXT_EXTENSIONS = new Set([
+  ".csv",
+  ".json",
+  ".log",
+  ".md",
+  ".txt",
+  ".tsv",
+  ".xml",
+  ".yaml",
+  ".yml"
+]);
 
 export class WorkspaceService {
   private rootPath: string | undefined;
@@ -127,22 +142,33 @@ export class WorkspaceService {
     };
   }
 
-  async readNote(relativePath: string): Promise<NoteDocument> {
+  async readWorkspaceFile(relativePath: string): Promise<WorkspaceFileDocument> {
     this.getConfiguredRootPath();
     await this.ensureWorkspaceReady();
 
     const absolutePath = this.resolveWorkspacePath(relativePath);
     const stats = await fs.stat(absolutePath);
 
-    if (!stats.isFile() || path.extname(absolutePath).toLowerCase() !== ".md") {
+    if (!stats.isFile()) {
+      throw new Error("ファイルのみ開けます。");
+    }
+
+    return this.readWorkspaceFileDocument(absolutePath, stats);
+  }
+
+  async readNote(relativePath: string): Promise<NoteDocument> {
+    const document = await this.readWorkspaceFile(relativePath);
+
+    if (document.kind !== "markdown" || document.content === null) {
       throw new Error("Markdownノートのみ開けます。");
     }
 
     return {
-      relativePath: this.toRelativePath(absolutePath),
-      name: path.basename(absolutePath),
-      content: await fs.readFile(absolutePath, "utf8"),
-      modifiedAt: stats.mtime.toISOString()
+      content: document.content,
+      kind: "markdown",
+      modifiedAt: document.modifiedAt,
+      name: document.name,
+      relativePath: document.relativePath
     };
   }
 
@@ -151,6 +177,12 @@ export class WorkspaceService {
     await this.ensureWorkspaceReady();
 
     const absolutePath = this.resolveWorkspacePath(relativePath);
+    const stats = await fs.stat(absolutePath);
+
+    if (!stats.isFile() || path.extname(absolutePath).toLowerCase() !== ".md") {
+      throw new Error("Markdownノートのみ保存できます。");
+    }
+
     await fs.writeFile(absolutePath, content, "utf8");
 
     return this.readNote(relativePath);
@@ -290,6 +322,76 @@ export class WorkspaceService {
     };
   }
 
+  private async readWorkspaceFileDocument(
+    absolutePath: string,
+    stats: Awaited<ReturnType<typeof fs.stat>>
+  ): Promise<WorkspaceFileDocument> {
+    const relativePath = this.toRelativePath(absolutePath);
+    const extension = path.extname(absolutePath).toLowerCase();
+
+    if (extension === ".md") {
+      return {
+        content: await fs.readFile(absolutePath, "utf8"),
+        kind: "markdown",
+        modifiedAt: stats.mtime.toISOString(),
+        name: path.basename(absolutePath),
+        relativePath
+      };
+    }
+
+    if (HTML_EXTENSIONS.has(extension)) {
+      return {
+        content: injectHtmlBaseTag(await fs.readFile(absolutePath, "utf8"), path.dirname(absolutePath)),
+        kind: "html",
+        modifiedAt: stats.mtime.toISOString(),
+        name: path.basename(absolutePath),
+        relativePath
+      };
+    }
+
+    if (IMAGE_EXTENSIONS.has(extension)) {
+      const buffer = await fs.readFile(absolutePath);
+
+      return {
+        content: `data:${inferMimeType(absolutePath)};base64,${buffer.toString("base64")}`,
+        kind: "image",
+        modifiedAt: stats.mtime.toISOString(),
+        name: path.basename(absolutePath),
+        relativePath
+      };
+    }
+
+    if (TEXT_EXTENSIONS.has(extension)) {
+      return {
+        content: await fs.readFile(absolutePath, "utf8"),
+        kind: "text",
+        modifiedAt: stats.mtime.toISOString(),
+        name: path.basename(absolutePath),
+        relativePath
+      };
+    }
+
+    const buffer = await fs.readFile(absolutePath);
+
+    if (isProbablyTextFile(buffer)) {
+      return {
+        content: buffer.toString("utf8"),
+        kind: "text",
+        modifiedAt: stats.mtime.toISOString(),
+        name: path.basename(absolutePath),
+        relativePath
+      };
+    }
+
+    return {
+      content: null,
+      kind: "unsupported",
+      modifiedAt: stats.mtime.toISOString(),
+      name: path.basename(absolutePath),
+      relativePath
+    };
+  }
+
   private normalizeEntryName(name: string, kind: WorkspaceEntryKind): string {
     const trimmedName = name.trim();
 
@@ -346,7 +448,7 @@ export class WorkspaceService {
       return false;
     }
 
-    return isDirectory || path.extname(name).toLowerCase() === ".md";
+    return isDirectory || name.length > 0;
   }
 
   private async migrateLegacyIntegralStorageLayout(rootPath: string): Promise<void> {
@@ -589,4 +691,51 @@ function sanitizeFileNameSegment(value: string): string {
     .replace(/[. ]+$/gu, "");
 
   return sanitized.length > 0 ? sanitized : "blob";
+}
+
+function isProbablyTextFile(buffer: Buffer): boolean {
+  return !buffer.includes(0);
+}
+
+function injectHtmlBaseTag(document: string, baseDirectoryPath: string): string {
+  if (/<base\s/iu.test(document)) {
+    return document;
+  }
+
+  const baseHref = escapeHtmlAttribute(pathToFileURL(`${baseDirectoryPath}${path.sep}`).href);
+  const baseTag = `<base href="${baseHref}">`;
+
+  if (/<head(\s[^>]*)?>/iu.test(document)) {
+    return document.replace(/<head(\s[^>]*)?>/iu, (match) => `${match}\n    ${baseTag}`);
+  }
+
+  if (/<html(\s[^>]*)?>/iu.test(document)) {
+    return document.replace(/<html(\s[^>]*)?>/iu, (match) => `${match}\n  <head>${baseTag}</head>`);
+  }
+
+  return `${baseTag}\n${document}`;
+}
+
+function inferMimeType(assetPath: string): string {
+  switch (path.extname(assetPath).toLowerCase()) {
+    case ".bmp":
+      return "image/bmp";
+    case ".gif":
+      return "image/gif";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }

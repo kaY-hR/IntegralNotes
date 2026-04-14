@@ -261,6 +261,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle("workspace:readNote", async (_event, relativePath: string) =>
     workspaceService.readNote(relativePath)
   );
+  ipcMain.handle("workspace:readFile", async (_event, relativePath: string) =>
+    workspaceService.readWorkspaceFile(relativePath)
+  );
   ipcMain.handle(
     "workspace:saveNote",
     async (_event, relativePath: string, content: string) =>

@@ -29,9 +29,20 @@ export interface WorkspaceSnapshot {
 }
 
 export interface NoteDocument {
+  kind: "markdown";
   relativePath: string;
   name: string;
   content: string;
+  modifiedAt: string;
+}
+
+export type WorkspaceFileViewKind = "markdown" | "html" | "image" | "text" | "unsupported";
+
+export interface WorkspaceFileDocument {
+  relativePath: string;
+  name: string;
+  content: string | null;
+  kind: WorkspaceFileViewKind;
   modifiedAt: string;
 }
 
@@ -118,6 +129,7 @@ export interface IntegralNotesApi {
   registerPythonScript: (
     request: RegisterPythonScriptRequest
   ) => Promise<RegisterPythonScriptResult>;
+  readWorkspaceFile: (relativePath: string) => Promise<WorkspaceFileDocument>;
   readNote: (relativePath: string) => Promise<NoteDocument>;
   saveNote: (relativePath: string, content: string) => Promise<NoteDocument>;
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;

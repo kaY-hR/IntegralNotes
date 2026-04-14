@@ -8,10 +8,13 @@ import type {
 import type {
   CreateEntryResult,
   DeleteEntryResult,
+  NoteDocument,
   RenameEntryResult,
   UninstallPluginResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
+  WorkspaceFileDocument,
+  WorkspaceFileViewKind,
   WorkspaceSnapshot
 } from "../shared/workspace";
 import type { InstalledPluginDefinition } from "../shared/plugins";
@@ -21,20 +24,25 @@ import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { PluginManagerDialog } from "./PluginManagerDialog";
 import { PythonScriptDialog } from "./PythonScriptDialog";
+import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import {
   INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT,
   OPEN_PYTHON_SCRIPT_DIALOG_EVENT
 } from "./integralSnippetMenu";
 
-interface OpenNoteTab {
-  content: string;
+type ReadonlyWorkspaceFileKind = Exclude<WorkspaceFileViewKind, "markdown">;
+
+interface OpenMarkdownTab extends NoteDocument {
   isSaving: boolean;
-  modifiedAt: string;
-  name: string;
-  relativePath: string;
   savedContent: string;
 }
+
+interface OpenReadonlyTab extends WorkspaceFileDocument {
+  kind: ReadonlyWorkspaceFileKind;
+}
+
+type OpenWorkspaceTab = OpenMarkdownTab | OpenReadonlyTab;
 
 interface DeleteDialogState {
   confirmLabel: string;
@@ -140,14 +148,14 @@ function dirname(relativePath: string): string {
   return parts.slice(0, -1).join("/");
 }
 
-function findFirstNote(entries: WorkspaceEntry[]): WorkspaceEntry | undefined {
+function findFirstFile(entries: WorkspaceEntry[]): WorkspaceEntry | undefined {
   for (const entry of entries) {
     if (entry.kind === "file") {
       return entry;
     }
 
     if (entry.children) {
-      const childNote = findFirstNote(entry.children);
+      const childNote = findFirstFile(entry.children);
 
       if (childNote) {
         return childNote;
@@ -194,8 +202,34 @@ function reconcileExpandedPaths(
   );
 }
 
-function isDirty(tab: OpenNoteTab | undefined): boolean {
-  return Boolean(tab && tab.content !== tab.savedContent);
+function isMarkdownTab(tab: OpenWorkspaceTab | undefined): tab is OpenMarkdownTab {
+  return Boolean(tab && tab.kind === "markdown");
+}
+
+function isDirty(tab: OpenWorkspaceTab | undefined): boolean {
+  return Boolean(isMarkdownTab(tab) && tab.content !== tab.savedContent);
+}
+
+function createOpenTab(document: WorkspaceFileDocument): OpenWorkspaceTab {
+  if (document.kind === "markdown") {
+    return {
+      content: document.content ?? "",
+      isSaving: false,
+      kind: "markdown",
+      modifiedAt: document.modifiedAt,
+      name: document.name,
+      relativePath: document.relativePath,
+      savedContent: document.content ?? ""
+    };
+  }
+
+  return {
+    content: document.content,
+    kind: document.kind as ReadonlyWorkspaceFileKind,
+    modifiedAt: document.modifiedAt,
+    name: document.name,
+    relativePath: document.relativePath
+  };
 }
 
 function findSelectedTabId(model: FlexLayout.Model): string | undefined {
@@ -281,7 +315,7 @@ function clampContextMenuPosition(x: number, y: number): Pick<TreeContextMenuSta
 
 export function App(): JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
-  const [openTabs, setOpenTabs] = useState<Record<string, OpenNoteTab>>({});
+  const [openTabs, setOpenTabs] = useState<Record<string, OpenWorkspaceTab>>({});
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
   const [selectedTabId, setSelectedTabId] = useState<string | undefined>(undefined);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -301,7 +335,7 @@ export function App(): JSX.Element {
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
-  const shouldAutoOpenInitialNoteRef = useRef(false);
+  const shouldAutoOpenInitialFileRef = useRef(false);
   const sidebarRef = useRef<HTMLElement>(null);
 
   const selectedEntry = workspace ? findEntryByPath(workspace.entries, selectedEntryPath) : undefined;
@@ -354,7 +388,7 @@ export function App(): JSX.Element {
   };
 
   const clearWorkspace = (nextStatusMessage: string): void => {
-    shouldAutoOpenInitialNoteRef.current = false;
+    shouldAutoOpenInitialFileRef.current = false;
     setInlineEditor(null);
     setContextMenu(null);
     setDeleteDialog(null);
@@ -376,7 +410,7 @@ export function App(): JSX.Element {
     setContextMenu(null);
 
     if (options.resetTabs) {
-      shouldAutoOpenInitialNoteRef.current = true;
+      shouldAutoOpenInitialFileRef.current = true;
       resetOpenTabs();
       setSelectedEntryPath("");
       setExpandedPaths(defaultExpandedPaths(snapshot.entries));
@@ -610,21 +644,21 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (
       !workspace ||
-      !shouldAutoOpenInitialNoteRef.current ||
+      !shouldAutoOpenInitialFileRef.current ||
       Object.keys(openTabs).length > 0 ||
       selectedTabId
     ) {
       return;
     }
 
-    shouldAutoOpenInitialNoteRef.current = false;
-    const firstNote = findFirstNote(workspace.entries);
+    shouldAutoOpenInitialFileRef.current = false;
+    const firstFile = findFirstFile(workspace.entries);
 
-    if (!firstNote) {
+    if (!firstFile) {
       return;
     }
 
-    void openNote(firstNote.relativePath);
+    void openNote(firstFile.relativePath);
   }, [workspace, openTabs, selectedTabId]);
 
   useEffect(() => {
@@ -656,7 +690,7 @@ export function App(): JSX.Element {
 
       event.preventDefault();
 
-      if (activeTab) {
+      if (isMarkdownTab(activeTab)) {
         void saveNote(activeTab.relativePath);
       }
     };
@@ -754,23 +788,18 @@ export function App(): JSX.Element {
     if (existingTab) {
       model.doAction(FlexLayout.Actions.selectTab(tabId));
       setSelectedTabId(tabId);
-      setStatusMessage(`${existingTab.name} を編集中`);
+      setStatusMessage(
+        isMarkdownTab(existingTab) ? `${existingTab.name} を編集中` : `${existingTab.name} を表示中`
+      );
       return;
     }
 
     try {
-      const note = await window.integralNotes.readNote(relativePath);
+      const document = await window.integralNotes.readWorkspaceFile(relativePath);
 
       setOpenTabs((currentTabs) => ({
         ...currentTabs,
-        [relativePath]: {
-          content: note.content,
-          isSaving: false,
-          modifiedAt: note.modifiedAt,
-          name: note.name,
-          relativePath: note.relativePath,
-          savedContent: note.content
-        }
+        [relativePath]: createOpenTab(document)
       }));
 
       const activeTabsetId =
@@ -782,9 +811,9 @@ export function App(): JSX.Element {
             type: "tab",
             id: tabId,
             component: "editor",
-            name: note.name,
+            name: document.name,
             config: {
-              relativePath: note.relativePath
+              relativePath: document.relativePath
             }
           },
           activeTabsetId,
@@ -795,7 +824,7 @@ export function App(): JSX.Element {
       );
 
       setSelectedTabId(tabId);
-      setStatusMessage(`${note.name} を開きました`);
+      setStatusMessage(`${document.name} を開きました`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
@@ -804,44 +833,68 @@ export function App(): JSX.Element {
   const saveNote = async (relativePath: string): Promise<void> => {
     const tab = openTabs[relativePath];
 
-    if (!tab) {
+    if (!isMarkdownTab(tab)) {
       return;
     }
 
-    setOpenTabs((currentTabs) => ({
-      ...currentTabs,
-      [relativePath]: {
-        ...currentTabs[relativePath],
-        isSaving: true
+    setOpenTabs((currentTabs) => {
+      const currentTab = currentTabs[relativePath];
+
+      if (!isMarkdownTab(currentTab)) {
+        return currentTabs;
       }
-    }));
+
+      return {
+        ...currentTabs,
+        [relativePath]: {
+          ...currentTab,
+          isSaving: true
+        }
+      };
+    });
 
     try {
       const savedNote = await window.integralNotes.saveNote(relativePath, tab.content);
 
-      setOpenTabs((currentTabs) => ({
-        ...currentTabs,
-        [relativePath]: {
-          ...currentTabs[relativePath],
-          content: savedNote.content,
-          isSaving: false,
-          modifiedAt: savedNote.modifiedAt,
-          name: savedNote.name,
-          savedContent: savedNote.content
+      setOpenTabs((currentTabs) => {
+        const currentTab = currentTabs[relativePath];
+
+        if (!isMarkdownTab(currentTab)) {
+          return currentTabs;
         }
-      }));
+
+        return {
+          ...currentTabs,
+          [relativePath]: {
+            ...currentTab,
+            content: savedNote.content,
+            isSaving: false,
+            modifiedAt: savedNote.modifiedAt,
+            name: savedNote.name,
+            savedContent: savedNote.content
+          }
+        };
+      });
 
       syncTabLabel(relativePath, savedNote.name, false);
       setStatusMessage(`${savedNote.name} を保存しました`);
       await refreshWorkspace();
     } catch (error) {
-      setOpenTabs((currentTabs) => ({
-        ...currentTabs,
-        [relativePath]: {
-          ...currentTabs[relativePath],
-          isSaving: false
+      setOpenTabs((currentTabs) => {
+        const currentTab = currentTabs[relativePath];
+
+        if (!isMarkdownTab(currentTab)) {
+          return currentTabs;
         }
-      }));
+
+        return {
+          ...currentTabs,
+          [relativePath]: {
+            ...currentTab,
+            isSaving: false
+          }
+        };
+      });
       setStatusMessage(toErrorMessage(error));
     }
   };
@@ -1130,11 +1183,11 @@ export function App(): JSX.Element {
   const updateTabContent = (relativePath: string, nextContent: string): void => {
     const currentTab = openTabsRef.current[relativePath];
 
-    if (!currentTab || currentTab.content === nextContent) {
+    if (!isMarkdownTab(currentTab) || currentTab.content === nextContent) {
       return;
     }
 
-    const nextTab: OpenNoteTab = {
+    const nextTab: OpenMarkdownTab = {
       ...currentTab,
       content: nextContent
     };
@@ -1192,7 +1245,7 @@ export function App(): JSX.Element {
     const relativePath = node.getConfig()?.relativePath as string | undefined;
 
     if (!relativePath) {
-      return <div className="editor-empty">ノートを選択してください。</div>;
+      return <div className="editor-empty">ファイルを選択してください。</div>;
     }
 
     const tab = openTabs[relativePath];
@@ -1200,21 +1253,25 @@ export function App(): JSX.Element {
     if (!tab) {
       return (
         <div className="editor-empty">
-          ノートの状態が見つかりません。サイドバーから再度開いてください。
+          ファイルの状態が見つかりません。サイドバーから再度開いてください。
         </div>
       );
     }
 
-    return (
-      <MilkdownEditor
-        initialValue={tab.content}
-        isActive={selectedTabPath === relativePath}
-        key={`${relativePath}:${pluginCatalogRevision}`}
-        onChange={(markdown) => {
-          updateTabContent(relativePath, markdown);
-        }}
-      />
-    );
+    if (isMarkdownTab(tab)) {
+      return (
+        <MilkdownEditor
+          initialValue={tab.content}
+          isActive={selectedTabPath === relativePath}
+          key={`${relativePath}:${pluginCatalogRevision}`}
+          onChange={(markdown) => {
+            updateTabContent(relativePath, markdown);
+          }}
+        />
+      );
+    }
+
+    return <WorkspaceFileViewer file={tab} />;
   };
 
   return (
@@ -1363,7 +1420,7 @@ export function App(): JSX.Element {
               <div className="sidebar__empty-state">
                 <p className="sidebar__section-title">Workspace</p>
                 <h2>ワークスペースが未設定です</h2>
-                <p>ノートを表示するフォルダを選ぶと、ここにエクスプローラーを表示します。</p>
+                <p>ファイルを表示するフォルダを選ぶと、ここにエクスプローラーを表示します。</p>
                 <button
                   className="button button--primary"
                   onClick={() => {
@@ -1388,10 +1445,10 @@ export function App(): JSX.Element {
             onTabSetPlaceHolder={() => (
               <div className="layout-placeholder">
                 <p className="layout-placeholder__eyebrow">Editor</p>
-                <h3>{workspace ? "ノートを選択してください" : "ワークスペースを開いてください"}</h3>
+                <h3>{workspace ? "ファイルを選択してください" : "ワークスペースを開いてください"}</h3>
                 <p>
                   {workspace
-                    ? "左のエクスプローラーからノートを開くか、新しいノートを作成してください。"
+                    ? "左のエクスプローラーからファイルを開くか、新しいノートを作成してください。"
                     : "左のパネルからフォルダを開くと、ここにエディターを表示します。"}
                 </p>
               </div>

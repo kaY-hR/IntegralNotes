@@ -530,6 +530,58 @@ input:focus-visible {
   text-align: center;
 }
 
+.workspace-file-viewer {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--app-bg);
+}
+
+.workspace-file-viewer--empty {
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.workspace-file-viewer__message {
+  display: grid;
+  gap: 8px;
+  max-width: 36ch;
+  text-align: center;
+}
+
+.workspace-file-viewer__message strong {
+  color: var(--text-0);
+}
+
+.workspace-file-viewer__message p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.workspace-file-viewer__card {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+}
+
+.workspace-file-viewer__frame {
+  height: 100%;
+  min-height: 520px;
+}
+
+.workspace-file-viewer__image {
+  display: block;
+  max-width: 100%;
+}
+
+.workspace-file-viewer__text {
+  min-height: 100%;
+  max-height: none;
+}
+
 .layout-placeholder h3 {
   margin: 10px 0 6px;
   color: var(--text-0);
