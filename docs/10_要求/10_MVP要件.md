@@ -9,6 +9,9 @@
 - original data / dataset の data note metadata は frontmatter に持たせ、editor / viewer には本文だけを渡す
 - `data-note` に限らず、`cwd` 配下の Markdown は frontmatter があれば app が保持し、editor / viewer には本文だけを渡す
 - Markdown 保存時は本文だけを更新し、既存 frontmatter は壊さず保持する
+- Markdown note tab では `見たまま編集` と `body-only raw text` を切り替えられる
+- mode 切替は tab 内右上の button から行う
+- raw text mode でも frontmatter は表示せず、両 mode は同じ本文 string を共有する
 - original data の data note file 名は原則 `originalName.md` とする
 - data note file 名が重複する場合は保存前に連番を付けて解消する
 - dataset の data note 本文には canonical dataset 配下の各 file への標準 Markdown link を箇条書きで自動生成する

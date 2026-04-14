@@ -5,7 +5,7 @@ import type { Selection } from "@milkdown/kit/prose/state";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
@@ -26,6 +26,7 @@ interface MilkdownEditorProps {
   onOpenWorkspaceFile: (relativePath: string) => void;
   onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot) => void;
   onWorkspaceLinkError: (message: string) => void;
+  toolbar?: ReactNode;
   workspaceEntries: WorkspaceEntry[];
 }
 
@@ -51,6 +52,7 @@ export function MilkdownEditor({
   onOpenWorkspaceFile,
   onWorkspaceSnapshotChanged,
   onWorkspaceLinkError,
+  toolbar,
   workspaceEntries
 }: MilkdownEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -445,6 +447,7 @@ export function MilkdownEditor({
 
   return (
     <div className="editor-shell">
+      {toolbar ? <div className="editor-toolbar">{toolbar}</div> : null}
       <div
         className="editor-surface"
         ref={rootRef}

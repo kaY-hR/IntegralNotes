@@ -12,14 +12,15 @@
 
 スラッシュを打った状態でスラッシュコマンドメニューを開くと、その後エディタ内で他の箇所にカーソルを移さない限り、他のGUI部品をクリックしたりしてもスラッシュコマンドメニューが最前面に表示され続ける。可能なら、エディタ以外の部分にフォーカスを移した時点でスラッシュコマンドメニューは非表示にしたい、、が、milkdownの仕様ならちょっと対応は要検討
 
-## [ ] 3.テキスト直編集モードの追加
+## [x] 3.テキスト直編集モードの追加
+- Status:completed
 - 優先重み:1
 - 記載日時:?
 
 可能なら、wiswigモード以外に、生のマークダウンファイルを編集できるモードに切り替えられると嬉しい
 * 2026-04-14 調査: 実現性は高い。現在の `.md` 読込・保存は `src/main/workspaceService.ts` の `readNote() / saveNote()` に集約されており、主変更点は renderer 側の markdown tab に editor mode を足すことになる
 * 現状の `src/renderer/App.tsx` は markdown tab の `content` / `savedContent` / dirty 判定 / `Ctrl+S` 保存を 1 本化しているため、`WYSIWYG` と `raw markdown` の 2 UI が同じ文字列 state を共有すれば、tab 管理や保存導線はほぼ再利用できる
-* 実装方針としては、`OpenMarkdownTab` に `editorMode: "wysiwyg" | "raw"` を持たせ、`editorFactory` で `MilkdownEditor` と軽量な plain text editor を切り替える構成が最もクリーン
+* 実装方針としては、`OpenMarkdownTab` に `editorMode: "wysiwyg" | "text"` を持たせ、`editorFactory` で `MilkdownEditor` と軽量な plain text editor を切り替える構成が最もクリーン
 * 注意点として、`src/renderer/MilkdownEditor.tsx` は mount 時の `initialValue` で初期化する非制御 component なので、`raw -> WYSIWYG` 切替時は mode を `key` に含めて再生成する設計にする必要がある
 * Integral 独自 block は `itg-notes` fenced code block として markdown に保存されており、raw mode で直接編集しても保存経路自体は壊れない。内容が不正でも WYSIWYG 側では custom block view 内で parse error として扱えるため、設計上は許容しやすい
 * 2026-04-14 再整理: Issue 20 により、frontmatter 隠蔽は `data-catalog/` 配下の data-note 限定ではなく、`cwd` 配下の Markdown 全体の標準動作になった
@@ -28,6 +29,11 @@
 * この定義なら、`WYSIWYG` と `raw text` が同じ本文 string state を共有でき、frontmatter 保持・保存導線・tab 管理をそのまま再利用しやすい
 * 一方で full-file raw 編集まで求めると、frontmatter 表示 UX、保存契約、rename / move 時の本文-only rewrite、managed data-note metadata 保護をまとめて再設計する必要があり、Issue 3 単体としては重い
 * 結論として、current Issue 3 は `Markdown tab 向けの body-only source editing mode` として切るのが妥当で、frontmatter を含む完全な生ファイル編集は別 Issue に分離した方がよい
+* 2026-04-15 実装:
+  - `src/renderer/App.tsx` の markdown tab state に `editorMode` を追加し、tab 内右上 button から `WYSIWYG` と `body-only text` を切り替えられるようにした
+  - `src/renderer/RawMarkdownEditor.tsx` を追加し、frontmatter を見せずに本文だけを monospaced textarea で編集できるようにした
+  - `src/renderer/MilkdownEditor.tsx` に共通 toolbar slot を追加し、mode 切替 UI を WYSIWYG 側と text 側で同じ位置に揃えた
+  - `Ctrl+S` 保存、dirty 判定、frontmatter 保持、Markdown link / image rewrite は既存の本文 string 契約をそのまま再利用している
 
 ## [x] 5. blob/chunk/block ベースの解析基盤を設計・実装したい
 - 優先重み:9

@@ -31,6 +31,7 @@ import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { PluginManagerDialog } from "./PluginManagerDialog";
 import { PythonScriptDialog } from "./PythonScriptDialog";
+import { RawMarkdownEditor } from "./RawMarkdownEditor";
 import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import {
@@ -39,8 +40,10 @@ import {
 } from "./integralSnippetMenu";
 
 type ReadonlyWorkspaceFileKind = Exclude<WorkspaceFileViewKind, "markdown">;
+type MarkdownEditorMode = "wysiwyg" | "text";
 
 interface OpenMarkdownTab extends NoteDocument {
+  editorMode: MarkdownEditorMode;
   isSaving: boolean;
   savedContent: string;
 }
@@ -331,6 +334,7 @@ function createOpenTab(document: WorkspaceFileDocument): OpenWorkspaceTab {
   if (document.kind === "markdown") {
     return {
       content: document.content ?? "",
+      editorMode: "wysiwyg",
       isSaving: false,
       kind: "markdown",
       modifiedAt: document.modifiedAt,
@@ -1853,6 +1857,39 @@ export function App(): JSX.Element {
     syncTabLabel(relativePath, currentTab.name, isDirty(nextTab));
   };
 
+  const setMarkdownEditorMode = (
+    relativePath: string,
+    nextEditorMode: MarkdownEditorMode
+  ): void => {
+    const currentTab = openTabsRef.current[relativePath];
+
+    if (!isMarkdownTab(currentTab) || currentTab.editorMode === nextEditorMode) {
+      return;
+    }
+
+    setOpenTabs((currentTabs) => {
+      const activeTab = currentTabs[relativePath];
+
+      if (!isMarkdownTab(activeTab) || activeTab.editorMode === nextEditorMode) {
+        return currentTabs;
+      }
+
+      return {
+        ...currentTabs,
+        [relativePath]: {
+          ...activeTab,
+          editorMode: nextEditorMode
+        }
+      };
+    });
+
+    setStatusMessage(
+      nextEditorMode === "text"
+        ? `${currentTab.name} を Markdown 編集で編集中`
+        : `${currentTab.name} を見たまま編集で編集中`
+    );
+  };
+
   const handleLayoutModelChange = (
     nextModel: FlexLayout.Model,
     action: FlexLayout.Action
@@ -1912,11 +1949,45 @@ export function App(): JSX.Element {
     }
 
     if (isMarkdownTab(tab)) {
+      const toggleLabel = tab.editorMode === "wysiwyg" ? "Markdown編集" : "見たまま編集";
+      const editorToolbar = (
+        <button
+          className="button button--ghost button--xs editor-mode-toggle"
+          onClick={() => {
+            setMarkdownEditorMode(
+              relativePath,
+              tab.editorMode === "wysiwyg" ? "text" : "wysiwyg"
+            );
+          }}
+          title={
+            tab.editorMode === "wysiwyg"
+              ? "本文を Markdown テキストとして編集します。frontmatter は保持されます。"
+              : "本文を見たまま編集に戻します。frontmatter は保持されます。"
+          }
+          type="button"
+        >
+          {toggleLabel}
+        </button>
+      );
+
+      if (tab.editorMode === "text") {
+        return (
+          <RawMarkdownEditor
+            isActive={selectedTabPath === relativePath}
+            onChange={(markdown) => {
+              updateTabContent(relativePath, markdown);
+            }}
+            toolbar={editorToolbar}
+            value={tab.content}
+          />
+        );
+      }
+
       return (
         <MilkdownEditor
           initialValue={tab.content}
           isActive={selectedTabPath === relativePath}
-          key={`${relativePath}:${pluginCatalogRevision}`}
+          key={`${relativePath}:${tab.editorMode}:${pluginCatalogRevision}`}
           onChange={(markdown) => {
             updateTabContent(relativePath, markdown);
           }}
@@ -1933,6 +2004,7 @@ export function App(): JSX.Element {
           onWorkspaceLinkError={(message) => {
             setStatusMessage(message);
           }}
+          toolbar={editorToolbar}
           workspaceEntries={workspace?.entries ?? []}
         />
       );

@@ -633,13 +633,37 @@ textarea:focus-visible {
 
 .editor-shell {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 0;
   background: var(--app-bg);
 }
 
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #fafbfd;
+}
+
+.editor-mode-toggle {
+  color: var(--text-2);
+}
+
 .editor-surface {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: var(--app-bg);
+}
+
+.editor-surface--raw {
+  padding: 24px;
+  background: linear-gradient(180deg, #edf1f6, #e8edf3);
 }
 
 .editor-surface .milkdown {
@@ -659,6 +683,32 @@ textarea:focus-visible {
   box-shadow:
     0 0 0 1px rgba(35, 46, 60, 0.04),
     0 18px 36px rgba(35, 46, 60, 0.08);
+}
+
+.raw-markdown-editor {
+  display: block;
+  width: min(980px, 100%);
+  min-height: calc(100vh - 230px);
+  margin: 0 auto;
+  padding: 56px 72px;
+  border: 1px solid #d8d8d8;
+  border-radius: 2px;
+  background: #ffffff;
+  color: var(--text-0);
+  box-shadow:
+    0 0 0 1px rgba(35, 46, 60, 0.04),
+    0 18px 36px rgba(35, 46, 60, 0.08);
+  font-family:
+    "Cascadia Mono",
+    "Consolas",
+    "SFMono-Regular",
+    monospace;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  tab-size: 2;
 }
 
 .editor-surface .milkdown .integral-code-block {
@@ -2010,7 +2060,16 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
     padding: 12px;
   }
 
+  .editor-surface--raw {
+    padding: 12px;
+  }
+
   .editor-surface .milkdown .editor {
+    min-height: calc(100vh - 280px);
+    padding: 28px 22px;
+  }
+
+  .raw-markdown-editor {
     min-height: calc(100vh - 280px);
     padding: 28px 22px;
   }
