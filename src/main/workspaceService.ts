@@ -15,6 +15,14 @@ import type {
   WorkspaceFileDocument,
   WorkspaceSnapshot
 } from "../shared/workspace";
+import {
+  buildOriginalDataNoteMarkdown,
+  createOriginalDataNoteFileName,
+  extractOriginalDataNoteBody,
+  hasOriginalDataNoteFrontmatter,
+  replaceOriginalDataNoteBody,
+  type OriginalDataNoteMetadata
+} from "./originalDataNote";
 
 interface WorkspaceServiceOptions {
   initialRootPath?: string;
@@ -25,16 +33,6 @@ interface PersistedWorkspaceState {
   rootPath?: string;
 }
 
-interface OriginalDataNoteMetadata {
-  aliasRelativePath: string;
-  createdAt: string;
-  originalDataId: string;
-  originalName: string;
-  sourceKind: "directory" | "file";
-  storeRelativePath: string;
-}
-
-const NOTES_DIRECTORY = "Notes";
 const DATA_CATALOG_DIRECTORY = "data-catalog";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
@@ -115,7 +113,6 @@ export class WorkspaceService {
 
     await fs.mkdir(rootPath, { recursive: true });
     await Promise.all([
-      fs.mkdir(path.join(rootPath, NOTES_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, DATA_CATALOG_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
@@ -180,7 +177,15 @@ export class WorkspaceService {
       throw new Error("Markdownノートのみ保存できます。");
     }
 
-    await fs.writeFile(absolutePath, content, "utf8");
+    const existingContent = await fs.readFile(absolutePath, "utf8");
+    const nextContent =
+      this.isDataCatalogNotePath(relativePath) && hasOriginalDataNoteFrontmatter(existingContent)
+        ? replaceOriginalDataNoteBody(existingContent, content)
+        : content;
+
+    if (existingContent !== nextContent) {
+      await fs.writeFile(absolutePath, nextContent, "utf8");
+    }
 
     return this.readNote(relativePath);
   }
@@ -327,8 +332,13 @@ export class WorkspaceService {
     const extension = path.extname(absolutePath).toLowerCase();
 
     if (extension === ".md") {
+      const markdownContent = await fs.readFile(absolutePath, "utf8");
+
       return {
-        content: await fs.readFile(absolutePath, "utf8"),
+        content:
+          this.isDataCatalogNotePath(relativePath) && hasOriginalDataNoteFrontmatter(markdownContent)
+            ? extractOriginalDataNoteBody(markdownContent)
+            : markdownContent,
         kind: "markdown",
         modifiedAt: stats.mtime.toISOString(),
         name: path.basename(absolutePath),
@@ -448,6 +458,10 @@ export class WorkspaceService {
     return isDirectory || name.length > 0;
   }
 
+  private isDataCatalogNotePath(relativePath: string): boolean {
+    return relativePath === DATA_CATALOG_DIRECTORY || relativePath.startsWith(`${DATA_CATALOG_DIRECTORY}/`);
+  }
+
   private async syncOriginalDataNotes(rootPath: string): Promise<void> {
     const metadataRootPath = path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY);
     const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
@@ -479,26 +493,14 @@ export class WorkspaceService {
             dataCatalogRootPath,
             createOriginalDataNoteFileName(originalName, originalDataId)
           );
-          const aliasRelativePath = path
-            .relative(path.dirname(dataNotePath), path.join(rootPath, ...metadata.aliasRelativePath.split("/")))
-            .split(path.sep)
-            .join("/");
-          const noteStoreRelativePath = path
-            .relative(path.dirname(dataNotePath), path.join(rootPath, ...metadata.storeRelativePath.split("/")))
-            .split(path.sep)
-            .join("/");
-          const lines = [
-            `# ${originalName}_${originalDataId}`,
-            "",
-            `- Original Name: ${originalName}`,
-            `- Original Data ID: ${originalDataId}`,
-            `- Source Kind: ${metadata.sourceKind}`,
-            `- Created At: ${metadata.createdAt}`,
-            `- Alias Path: \`${aliasRelativePath}\``,
-            `- Store Path: \`${noteStoreRelativePath}\``
-          ];
+          const existingContent = await readTextFileIfExists(dataNotePath);
+          const nextContent = buildOriginalDataNoteMarkdown(metadata, existingContent);
 
-          await fs.writeFile(dataNotePath, `${lines.join("\n")}\n`, "utf8");
+          if (normalizeForComparison(existingContent) === nextContent) {
+            return;
+          }
+
+          await fs.writeFile(dataNotePath, nextContent, "utf8");
         })
     );
   }
@@ -563,22 +565,20 @@ export class WorkspaceService {
   }
 }
 
-function createOriginalDataNoteFileName(originalName: string, originalDataId: string): string {
-  const normalizedOriginalName = sanitizeFileNameSegment(originalName);
-  return `${normalizedOriginalName}_${originalDataId}.md`;
-}
-
-function sanitizeFileNameSegment(value: string): string {
-  const sanitized = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
-    .replace(/[. ]+$/gu, "");
-
-  return sanitized.length > 0 ? sanitized : "original-data";
-}
-
 function isProbablyTextFile(buffer: Buffer): boolean {
   return !buffer.includes(0);
+}
+
+async function readTextFileIfExists(filePath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeForComparison(value: string | undefined): string | undefined {
+  return value?.replace(/\r\n?/gu, "\n");
 }
 
 function injectHtmlBaseTag(document: string, baseDirectoryPath: string): string {

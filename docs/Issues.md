@@ -76,7 +76,8 @@
 * まずは `1. 文書 2. コード 3. フォルダ命名規則 4. UI` の順で進めたい
 * 既存の開発用 workspace / note / link path も壊さないよう、必要なら migration を入れたい
 
-## [ ] 10. data-note の metadata を frontmatter 化し、本文だけを表示したい
+## [x] 10. data-note の metadata を frontmatter 化し、本文だけを表示したい
+- Status:completed
 - 優先重み:5
 - 記載日時:2026-04-14-10:17(UTC+9)
 
@@ -138,3 +139,23 @@
   - まず関連文書を精査し、`docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` を現在方針へ完全更新する
   - 次に実装を更新する
   - 最後に、既存の未実装 Issue について、現在の設計に合わせて修正が必要なら見直す
+
+## [ ] 14. dataset / original data の ID prefix を `DTS-` / `ORD-` に変更したい
+- 優先重み:4
+- 記載日時:2026-04-14-13:39(UTC+9)
+
+* 現状の `CNK-...` / `BLB-...` は旧用語由来で、現在の `dataset` / `original data` 命名と揃っていない
+* `CNK-...` は `DTS-...`、`BLB-...` は `ORD-...` へ寄せたい
+* 少なくとも `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計`, `docs/Issues.md`, `src/` 配下の表示文言・型名・metadata 例を見直したい
+* `.store/.integral/*.json`, data-note frontmatter / 本文, `Data/` alias 名, `.py-scripts` や block JSON との参照整合も確認したい
+* 未リリース前提なので migration を持たない前提で一気に切り替えるか、開発用 workspace 向けに最小 migration を入れるかを実装前に決めたい
+
+## [ ] 15. dataset 作成時も data-catalog に data-note を生成したい
+- 優先重み:4
+- 記載日時:2026-04-14-13:39(UTC+9)
+
+* 現状は original data の data-note は自動生成しているが、dataset には対応する data-note が自動生成されていない
+* source dataset / derived dataset のどちらでも、生成時に `data-catalog/` へ対応する data-note を作りたい
+* data-note には dataset ID, kind, createdAt, createdByBlockId, sourceMembers など、検索や参照に使いたい metadata を frontmatter で保持したい
+* block 実行結果から dataset をたどるだけでなく、catalog 側から dataset を見つけてノートへ参照しやすい導線にしたい
+* dataset 再生成時の重複生成や更新方針、GC 時に data-note をどう扱うかも整理したい

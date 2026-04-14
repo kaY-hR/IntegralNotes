@@ -62,18 +62,18 @@ export function MilkdownEditor({
 
       installIntegralCodeBlockFeature(editor);
 
-      editor.on((listener) => {
-        listener.markdownUpdated((_ctx, markdown) => {
-          onChangeRef.current(markdown);
-        });
-      });
-
       await editor.create();
 
       if (shouldDestroyAfterCreate) {
         void editor.destroy();
         return;
       }
+
+      editor.on((listener) => {
+        listener.markdownUpdated((_ctx, markdown) => {
+          onChangeRef.current(markdown);
+        });
+      });
 
       editorRef.current = editor;
     })();

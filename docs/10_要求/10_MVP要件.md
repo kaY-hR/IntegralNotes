@@ -6,6 +6,7 @@
 - original data には一意 ID `BLB-...` を付与する
 - `1 original data = 1 data note` を基本とする
 - data note はユーザーがノート上で参照できる
+- original data の data note metadata は frontmatter に持たせ、editor / viewer には本文だけを渡す
 - canonical 実体は `.store/` に置く
 - metadata は `.store/.integral/{originalDataId}.json` に置く
 - file original data の実体は `.store/{originalDataId}{ext}` に置く

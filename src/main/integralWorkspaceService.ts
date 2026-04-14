@@ -26,6 +26,10 @@ import type {
 } from "../shared/integral";
 import type { InstalledPluginDefinition } from "../shared/plugins";
 import { PluginRegistry } from "./pluginRegistry";
+import {
+  buildOriginalDataNoteMarkdown,
+  createOriginalDataNoteFileName
+} from "./originalDataNote";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
@@ -615,29 +619,14 @@ export class IntegralWorkspaceService {
     const dataNotePath = this.resolveWorkspacePath(
       `${DATA_CATALOG_DIRECTORY}/${createOriginalDataNoteFileName(metadata.originalName, metadata.originalDataId)}`
     );
-    const aliasRelativePath = path
-      .relative(path.dirname(dataNotePath), this.resolveOriginalDataAliasPath(metadata))
-      .split(path.sep)
-      .join("/");
-    const storeRelativePath = path
-      .relative(
-        path.dirname(dataNotePath),
-        this.resolveOriginalDataStorePath(metadata)
-      )
-      .split(path.sep)
-      .join("/");
-    const lines = [
-      `# ${metadata.originalName}_${metadata.originalDataId}`,
-      "",
-      `- Original Name: ${metadata.originalName}`,
-      `- Original Data ID: ${metadata.originalDataId}`,
-      `- Source Kind: ${metadata.sourceKind}`,
-      `- Created At: ${metadata.createdAt}`,
-      `- Alias Path: \`${aliasRelativePath}\``,
-      `- Store Path: \`${storeRelativePath}\``
-    ];
+    const existingContent = await readTextFileIfExists(dataNotePath);
+    const nextContent = buildOriginalDataNoteMarkdown(metadata, existingContent);
 
-    await fs.writeFile(dataNotePath, `${lines.join("\n")}\n`, "utf8");
+    if (normalizeForComparison(existingContent) === nextContent) {
+      return;
+    }
+
+    await fs.writeFile(dataNotePath, nextContent, "utf8");
   }
 
   private async writePythonExecutionLogs(
@@ -813,10 +802,6 @@ export class IntegralWorkspaceService {
 
   private resolveOriginalDataStorePath(metadata: OriginalDataMetadata): string {
     return this.resolveWorkspacePath(metadata.storeRelativePath);
-  }
-
-  private resolveOriginalDataAliasPath(metadata: OriginalDataMetadata): string {
-    return this.resolveWorkspacePath(metadata.aliasRelativePath);
   }
 
   private isWorkspacePath(rootPath: string, absolutePath: string): boolean {
@@ -1181,20 +1166,6 @@ function createVisibleAliasEntryName(
   return `${normalizedBaseName}_${originalDataId}${extension}`;
 }
 
-function createOriginalDataNoteFileName(originalName: string, originalDataId: string): string {
-  const normalizedOriginalName = sanitizeFileNameSegment(originalName);
-  return `${normalizedOriginalName}_${originalDataId}.md`;
-}
-
-function sanitizeFileNameSegment(value: string): string {
-  const sanitized = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
-    .replace(/[. ]+$/gu, "");
-
-  return sanitized.length > 0 ? sanitized : "original-data";
-}
-
 async function collectRelativeFiles(rootPath: string, basePath = rootPath): Promise<string[]> {
   const entries = await fs.readdir(rootPath, { withFileTypes: true });
   const files: string[] = [];
@@ -1233,6 +1204,18 @@ async function pathExists(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readTextFileIfExists(filePath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeForComparison(value: string | undefined): string | undefined {
+  return value?.replace(/\r\n?/gu, "\n");
 }
 
 function splitLogLines(value: string): string[] {
