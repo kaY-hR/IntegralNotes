@@ -160,6 +160,13 @@ textarea:focus-visible {
   padding: 10px 6px 12px;
 }
 
+.sidebar__tree.is-drop-target {
+  background:
+    linear-gradient(180deg, rgba(14, 99, 156, 0.08), rgba(14, 99, 156, 0.04)),
+    rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(14, 99, 156, 0.28);
+}
+
 .sidebar__placeholder {
   padding: 12px 10px;
   color: var(--text-2);
@@ -421,9 +428,20 @@ textarea:focus-visible {
   color: #16324f;
 }
 
+.tree-row.is-primary-selected {
+  background: #bddfff;
+  color: #16324f;
+}
+
 .tree-row.is-editing {
   background: #dcebfb;
   color: #16324f;
+}
+
+.tree-row.is-drop-target {
+  background: #d7ebff;
+  color: #16324f;
+  box-shadow: inset 0 0 0 1px rgba(14, 99, 156, 0.34);
 }
 
 .tree-row__main {
@@ -566,6 +584,11 @@ textarea:focus-visible {
 .workspace-file-viewer__message p {
   margin: 0;
   color: var(--text-2);
+}
+
+.workspace-file-viewer__actions {
+  display: flex;
+  justify-content: center;
 }
 
 .workspace-file-viewer__card {
@@ -1975,4 +1998,3 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
     text-align: left;
   }
 }
-

@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 import type {
   CreateSourceDatasetRequest,
+  CreateSourceDatasetFromWorkspaceEntriesRequest,
   CreateSourceDatasetResult,
   ExecuteIntegralBlockRequest,
   ExecuteIntegralBlockResult,
@@ -266,6 +267,43 @@ export class IntegralWorkspaceService {
     return {
       dataset: await this.readDatasetSummary(datasetId)
     };
+  }
+
+  async createSourceDatasetFromWorkspaceEntries(
+    request: CreateSourceDatasetFromWorkspaceEntriesRequest
+  ): Promise<CreateSourceDatasetResult> {
+    await this.workspaceService.ensureWorkspaceReady();
+
+    const relativePaths = collapseNestedRelativePaths(request.relativePaths);
+
+    if (relativePaths.length === 0) {
+      throw new Error("dataset に追加するファイルまたはフォルダを選択してください。");
+    }
+
+    const originalDataIds: string[] = [];
+
+    for (const relativePath of relativePaths) {
+      const existingMetadata = await this.findOriginalDataMetadataByAliasRelativePath(relativePath);
+
+      if (existingMetadata) {
+        originalDataIds.push(existingMetadata.originalDataId);
+        continue;
+      }
+
+      const importResult = await this.importOriginalDataPaths([this.resolveWorkspacePath(relativePath)]);
+      const importedOriginalDataId = importResult.originalData[0]?.originalDataId;
+
+      if (!importedOriginalDataId) {
+        throw new Error(`${relativePath} を元データとして登録できませんでした。`);
+      }
+
+      originalDataIds.push(importedOriginalDataId);
+    }
+
+    return this.createSourceDataset({
+      name: request.name,
+      originalDataIds
+    });
   }
 
   async registerPythonScript(
@@ -655,6 +693,31 @@ export class IntegralWorkspaceService {
     return readJsonFile<OriginalDataMetadata>(
       path.join(this.resolveStoreMetadataRootPath(), `${originalDataId}.json`)
     );
+  }
+
+  private async findOriginalDataMetadataByAliasRelativePath(
+    relativePath: string
+  ): Promise<OriginalDataMetadata | null> {
+    const metadataRootPath = this.resolveStoreMetadataRootPath();
+    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+    for (const entry of entries) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") {
+        continue;
+      }
+
+      const metadata = await readJsonFile<OriginalDataMetadata>(path.join(metadataRootPath, entry.name));
+
+      if (
+        metadata?.originalDataId &&
+        normalizeRelativePath(metadata.aliasRelativePath) === normalizedRelativePath
+      ) {
+        return metadata;
+      }
+    }
+
+    return null;
   }
 
   private async readDatasetMetadata(datasetId: string): Promise<DatasetMetadata | null> {
@@ -1277,6 +1340,34 @@ function createVisibleAliasEntryName(
   const baseName = extension.length > 0 ? trimmedName.slice(0, -extension.length) : trimmedName;
   const normalizedBaseName = baseName.length > 0 ? baseName : originalDataId;
   return `${normalizedBaseName}_${originalDataId}${extension}`;
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath
+    .split(/[\\/]+/u)
+    .filter(Boolean)
+    .join("/");
+}
+
+function collapseNestedRelativePaths(relativePaths: string[]): string[] {
+  const normalized = Array.from(
+    new Set(
+      relativePaths
+        .map((value) => normalizeRelativePath(value.trim()))
+        .filter((value) => value.length > 0)
+    )
+  ).sort((left, right) => left.length - right.length || left.localeCompare(right, "ja"));
+  const collapsed: string[] = [];
+
+  for (const candidate of normalized) {
+    if (collapsed.some((existing) => candidate === existing || candidate.startsWith(`${existing}/`))) {
+      continue;
+    }
+
+    collapsed.push(candidate);
+  }
+
+  return collapsed;
 }
 
 async function collectRelativeFiles(rootPath: string, basePath = rootPath): Promise<string[]> {

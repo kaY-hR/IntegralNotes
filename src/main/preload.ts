@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webFrame } from "electron";
+import { clipboard, contextBridge, ipcRenderer, webFrame } from "electron";
 
 import type { IntegralNotesApi } from "../shared/workspace";
 
@@ -26,6 +26,8 @@ const api: IntegralNotesApi = {
   browsePythonSupportFiles: (entryAbsolutePath) =>
     ipcRenderer.invoke("integral:browsePythonSupportFiles", entryAbsolutePath),
   createSourceDataset: (request) => ipcRenderer.invoke("integral:createSourceDataset", request),
+  createSourceDatasetFromWorkspaceEntries: (request) =>
+    ipcRenderer.invoke("integral:createSourceDatasetFromWorkspaceEntries", request),
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
   zoomIn: () => adjustZoomLevel("in"),
@@ -47,6 +49,15 @@ const api: IntegralNotesApi = {
   createEntry: (request) => ipcRenderer.invoke("workspace:createEntry", request),
   renameEntry: (request) => ipcRenderer.invoke("workspace:renameEntry", request),
   deleteEntry: (request) => ipcRenderer.invoke("workspace:deleteEntry", request),
+  deleteEntries: (request) => ipcRenderer.invoke("workspace:deleteEntries", request),
+  copyEntries: (request) => ipcRenderer.invoke("workspace:copyEntries", request),
+  moveEntries: (request) => ipcRenderer.invoke("workspace:moveEntries", request),
+  copyExternalEntries: (request) => ipcRenderer.invoke("workspace:copyExternalEntries", request),
+  saveClipboardImage: (request) => ipcRenderer.invoke("workspace:saveClipboardImage", request),
+  writeClipboardText: (text) => clipboard.writeText(text),
+  clipboardHasImage: () => !clipboard.readImage().isEmpty(),
+  openPathInExternalApp: (relativePath) =>
+    ipcRenderer.invoke("workspace:openPathInExternalApp", relativePath),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("plugins:uninstall", pluginId),
   executeIntegralBlock: (request) => ipcRenderer.invoke("integral:executeBlock", request),
   executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request)

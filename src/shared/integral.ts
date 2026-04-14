@@ -121,6 +121,11 @@ export interface CreateSourceDatasetRequest {
   name?: string;
 }
 
+export interface CreateSourceDatasetFromWorkspaceEntriesRequest {
+  name?: string;
+  relativePaths: string[];
+}
+
 export interface CreateSourceDatasetResult {
   dataset: IntegralDatasetSummary;
 }

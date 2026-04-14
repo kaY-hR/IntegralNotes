@@ -1,16 +1,22 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 
 import type {
   CreateSourceDatasetRequest,
+  CreateSourceDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
   RegisterPythonScriptRequest
 } from "../shared/integral";
 import type {
+  CopyEntriesRequest,
+  CopyExternalEntriesRequest,
   CreateEntryRequest,
+  DeleteEntriesRequest,
   DeleteEntryRequest,
   ExecuteIntegralActionRequest,
+  MoveEntriesRequest,
   RenameEntryRequest,
+  SaveClipboardImageRequest,
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
@@ -174,6 +180,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle("integral:createSourceDataset", async (_event, request: CreateSourceDatasetRequest) =>
     getIntegralWorkspaceService().createSourceDataset(request)
   );
+  ipcMain.handle(
+    "integral:createSourceDatasetFromWorkspaceEntries",
+    async (_event, request: CreateSourceDatasetFromWorkspaceEntriesRequest) =>
+      getIntegralWorkspaceService().createSourceDatasetFromWorkspaceEntries(request)
+  );
   ipcMain.handle("integral:inspectDataset", async (_event, datasetId: string) =>
     getIntegralWorkspaceService().inspectDataset(datasetId)
   );
@@ -278,6 +289,34 @@ function registerIpcHandlers(): void {
   ipcMain.handle("workspace:deleteEntry", async (_event, request: DeleteEntryRequest) =>
     workspaceService.deleteEntry(request)
   );
+  ipcMain.handle("workspace:deleteEntries", async (_event, request: DeleteEntriesRequest) =>
+    workspaceService.deleteEntries(request)
+  );
+  ipcMain.handle("workspace:copyEntries", async (_event, request: CopyEntriesRequest) =>
+    workspaceService.copyEntries(request)
+  );
+  ipcMain.handle("workspace:moveEntries", async (_event, request: MoveEntriesRequest) =>
+    workspaceService.moveEntries(request)
+  );
+  ipcMain.handle("workspace:copyExternalEntries", async (_event, request: CopyExternalEntriesRequest) =>
+    workspaceService.copyExternalEntries(request)
+  );
+  ipcMain.handle("workspace:saveClipboardImage", async (_event, request: SaveClipboardImageRequest) => {
+    const image = clipboard.readImage();
+
+    if (image.isEmpty()) {
+      throw new Error("クリップボードに画像がありません。");
+    }
+
+    return workspaceService.savePngImage(request, image.toPNG());
+  });
+  ipcMain.handle("workspace:openPathInExternalApp", async (_event, relativePath: string) => {
+    const errorMessage = await shell.openPath(workspaceService.getAbsolutePath(relativePath));
+
+    if (errorMessage.trim().length > 0) {
+      throw new Error(errorMessage);
+    }
+  });
   ipcMain.handle("integral:executeAction", async (_event, request: ExecuteIntegralActionRequest) =>
     getPluginRegistry().executeAction(request)
   );

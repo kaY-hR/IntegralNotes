@@ -1,15 +1,18 @@
 import * as FlexLayout from "flexlayout-react";
-import { useEffect, useRef, useState } from "react";
+import { type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 
 import type {
   IntegralOriginalDataSummary,
   RegisterPythonScriptResult
 } from "../shared/integral";
 import type {
+  CopyEntriesResult,
   CreateEntryResult,
-  DeleteEntryResult,
+  DeleteEntriesResult,
+  MoveEntriesResult,
   NoteDocument,
   RenameEntryResult,
+  SaveClipboardImageResult,
   UninstallPluginResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
@@ -47,8 +50,7 @@ type OpenWorkspaceTab = OpenMarkdownTab | OpenReadonlyTab;
 interface DeleteDialogState {
   confirmLabel: string;
   description: string;
-  targetKind: WorkspaceEntryKind;
-  targetPath: string;
+  targetPaths: string[];
   title: string;
 }
 
@@ -59,9 +61,19 @@ interface TreeContextMenuState {
   y: number;
 }
 
+interface DatasetCreationDialogState {
+  defaultName: string;
+  relativePaths: string[];
+}
+
+interface ExplorerClipboardState {
+  sourcePaths: string[];
+}
+
 const MAIN_TABSET_ID = "editor-main";
 const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
+const TREE_DRAG_MIME = "application/x-integralnotes-workspace-selection";
 
 function createLayoutModel(): FlexLayout.Model {
   return FlexLayout.Model.fromJson({
@@ -146,6 +158,67 @@ function dirname(relativePath: string): string {
   }
 
   return parts.slice(0, -1).join("/");
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath
+    .split(/[\\/]+/u)
+    .filter(Boolean)
+    .join("/");
+}
+
+function collapseNestedSelection(relativePaths: Iterable<string>): string[] {
+  const normalized = Array.from(
+    new Set(
+      Array.from(relativePaths)
+        .map((value) => normalizeRelativePath(value))
+        .filter((value) => value.length > 0)
+    )
+  ).sort((left, right) => left.length - right.length || left.localeCompare(right, "ja"));
+  const collapsed: string[] = [];
+
+  for (const candidate of normalized) {
+    if (collapsed.some((existing) => candidate === existing || candidate.startsWith(`${existing}/`))) {
+      continue;
+    }
+
+    collapsed.push(candidate);
+  }
+
+  return collapsed;
+}
+
+function findEntriesByPaths(entries: WorkspaceEntry[], relativePaths: Iterable<string>): WorkspaceEntry[] {
+  return collapseNestedSelection(relativePaths)
+    .map((relativePath) => findEntryByPath(entries, relativePath))
+    .filter((entry): entry is WorkspaceEntry => entry !== undefined);
+}
+
+function getEntryDirectoryPath(entry: WorkspaceEntry | undefined): string {
+  if (!entry) {
+    return "";
+  }
+
+  return entry.kind === "directory" ? entry.relativePath : dirname(entry.relativePath);
+}
+
+function joinWorkspaceAbsolutePath(rootPath: string, relativePath: string): string {
+  if (relativePath.length === 0) {
+    return rootPath;
+  }
+
+  const separator = rootPath.includes("\\") ? "\\" : "/";
+  const normalizedRootPath = rootPath.replace(/[\\/]+$/u, "");
+  return `${normalizedRootPath}${separator}${relativePath.split("/").join(separator)}`;
+}
+
+function createDefaultDatasetName(entries: readonly WorkspaceEntry[]): string {
+  if (entries.length === 1) {
+    const [entry] = entries;
+    return entry.kind === "file" ? entry.name.replace(/\.[^.]+$/u, "") : entry.name;
+  }
+
+  return "";
 }
 
 function findFirstFile(entries: WorkspaceEntry[]): WorkspaceEntry | undefined {
@@ -304,8 +377,8 @@ function isZoomResetShortcut(event: KeyboardEvent): boolean {
 }
 
 function clampContextMenuPosition(x: number, y: number): Pick<TreeContextMenuState, "x" | "y"> {
-  const menuWidth = 188;
-  const menuHeight = 196;
+  const menuWidth = 196;
+  const menuHeight = 360;
 
   return {
     x: Math.max(8, Math.min(x, window.innerWidth - menuWidth)),
@@ -317,6 +390,7 @@ export function App(): JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
   const [openTabs, setOpenTabs] = useState<Record<string, OpenWorkspaceTab>>({});
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
+  const [selectedEntryPaths, setSelectedEntryPaths] = useState<Set<string>>(new Set());
   const [selectedTabId, setSelectedTabId] = useState<string | undefined>(undefined);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [statusMessage, setStatusMessage] = useState("ワークスペースを読み込み中...");
@@ -326,6 +400,10 @@ export function App(): JSX.Element {
   const [inlineEditor, setInlineEditor] = useState<FileTreeInlineEditorState | null>(null);
   const [inlineEditorPending, setInlineEditorPending] = useState(false);
   const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const [explorerClipboard, setExplorerClipboard] = useState<ExplorerClipboardState | null>(null);
+  const [datasetCreationDialog, setDatasetCreationDialog] = useState<DatasetCreationDialogState | null>(null);
+  const [datasetCreationPending, setDatasetCreationPending] = useState(false);
   const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
@@ -339,10 +417,12 @@ export function App(): JSX.Element {
   const sidebarRef = useRef<HTMLElement>(null);
 
   const selectedEntry = workspace ? findEntryByPath(workspace.entries, selectedEntryPath) : undefined;
+  const selectedEntries = workspace ? findEntriesByPaths(workspace.entries, selectedEntryPaths) : [];
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
   const activeTab = selectedTabPath ? openTabs[selectedTabPath] : undefined;
   const hasBlockingDialog =
     deleteDialog !== null ||
+    datasetCreationDialog !== null ||
     dataRegistrationDialogOpen ||
     pythonScriptDialogOpen ||
     pluginDialogOpen;
@@ -391,10 +471,12 @@ export function App(): JSX.Element {
     shouldAutoOpenInitialFileRef.current = false;
     setInlineEditor(null);
     setContextMenu(null);
+    setDropTargetPath(null);
     setDeleteDialog(null);
     resetOpenTabs();
     setWorkspace(null);
     setSelectedEntryPath("");
+    setSelectedEntryPaths(new Set());
     setExpandedPaths(new Set());
     setStatusMessage(nextStatusMessage);
   };
@@ -408,11 +490,13 @@ export function App(): JSX.Element {
   ): void => {
     setInlineEditor(null);
     setContextMenu(null);
+    setDropTargetPath(null);
 
     if (options.resetTabs) {
       shouldAutoOpenInitialFileRef.current = true;
       resetOpenTabs();
       setSelectedEntryPath("");
+      setSelectedEntryPaths(new Set());
       setExpandedPaths(defaultExpandedPaths(snapshot.entries));
     } else {
       closeTabsMatching((relativePath) => !hasEntry(snapshot.entries, relativePath));
@@ -421,6 +505,16 @@ export function App(): JSX.Element {
       if (!hasEntry(snapshot.entries, selectedEntryPath)) {
         setSelectedEntryPath("");
       }
+
+      setSelectedEntryPaths((current) => {
+        const next = new Set(Array.from(current).filter((entryPath) => hasEntry(snapshot.entries, entryPath)));
+
+        if (selectedEntryPath.length > 0 && hasEntry(snapshot.entries, selectedEntryPath)) {
+          next.add(selectedEntryPath);
+        }
+
+        return next;
+      });
     }
 
     setWorkspace(snapshot);
@@ -518,6 +612,47 @@ export function App(): JSX.Element {
 
   const openPythonScriptDialog = (): void => {
     setPythonScriptDialogOpen(true);
+  };
+
+  const replaceSelection = (relativePaths: Iterable<string>, primaryPath = ""): void => {
+    const normalizedPaths = collapseNestedSelection(relativePaths);
+    setSelectedEntryPath(primaryPath);
+    setSelectedEntryPaths(new Set(normalizedPaths));
+  };
+
+  const selectSingleEntry = (relativePath: string): void => {
+    replaceSelection(relativePath.length > 0 ? [relativePath] : [], relativePath);
+  };
+
+  const toggleEntrySelection = (entry: WorkspaceEntry): void => {
+    setSelectedEntryPath(entry.relativePath);
+    setSelectedEntryPaths((current) => {
+      const next = new Set(current);
+
+      if (next.has(entry.relativePath)) {
+        next.delete(entry.relativePath);
+      } else {
+        next.add(entry.relativePath);
+      }
+
+      return new Set(collapseNestedSelection(next));
+    });
+  };
+
+  const getActiveSelectionEntries = (fallbackEntry?: WorkspaceEntry): WorkspaceEntry[] => {
+    if (!workspace) {
+      return [];
+    }
+
+    if (fallbackEntry && selectedEntryPaths.has(fallbackEntry.relativePath)) {
+      return findEntriesByPaths(workspace.entries, selectedEntryPaths);
+    }
+
+    if (selectedEntries.length > 0) {
+      return selectedEntries;
+    }
+
+    return fallbackEntry ? [fallbackEntry] : [];
   };
 
   const handleImportedOriginalData = async (
@@ -742,7 +877,7 @@ export function App(): JSX.Element {
         return;
       }
 
-      if (inlineEditor || deleteDialog || !selectedEntry) {
+      if (inlineEditor || deleteDialog || datasetCreationDialog) {
         return;
       }
 
@@ -758,17 +893,29 @@ export function App(): JSX.Element {
         return;
       }
 
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        copySelectedEntriesToClipboard();
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        void pasteIntoWorkspace();
+        return;
+      }
+
       if (event.key === "F2") {
         event.preventDefault();
         setContextMenu(null);
-        startRenameInline(selectedEntry);
+        startRenameInline();
         return;
       }
 
       if (event.key === "Delete") {
         event.preventDefault();
         setContextMenu(null);
-        openDeleteDialog(selectedEntry);
+        openDeleteDialog();
       }
     };
 
@@ -777,13 +924,21 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [contextMenu, deleteDialog, inlineEditor, selectedEntry]);
+  }, [
+    contextMenu,
+    datasetCreationDialog,
+    deleteDialog,
+    explorerClipboard,
+    inlineEditor,
+    selectedEntry,
+    selectedEntryPaths
+  ]);
 
   const openNote = async (relativePath: string): Promise<void> => {
     const existingTab = openTabs[relativePath];
     const tabId = toTabId(relativePath);
 
-    setSelectedEntryPath(relativePath);
+    selectSingleEntry(relativePath);
 
     if (existingTab) {
       model.doAction(FlexLayout.Actions.selectTab(tabId));
@@ -931,7 +1086,7 @@ export function App(): JSX.Element {
 
   const handleCreateResult = async (result: CreateEntryResult): Promise<void> => {
     setWorkspace(result.snapshot);
-    setSelectedEntryPath(result.entry.relativePath);
+    replaceSelection([result.entry.relativePath], result.entry.relativePath);
 
     if (result.entry.kind === "directory") {
       setExpandedPaths((current) => {
@@ -949,7 +1104,7 @@ export function App(): JSX.Element {
 
   const handleRenameResult = async (result: RenameEntryResult): Promise<void> => {
     setWorkspace(result.snapshot);
-    setSelectedEntryPath(result.entry.relativePath);
+    replaceSelection([result.entry.relativePath], result.entry.relativePath);
 
     if (result.entry.kind === "file") {
       closeTabsMatching((relativePath) => relativePath === result.previousRelativePath);
@@ -988,38 +1143,247 @@ export function App(): JSX.Element {
     setStatusMessage(`${result.entry.name} にリネームしました`);
   };
 
-  const handleDeleteResult = (result: DeleteEntryResult): void => {
+  const handleDeleteEntriesResult = (result: DeleteEntriesResult): void => {
     setWorkspace(result.snapshot);
-    setSelectedEntryPath("");
+    replaceSelection([], "");
 
-    if (result.deletedKind === "file") {
-      closeTabsMatching((relativePath) => relativePath === result.deletedRelativePath);
-    } else {
-      closeTabsMatching(
-        (relativePath) =>
-          relativePath === result.deletedRelativePath ||
-          relativePath.startsWith(`${result.deletedRelativePath}/`)
-      );
+    closeTabsMatching((relativePath) =>
+      result.deletedRelativePaths.some(
+        (deletedPath) => relativePath === deletedPath || relativePath.startsWith(`${deletedPath}/`)
+      )
+    );
 
-      setExpandedPaths((current) => {
-        const next = new Set<string>();
+    setExpandedPaths((current) => {
+      const next = new Set<string>();
 
-        for (const entryPath of current) {
-          if (
-            entryPath === result.deletedRelativePath ||
-            entryPath.startsWith(`${result.deletedRelativePath}/`)
-          ) {
+      for (const entryPath of current) {
+        if (
+          result.deletedRelativePaths.some(
+            (deletedPath) => entryPath === deletedPath || entryPath.startsWith(`${deletedPath}/`)
+          )
+        ) {
+          continue;
+        }
+
+        next.add(entryPath);
+      }
+
+      return next;
+    });
+
+    setStatusMessage(
+      result.deletedRelativePaths.length === 1
+        ? `${basename(result.deletedRelativePaths[0] ?? "")} を削除しました`
+        : `${result.deletedRelativePaths.length} 件を削除しました`
+    );
+  };
+
+  const handleCopyEntriesResult = (result: CopyEntriesResult, summary: string): void => {
+    setWorkspace(result.snapshot);
+
+    const createdPaths = result.createdEntries.map((entry) => entry.relativePath);
+    replaceSelection(createdPaths, createdPaths[0] ?? "");
+    setStatusMessage(summary);
+  };
+
+  const handleMoveEntriesResult = (result: MoveEntriesResult): void => {
+    if (result.movedEntries.length === 0) {
+      setStatusMessage("移動先が変わりませんでした。");
+      return;
+    }
+
+    setWorkspace(result.snapshot);
+
+    const movedPaths = result.movedEntries.map((entry) => entry.relativePath);
+    replaceSelection(movedPaths, movedPaths[0] ?? "");
+    closeTabsMatching((relativePath) =>
+      result.previousRelativePaths.some(
+        (previousPath) => relativePath === previousPath || relativePath.startsWith(`${previousPath}/`)
+      )
+    );
+    setExpandedPaths((current) => {
+      const next = new Set<string>();
+
+      for (const entryPath of current) {
+        let rewrittenPath = entryPath;
+
+        for (let index = 0; index < result.previousRelativePaths.length; index += 1) {
+          const previousPath = result.previousRelativePaths[index];
+          const nextPath = result.movedEntries[index]?.relativePath;
+
+          if (!nextPath) {
             continue;
           }
 
-          next.add(entryPath);
+          if (rewrittenPath === previousPath) {
+            rewrittenPath = nextPath;
+            break;
+          }
+
+          if (rewrittenPath.startsWith(`${previousPath}/`)) {
+            rewrittenPath = rewrittenPath.replace(previousPath, nextPath);
+            break;
+          }
         }
 
-        return next;
-      });
+        next.add(rewrittenPath);
+      }
+
+      result.movedEntries
+        .filter((entry) => entry.kind === "directory")
+        .forEach((entry) => next.add(entry.relativePath));
+
+      return next;
+    });
+    setStatusMessage(
+      result.movedEntries.length === 1
+        ? `${result.movedEntries[0]?.name ?? "項目"} を移動しました`
+        : `${result.movedEntries.length} 件を移動しました`
+    );
+  };
+
+  const handleSaveClipboardImageResult = (result: SaveClipboardImageResult): void => {
+    setWorkspace(result.snapshot);
+    replaceSelection([result.entry.relativePath], result.entry.relativePath);
+    setStatusMessage(`${result.entry.name} を貼り付けました`);
+  };
+
+  const getPasteDestinationDirectoryPath = (targetEntry?: WorkspaceEntry): string => {
+    const baseEntry = targetEntry ?? selectedEntry;
+    return getEntryDirectoryPath(baseEntry);
+  };
+
+  const copySelectedEntriesToClipboard = (targetEntry?: WorkspaceEntry): void => {
+    const entriesToCopy = getActiveSelectionEntries(targetEntry);
+
+    if (entriesToCopy.length === 0) {
+      setStatusMessage("コピー対象を選択してください。");
+      return;
     }
 
-    setStatusMessage(`${basename(result.deletedRelativePath)} を削除しました`);
+    const sourcePaths = collapseNestedSelection(entriesToCopy.map((entry) => entry.relativePath));
+    setExplorerClipboard({ sourcePaths });
+    setContextMenu(null);
+    setStatusMessage(
+      sourcePaths.length === 1 ? `${basename(sourcePaths[0] ?? "")} をコピーしました` : `${sourcePaths.length} 件をコピーしました`
+    );
+  };
+
+  const pasteIntoWorkspace = async (targetEntry?: WorkspaceEntry): Promise<void> => {
+    if (!workspace) {
+      setStatusMessage("ワークスペースフォルダを開いてください。");
+      return;
+    }
+
+    const destinationDirectoryPath = getPasteDestinationDirectoryPath(targetEntry);
+
+    try {
+      if (explorerClipboard && explorerClipboard.sourcePaths.length > 0) {
+        const result = await window.integralNotes.copyEntries({
+          destinationDirectoryPath,
+          sourcePaths: explorerClipboard.sourcePaths
+        });
+
+        handleCopyEntriesResult(
+          result,
+          result.createdEntries.length === 1
+            ? `${result.createdEntries[0]?.name ?? "項目"} を貼り付けました`
+            : `${result.createdEntries.length} 件を貼り付けました`
+        );
+        return;
+      }
+
+      if (window.integralNotes.clipboardHasImage()) {
+        const result = await window.integralNotes.saveClipboardImage({
+          targetDirectoryPath: destinationDirectoryPath
+        });
+
+        handleSaveClipboardImageResult(result);
+        return;
+      }
+
+      setStatusMessage("貼り付け可能な explorer 項目または画像がありません。");
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setContextMenu(null);
+    }
+  };
+
+  const copyEntryPathsToClipboard = (
+    mode: "absolute" | "relative",
+    targetEntry?: WorkspaceEntry
+  ): void => {
+    if (!workspace) {
+      return;
+    }
+
+    const entriesToCopy = getActiveSelectionEntries(targetEntry);
+
+    if (entriesToCopy.length === 0) {
+      setStatusMessage("コピー対象を選択してください。");
+      return;
+    }
+
+    const values = entriesToCopy.map((entry) =>
+      mode === "absolute"
+        ? joinWorkspaceAbsolutePath(workspace.rootPath, entry.relativePath)
+        : entry.relativePath
+    );
+    window.integralNotes.writeClipboardText(values.join("\n"));
+    setContextMenu(null);
+    setStatusMessage(
+      mode === "absolute"
+        ? "パスをクリップボードへコピーしました"
+        : "相対パスをクリップボードへコピーしました"
+    );
+  };
+
+  const openDatasetCreationDialog = (targetEntry?: WorkspaceEntry): void => {
+    const entriesToAdd = getActiveSelectionEntries(targetEntry);
+
+    if (entriesToAdd.length === 0) {
+      setStatusMessage("dataset に追加する項目を選択してください。");
+      return;
+    }
+
+    setContextMenu(null);
+    setDatasetCreationDialog({
+      defaultName: createDefaultDatasetName(entriesToAdd),
+      relativePaths: collapseNestedSelection(entriesToAdd.map((entry) => entry.relativePath))
+    });
+  };
+
+  const submitDatasetCreationDialog = async (datasetName: string): Promise<void> => {
+    if (!datasetCreationDialog) {
+      return;
+    }
+
+    setDatasetCreationPending(true);
+
+    try {
+      const result = await window.integralNotes.createSourceDatasetFromWorkspaceEntries({
+        name: datasetName.trim(),
+        relativePaths: datasetCreationDialog.relativePaths
+      });
+
+      setDatasetCreationDialog(null);
+      setStatusMessage(`${result.dataset.name} (${result.dataset.datasetId}) を作成しました`);
+      await refreshWorkspace();
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setDatasetCreationPending(false);
+    }
+  };
+
+  const openPathInExternalApp = async (relativePath: string): Promise<void> => {
+    try {
+      await window.integralNotes.openPathInExternalApp(relativePath);
+      setStatusMessage(`${basename(relativePath)} を既定アプリで開きました`);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
   };
 
   const submitInlineEditor = async (value: string): Promise<void> => {
@@ -1080,7 +1444,7 @@ export function App(): JSX.Element {
       kind,
       parentPath: basePath
     });
-    setSelectedEntryPath(baseEntry?.relativePath ?? "");
+    replaceSelection(baseEntry ? [baseEntry.relativePath] : [], baseEntry?.relativePath ?? "");
     setStatusMessage(
       `${locationLabel}に${kind === "file" ? "ノート" : "フォルダ"}を作成します。名前を入力してください。`
     );
@@ -1095,7 +1459,13 @@ export function App(): JSX.Element {
   };
 
   const startRenameInline = (targetEntry?: WorkspaceEntry): void => {
+    const entriesToRename = getActiveSelectionEntries(targetEntry);
     const entry = targetEntry ?? selectedEntry;
+
+    if (entriesToRename.length > 1) {
+      setStatusMessage("複数選択時は名前を変更できません。");
+      return;
+    }
 
     if (!entry) {
       setStatusMessage("リネーム対象を選択してください。");
@@ -1110,14 +1480,14 @@ export function App(): JSX.Element {
       kind: entry.kind,
       targetPath: entry.relativePath
     });
-    setSelectedEntryPath(entry.relativePath);
+    replaceSelection([entry.relativePath], entry.relativePath);
     setStatusMessage(`${entry.name} をリネームします。名前を編集してください。`);
   };
 
   const openDeleteDialog = (targetEntry?: WorkspaceEntry): void => {
-    const entry = targetEntry ?? selectedEntry;
+    const entriesToDelete = getActiveSelectionEntries(targetEntry);
 
-    if (!entry) {
+    if (entriesToDelete.length === 0) {
       setStatusMessage("削除対象を選択してください。");
       return;
     }
@@ -1127,12 +1497,13 @@ export function App(): JSX.Element {
     setDeleteDialog({
       title: "削除確認",
       description:
-        entry.kind === "directory"
-          ? `${entry.name} 配下も含めて削除します。`
-          : `${entry.name} を削除します。`,
+        entriesToDelete.length === 1
+          ? entriesToDelete[0]?.kind === "directory"
+            ? `${entriesToDelete[0]?.name ?? ""} 配下も含めて削除します。`
+            : `${entriesToDelete[0]?.name ?? ""} を削除します。`
+          : `${entriesToDelete.length} 件を削除します。フォルダ配下も含めて削除されます。`,
       confirmLabel: "Delete",
-      targetKind: entry.kind,
-      targetPath: entry.relativePath
+      targetPaths: collapseNestedSelection(entriesToDelete.map((entry) => entry.relativePath))
     });
   };
 
@@ -1144,11 +1515,11 @@ export function App(): JSX.Element {
     setDeleteDialogPending(true);
 
     try {
-      const result = await window.integralNotes.deleteEntry({
-        targetPath: deleteDialog.targetPath
+      const result = await window.integralNotes.deleteEntries({
+        targetPaths: deleteDialog.targetPaths
       });
 
-      handleDeleteResult(result);
+      handleDeleteEntriesResult(result);
       setDeleteDialog(null);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
@@ -1160,7 +1531,12 @@ export function App(): JSX.Element {
   const openTreeContextMenu = (entry: WorkspaceEntry, x: number, y: number): void => {
     const position = clampContextMenuPosition(x, y);
 
-    setSelectedEntryPath(entry.relativePath);
+    if (!selectedEntryPaths.has(entry.relativePath)) {
+      replaceSelection([entry.relativePath], entry.relativePath);
+    } else {
+      setSelectedEntryPath(entry.relativePath);
+    }
+
     setContextMenu({
       entry,
       scope: "entry",
@@ -1172,12 +1548,146 @@ export function App(): JSX.Element {
   const openTreeRootContextMenu = (x: number, y: number): void => {
     const position = clampContextMenuPosition(x, y);
 
-    setSelectedEntryPath("");
+    replaceSelection([], "");
     setContextMenu({
       scope: "root",
       x: position.x,
       y: position.y
     });
+  };
+
+  const handleActivateEntry = (entry: WorkspaceEntry, event: ReactMouseEvent<HTMLButtonElement>): void => {
+    if (inlineEditor) {
+      return;
+    }
+
+    const isAdditiveSelection = event.ctrlKey || event.metaKey;
+
+    if (isAdditiveSelection) {
+      event.preventDefault();
+      toggleEntrySelection(entry);
+      return;
+    }
+
+    selectSingleEntry(entry.relativePath);
+    setContextMenu(null);
+
+    if (entry.kind === "directory") {
+      setExpandedPaths((current) => {
+        const next = new Set(current);
+
+        if (next.has(entry.relativePath)) {
+          next.delete(entry.relativePath);
+        } else {
+          next.add(entry.relativePath);
+        }
+
+        return next;
+      });
+      return;
+    }
+
+    void openNote(entry.relativePath);
+  };
+
+  const handleDragStartEntry = (
+    entry: WorkspaceEntry,
+    event: ReactDragEvent<HTMLButtonElement>
+  ): void => {
+    const dragPaths = selectedEntryPaths.has(entry.relativePath)
+      ? collapseNestedSelection(selectedEntryPaths)
+      : [entry.relativePath];
+
+    if (!selectedEntryPaths.has(entry.relativePath)) {
+      replaceSelection([entry.relativePath], entry.relativePath);
+    }
+
+    event.dataTransfer.effectAllowed = "copyMove";
+    event.dataTransfer.setData(TREE_DRAG_MIME, JSON.stringify(dragPaths));
+    event.dataTransfer.setData("text/plain", dragPaths.join("\n"));
+  };
+
+  const handleDragOverEntry = (entry: WorkspaceEntry, event: ReactDragEvent<HTMLDivElement>): void => {
+    const hasInternalPayload = event.dataTransfer.types.includes(TREE_DRAG_MIME);
+    const hasExternalFiles = event.dataTransfer.files.length > 0;
+
+    if (!hasInternalPayload && !hasExternalFiles) {
+      return;
+    }
+
+    event.preventDefault();
+    const destinationPath = getEntryDirectoryPath(entry);
+    setDropTargetPath(entry.relativePath);
+    event.dataTransfer.dropEffect = hasInternalPayload && !(event.ctrlKey || event.metaKey) ? "move" : "copy";
+
+    if (destinationPath.length === 0 && entry.kind !== "directory") {
+      setDropTargetPath(entry.relativePath);
+    }
+  };
+
+  const handleDragEnd = (): void => {
+    setDropTargetPath(null);
+  };
+
+  const handleDropOnEntry = async (
+    entry: WorkspaceEntry,
+    event: ReactDragEvent<HTMLDivElement>
+  ): Promise<void> => {
+    event.preventDefault();
+    setDropTargetPath(null);
+    const destinationDirectoryPath = getEntryDirectoryPath(entry);
+
+    try {
+      if (event.dataTransfer.types.includes(TREE_DRAG_MIME)) {
+        const payload = event.dataTransfer.getData(TREE_DRAG_MIME);
+        const sourcePaths = collapseNestedSelection(JSON.parse(payload) as string[]);
+
+        if (event.ctrlKey || event.metaKey) {
+          const result = await window.integralNotes.copyEntries({
+            destinationDirectoryPath,
+            sourcePaths
+          });
+
+          handleCopyEntriesResult(
+            result,
+            result.createdEntries.length === 1
+              ? `${result.createdEntries[0]?.name ?? "項目"} をコピーしました`
+              : `${result.createdEntries.length} 件をコピーしました`
+          );
+          return;
+        }
+
+        const result = await window.integralNotes.moveEntries({
+          destinationDirectoryPath,
+          sourcePaths
+        });
+
+        handleMoveEntriesResult(result);
+        return;
+      }
+
+      const sourceAbsolutePaths = Array.from(event.dataTransfer.files)
+        .map((file) => (file as File & { path?: string }).path?.trim() ?? "")
+        .filter((value) => value.length > 0);
+
+      if (sourceAbsolutePaths.length === 0) {
+        return;
+      }
+
+      const result = await window.integralNotes.copyExternalEntries({
+        destinationDirectoryPath,
+        sourceAbsolutePaths
+      });
+
+      handleCopyEntriesResult(
+        result,
+        result.createdEntries.length === 1
+          ? `${result.createdEntries[0]?.name ?? "項目"} を取り込みました`
+          : `${result.createdEntries.length} 件を取り込みました`
+      );
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
   };
 
   const updateTabContent = (relativePath: string, nextContent: string): void => {
@@ -1226,7 +1736,7 @@ export function App(): JSX.Element {
       setSelectedTabId(nextTabId);
 
       if (relativePath) {
-        setSelectedEntryPath(relativePath);
+        selectSingleEntry(relativePath);
       }
 
       return;
@@ -1271,7 +1781,14 @@ export function App(): JSX.Element {
       );
     }
 
-    return <WorkspaceFileViewer file={tab} />;
+    return (
+      <WorkspaceFileViewer
+        file={tab}
+        onOpenInExternalApp={(relativePath) => {
+          void openPathInExternalApp(relativePath);
+        }}
+      />
+    );
   };
 
   return (
@@ -1350,7 +1867,7 @@ export function App(): JSX.Element {
           ) : null}
 
           <div
-            className="sidebar__tree"
+            className={`sidebar__tree${dropTargetPath === "" ? " is-drop-target" : ""}`}
             onClick={(event) => {
               if (!workspace) {
                 return;
@@ -1362,7 +1879,7 @@ export function App(): JSX.Element {
                 return;
               }
 
-              setSelectedEntryPath("");
+              replaceSelection([], "");
               setContextMenu(null);
             }}
             onContextMenu={(event) => {
@@ -1379,41 +1896,131 @@ export function App(): JSX.Element {
               event.preventDefault();
               openTreeRootContextMenu(event.clientX, event.clientY);
             }}
+            onDragLeave={(event) => {
+              const relatedTarget = event.relatedTarget as Node | null;
+
+              if (relatedTarget && event.currentTarget.contains(relatedTarget)) {
+                return;
+              }
+
+              setDropTargetPath(null);
+            }}
+            onDragOver={(event) => {
+              const hasInternalPayload = event.dataTransfer.types.includes(TREE_DRAG_MIME);
+              const hasExternalFiles = event.dataTransfer.files.length > 0;
+
+              if (!hasInternalPayload && !hasExternalFiles) {
+                return;
+              }
+
+              if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
+                return;
+              }
+
+              event.preventDefault();
+              setDropTargetPath("");
+              event.dataTransfer.dropEffect =
+                hasInternalPayload && !(event.ctrlKey || event.metaKey) ? "move" : "copy";
+            }}
+            onDrop={(event) => {
+              if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
+                return;
+              }
+
+              event.preventDefault();
+              setDropTargetPath(null);
+
+              const internalPayload = event.dataTransfer.getData(TREE_DRAG_MIME);
+
+              if (internalPayload.length > 0) {
+                const sourcePaths = collapseNestedSelection(JSON.parse(internalPayload) as string[]);
+
+                if (event.ctrlKey || event.metaKey) {
+                  void window.integralNotes
+                    .copyEntries({
+                      destinationDirectoryPath: "",
+                      sourcePaths
+                    })
+                    .then((result) => {
+                      handleCopyEntriesResult(
+                        result,
+                        result.createdEntries.length === 1
+                          ? `${result.createdEntries[0]?.name ?? "項目"} をコピーしました`
+                          : `${result.createdEntries.length} 件をコピーしました`
+                      );
+                    })
+                    .catch((error) => {
+                      setStatusMessage(toErrorMessage(error));
+                    });
+                  return;
+                }
+
+                void window.integralNotes
+                  .moveEntries({
+                    destinationDirectoryPath: "",
+                    sourcePaths
+                  })
+                  .then((result) => {
+                    handleMoveEntriesResult(result);
+                  })
+                  .catch((error) => {
+                    setStatusMessage(toErrorMessage(error));
+                  });
+                return;
+              }
+
+              const sourceAbsolutePaths = Array.from(event.dataTransfer.files)
+                .map((file) => (file as File & { path?: string }).path?.trim() ?? "")
+                .filter((value) => value.length > 0);
+
+              if (sourceAbsolutePaths.length === 0) {
+                return;
+              }
+
+              void window.integralNotes
+                .copyExternalEntries({
+                  destinationDirectoryPath: "",
+                  sourceAbsolutePaths
+                })
+                .then((result) => {
+                  handleCopyEntriesResult(
+                    result,
+                    result.createdEntries.length === 1
+                      ? `${result.createdEntries[0]?.name ?? "項目"} を取り込みました`
+                      : `${result.createdEntries.length} 件を取り込みました`
+                  );
+                })
+                .catch((error) => {
+                  setStatusMessage(toErrorMessage(error));
+                });
+            }}
           >
             {loadingWorkspace && !workspace ? (
               <div className="sidebar__placeholder">Loading workspace...</div>
             ) : workspace ? (
               <FileTree
+                dropTargetPath={dropTargetPath}
                 editingPending={inlineEditorPending}
                 editingState={inlineEditor}
                 entries={workspace.entries}
                 expandedPaths={expandedPaths}
-                selectedPath={selectedEntryPath}
+                primarySelectedPath={selectedEntryPath}
+                selectedPaths={selectedEntryPaths}
+                onActivateEntry={handleActivateEntry}
                 onCancelEditing={() => {
                   if (!inlineEditorPending) {
                     setInlineEditor(null);
                   }
                 }}
                 onContextMenuEntry={openTreeContextMenu}
-                onOpenFile={(relativePath) => {
-                  void openNote(relativePath);
+                onDragEnd={handleDragEnd}
+                onDragOverEntry={handleDragOverEntry}
+                onDragStartEntry={handleDragStartEntry}
+                onDropEntry={(entry, event) => {
+                  void handleDropOnEntry(entry, event);
                 }}
-                onSelectEntry={setSelectedEntryPath}
                 onSubmitEditing={(value) => {
                   void submitInlineEditor(value);
-                }}
-                onToggleDirectory={(relativePath) => {
-                  setExpandedPaths((current) => {
-                    const next = new Set(current);
-
-                    if (next.has(relativePath)) {
-                      next.delete(relativePath);
-                    } else {
-                      next.add(relativePath);
-                    }
-
-                    return next;
-                  });
                 }}
               />
             ) : (
@@ -1474,7 +2081,7 @@ export function App(): JSX.Element {
                 }}
                 type="button"
               >
-                New Note
+                新しいノート
               </button>
               <button
                 className="tree-context-menu__item"
@@ -1486,14 +2093,46 @@ export function App(): JSX.Element {
                 }}
                 type="button"
               >
-                New Folder
+                新しいフォルダ
               </button>
+              {contextMenu.scope === "root" ? (
+                <>
+                  <div className="tree-context-menu__separator" />
+                  <button
+                    className="tree-context-menu__item"
+                    onClick={() => {
+                      void pasteIntoWorkspace();
+                    }}
+                    type="button"
+                  >
+                    貼り付け
+                  </button>
+                </>
+              ) : null}
             </>
           ) : null}
 
           {contextMenu.scope === "entry" && contextMenu.entry ? (
             <>
-              {contextMenu.entry.kind === "directory" ? <div className="tree-context-menu__separator" /> : null}
+              <div className="tree-context-menu__separator" />
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  copySelectedEntriesToClipboard(contextMenu.entry);
+                }}
+                type="button"
+              >
+                コピー
+              </button>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  void pasteIntoWorkspace(contextMenu.entry);
+                }}
+                type="button"
+              >
+                貼り付け
+              </button>
               <button
                 className="tree-context-menu__item"
                 onClick={() => {
@@ -1501,7 +2140,34 @@ export function App(): JSX.Element {
                 }}
                 type="button"
               >
-                Rename
+                名前を変更
+              </button>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  copyEntryPathsToClipboard("absolute", contextMenu.entry);
+                }}
+                type="button"
+              >
+                パスのコピー
+              </button>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  copyEntryPathsToClipboard("relative", contextMenu.entry);
+                }}
+                type="button"
+              >
+                相対パスのコピー
+              </button>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  openDatasetCreationDialog(contextMenu.entry);
+                }}
+                type="button"
+              >
+                DataSetに追加
               </button>
               <button
                 className="tree-context-menu__item tree-context-menu__item--danger"
@@ -1510,7 +2176,7 @@ export function App(): JSX.Element {
                 }}
                 type="button"
               >
-                Delete
+                削除
               </button>
             </>
           ) : null}
@@ -1533,6 +2199,26 @@ export function App(): JSX.Element {
           pending={deleteDialogPending}
           requireInput={false}
           title={deleteDialog.title}
+        />
+      ) : null}
+
+      {datasetCreationDialog ? (
+        <WorkspaceDialog
+          confirmLabel="作成"
+          description="選択中の項目を元に source dataset を作成します。"
+          initialValue={datasetCreationDialog.defaultName}
+          inputLabel="Dataset 名"
+          onClose={() => {
+            if (!datasetCreationPending) {
+              setDatasetCreationDialog(null);
+            }
+          }}
+          onConfirm={(value) => {
+            void submitDatasetCreationDialog(value);
+          }}
+          pending={datasetCreationPending}
+          requireInput
+          title="DataSetに追加"
         />
       ) : null}
 
@@ -1586,5 +2272,3 @@ export function App(): JSX.Element {
     </div>
   );
 }
-
-

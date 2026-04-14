@@ -3,13 +3,22 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type {
+  CopyEntriesRequest,
+  CopyEntriesResult,
+  CopyExternalEntriesRequest,
   CreateEntryRequest,
   CreateEntryResult,
+  DeleteEntriesRequest,
+  DeleteEntriesResult,
   DeleteEntryRequest,
   DeleteEntryResult,
+  MoveEntriesRequest,
+  MoveEntriesResult,
   NoteDocument,
   RenameEntryRequest,
   RenameEntryResult,
+  SaveClipboardImageRequest,
+  SaveClipboardImageResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
   WorkspaceFileDocument,
@@ -294,6 +303,199 @@ export class WorkspaceService {
       deletedRelativePath: request.targetPath,
       deletedKind: stats.isDirectory() ? "directory" : "file"
     };
+  }
+
+  async deleteEntries(request: DeleteEntriesRequest): Promise<DeleteEntriesResult> {
+    this.getConfiguredRootPath();
+    await this.ensureWorkspaceReady();
+
+    const targetPaths = collapseNestedRelativePaths(request.targetPaths);
+
+    if (targetPaths.length === 0) {
+      throw new Error("削除対象を選択してください。");
+    }
+
+    for (const targetPath of targetPaths) {
+      await fs.rm(this.resolveWorkspacePath(targetPath), { recursive: true, force: false });
+    }
+
+    return {
+      snapshot: await this.getRequiredSnapshot(),
+      deletedRelativePaths: targetPaths
+    };
+  }
+
+  async copyEntries(request: CopyEntriesRequest): Promise<CopyEntriesResult> {
+    this.getConfiguredRootPath();
+    await this.ensureWorkspaceReady();
+
+    const destinationDirectoryPath = await this.ensureDirectoryPath(request.destinationDirectoryPath);
+    const sourcePaths = collapseNestedRelativePaths(request.sourcePaths);
+
+    if (sourcePaths.length === 0) {
+      throw new Error("コピー対象を選択してください。");
+    }
+
+    const createdEntries: WorkspaceEntry[] = [];
+
+    for (const sourcePath of sourcePaths) {
+      createdEntries.push(
+        await this.copyEntryIntoWorkspace(this.resolveWorkspacePath(sourcePath), destinationDirectoryPath)
+      );
+    }
+
+    return {
+      createdEntries,
+      snapshot: await this.getRequiredSnapshot()
+    };
+  }
+
+  async moveEntries(request: MoveEntriesRequest): Promise<MoveEntriesResult> {
+    this.getConfiguredRootPath();
+    await this.ensureWorkspaceReady();
+
+    const destinationDirectoryPath = await this.ensureDirectoryPath(request.destinationDirectoryPath);
+    const sourcePaths = collapseNestedRelativePaths(request.sourcePaths);
+
+    if (sourcePaths.length === 0) {
+      throw new Error("移動対象を選択してください。");
+    }
+
+    const movedEntries: WorkspaceEntry[] = [];
+    const previousRelativePaths: string[] = [];
+
+    for (const sourcePath of sourcePaths) {
+      const movedEntry = await this.moveEntryIntoWorkspace(sourcePath, destinationDirectoryPath);
+
+      if (!movedEntry) {
+        continue;
+      }
+
+      previousRelativePaths.push(sourcePath);
+      movedEntries.push(movedEntry);
+    }
+
+    return {
+      movedEntries,
+      previousRelativePaths,
+      snapshot: await this.getRequiredSnapshot()
+    };
+  }
+
+  async copyExternalEntries(request: CopyExternalEntriesRequest): Promise<CopyEntriesResult> {
+    this.getConfiguredRootPath();
+    await this.ensureWorkspaceReady();
+
+    const destinationDirectoryPath = await this.ensureDirectoryPath(request.destinationDirectoryPath);
+    const sourceAbsolutePaths = normalizeAbsolutePaths(request.sourceAbsolutePaths);
+
+    if (sourceAbsolutePaths.length === 0) {
+      throw new Error("コピー対象を選択してください。");
+    }
+
+    const createdEntries: WorkspaceEntry[] = [];
+
+    for (const sourceAbsolutePath of sourceAbsolutePaths) {
+      createdEntries.push(await this.copyEntryIntoWorkspace(sourceAbsolutePath, destinationDirectoryPath));
+    }
+
+    return {
+      createdEntries,
+      snapshot: await this.getRequiredSnapshot()
+    };
+  }
+
+  async savePngImage(
+    request: SaveClipboardImageRequest,
+    content: Buffer
+  ): Promise<SaveClipboardImageResult> {
+    this.getConfiguredRootPath();
+    await this.ensureWorkspaceReady();
+
+    const destinationDirectoryPath = await this.ensureDirectoryPath(request.targetDirectoryPath);
+    const entry = await this.writeBinaryFile(destinationDirectoryPath, "image.png", content);
+
+    return {
+      entry,
+      snapshot: await this.getRequiredSnapshot()
+    };
+  }
+
+  getAbsolutePath(relativePath: string): string {
+    return this.resolveWorkspacePath(relativePath);
+  }
+
+  private async ensureDirectoryPath(relativePath: string): Promise<string> {
+    const absolutePath = this.resolveWorkspacePath(relativePath);
+    const stats = await fs.stat(absolutePath);
+
+    if (!stats.isDirectory()) {
+      throw new Error("貼り付け先はフォルダである必要があります。");
+    }
+
+    return absolutePath;
+  }
+
+  private async copyEntryIntoWorkspace(
+    sourceAbsolutePath: string,
+    destinationDirectoryPath: string
+  ): Promise<WorkspaceEntry> {
+    const resolvedSourcePath = path.resolve(sourceAbsolutePath);
+    const sourceStats = await fs.stat(resolvedSourcePath);
+    const sourceKind: WorkspaceEntryKind = sourceStats.isDirectory() ? "directory" : "file";
+
+    assertDestinationIsOutsideSource(resolvedSourcePath, destinationDirectoryPath, sourceKind, "copy");
+
+    const destinationPath = await createCopyDestinationPath(
+      destinationDirectoryPath,
+      path.basename(resolvedSourcePath),
+      sourceKind
+    );
+
+    if (sourceKind === "directory") {
+      await fs.cp(resolvedSourcePath, destinationPath, { force: false, recursive: true });
+    } else {
+      await fs.copyFile(resolvedSourcePath, destinationPath);
+    }
+
+    return this.getEntryByPath(this.toRelativePath(destinationPath));
+  }
+
+  private async moveEntryIntoWorkspace(
+    sourceRelativePath: string,
+    destinationDirectoryPath: string
+  ): Promise<WorkspaceEntry | null> {
+    const sourcePath = this.resolveWorkspacePath(sourceRelativePath);
+    const sourceStats = await fs.stat(sourcePath);
+    const sourceKind: WorkspaceEntryKind = sourceStats.isDirectory() ? "directory" : "file";
+
+    assertDestinationIsOutsideSource(sourcePath, destinationDirectoryPath, sourceKind, "move");
+
+    const destinationPath = path.join(destinationDirectoryPath, path.basename(sourcePath));
+
+    if (isSamePath(sourcePath, destinationPath)) {
+      return null;
+    }
+
+    if (await pathExists(destinationPath)) {
+      throw new Error(`${path.basename(destinationPath)} は既に存在します。`);
+    }
+
+    await fs.rename(sourcePath, destinationPath);
+
+    return this.getEntryByPath(this.toRelativePath(destinationPath));
+  }
+
+  private async writeBinaryFile(
+    destinationDirectoryPath: string,
+    preferredFileName: string,
+    content: Buffer
+  ): Promise<WorkspaceEntry> {
+    const destinationPath = await createAvailableImagePath(destinationDirectoryPath, preferredFileName);
+
+    await fs.writeFile(destinationPath, content);
+
+    return this.getEntryByPath(this.toRelativePath(destinationPath));
   }
 
   private async getEntryByPath(relativePath: string): Promise<WorkspaceEntry> {
@@ -711,11 +913,147 @@ function isProbablyTextFile(buffer: Buffer): boolean {
   return !buffer.includes(0);
 }
 
+function collapseNestedRelativePaths(relativePaths: string[]): string[] {
+  const normalized = Array.from(
+    new Set(
+      relativePaths
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+    )
+  ).sort((left, right) => left.length - right.length || left.localeCompare(right, "ja"));
+  const collapsed: string[] = [];
+
+  for (const candidate of normalized) {
+    if (collapsed.some((existing) => isSameOrDescendantRelativePath(candidate, existing))) {
+      continue;
+    }
+
+    collapsed.push(candidate);
+  }
+
+  return collapsed;
+}
+
+function normalizeAbsolutePaths(absolutePaths: string[]): string[] {
+  return Array.from(
+    new Set(
+      absolutePaths
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+        .map((value) => path.resolve(value))
+    )
+  );
+}
+
+function isSameOrDescendantRelativePath(candidate: string, base: string): boolean {
+  if (candidate === base) {
+    return true;
+  }
+
+  return candidate.startsWith(`${base}/`);
+}
+
+function isSamePath(leftPath: string, rightPath: string): boolean {
+  const normalizedLeft = path.resolve(leftPath);
+  const normalizedRight = path.resolve(rightPath);
+
+  if (process.platform === "win32") {
+    return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
+  }
+
+  return normalizedLeft === normalizedRight;
+}
+
+function isDescendantPath(candidatePath: string, parentPath: string): boolean {
+  const relativePath = path.relative(parentPath, candidatePath);
+
+  if (relativePath.length === 0) {
+    return true;
+  }
+
+  return !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+}
+
+function assertDestinationIsOutsideSource(
+  sourcePath: string,
+  destinationDirectoryPath: string,
+  sourceKind: WorkspaceEntryKind,
+  operation: "copy" | "move"
+): void {
+  if (sourceKind !== "directory") {
+    return;
+  }
+
+  if (isDescendantPath(destinationDirectoryPath, sourcePath)) {
+    throw new Error(`${path.basename(sourcePath)} の配下へは ${operation} できません。`);
+  }
+}
+
+async function createCopyDestinationPath(
+  destinationDirectoryPath: string,
+  sourceName: string,
+  sourceKind: WorkspaceEntryKind
+): Promise<string> {
+  const preferredPath = path.join(destinationDirectoryPath, sourceName);
+
+  if (!(await pathExists(preferredPath))) {
+    return preferredPath;
+  }
+
+  const extension = sourceKind === "file" ? path.extname(sourceName) : "";
+  const stem = sourceKind === "file" ? path.basename(sourceName, extension) : sourceName;
+
+  for (let serial = 1; serial < 10000; serial += 1) {
+    const suffix = serial === 1 ? " copy" : ` copy ${serial}`;
+    const nextName = `${stem}${suffix}${extension}`;
+    const candidatePath = path.join(destinationDirectoryPath, nextName);
+
+    if (!(await pathExists(candidatePath))) {
+      return candidatePath;
+    }
+  }
+
+  throw new Error(`${sourceName} のコピー先を確保できませんでした。`);
+}
+
+async function createAvailableImagePath(
+  destinationDirectoryPath: string,
+  preferredFileName: string
+): Promise<string> {
+  const preferredPath = path.join(destinationDirectoryPath, preferredFileName);
+
+  if (!(await pathExists(preferredPath))) {
+    return preferredPath;
+  }
+
+  const extension = path.extname(preferredFileName);
+  const stem = path.basename(preferredFileName, extension);
+
+  for (let serial = 2; serial < 10000; serial += 1) {
+    const candidatePath = path.join(destinationDirectoryPath, `${stem}_${serial}${extension}`);
+
+    if (!(await pathExists(candidatePath))) {
+      return candidatePath;
+    }
+  }
+
+  throw new Error(`${preferredFileName} の保存先を確保できませんでした。`);
+}
+
 async function readTextFileIfExists(filePath: string): Promise<string | undefined> {
   try {
     return await fs.readFile(filePath, "utf8");
   } catch {
     return undefined;
+  }
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 

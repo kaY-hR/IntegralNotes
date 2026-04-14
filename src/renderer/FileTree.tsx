@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type DragEvent, type MouseEvent, useEffect, useRef, useState } from "react";
 
 import type { WorkspaceEntry, WorkspaceEntryKind } from "../shared/workspace";
 
@@ -17,17 +17,21 @@ export type FileTreeInlineEditorState =
     };
 
 interface FileTreeProps {
+  dropTargetPath: string | null;
   editingPending: boolean;
   editingState: FileTreeInlineEditorState | null;
   entries: WorkspaceEntry[];
   expandedPaths: Set<string>;
-  selectedPath: string;
+  primarySelectedPath: string;
+  selectedPaths: ReadonlySet<string>;
+  onActivateEntry: (entry: WorkspaceEntry, event: MouseEvent<HTMLButtonElement>) => void;
   onCancelEditing: () => void;
   onContextMenuEntry: (entry: WorkspaceEntry, x: number, y: number) => void;
-  onOpenFile: (relativePath: string) => void;
-  onSelectEntry: (relativePath: string) => void;
+  onDragEnd: () => void;
+  onDragOverEntry: (entry: WorkspaceEntry, event: DragEvent<HTMLDivElement>) => void;
+  onDragStartEntry: (entry: WorkspaceEntry, event: DragEvent<HTMLButtonElement>) => void;
+  onDropEntry: (entry: WorkspaceEntry, event: DragEvent<HTMLDivElement>) => void;
   onSubmitEditing: (value: string) => void;
-  onToggleDirectory: (relativePath: string) => void;
 }
 
 interface TreeInlineEditorProps {
@@ -146,17 +150,21 @@ function InlineTreeRow({
 }
 
 export function FileTree({
+  dropTargetPath,
   editingPending,
   editingState,
   entries,
   expandedPaths,
-  selectedPath,
+  primarySelectedPath,
+  selectedPaths,
+  onActivateEntry,
   onCancelEditing,
   onContextMenuEntry,
-  onOpenFile,
-  onSelectEntry,
-  onSubmitEditing,
-  onToggleDirectory
+  onDragEnd,
+  onDragOverEntry,
+  onDragStartEntry,
+  onDropEntry,
+  onSubmitEditing
 }: FileTreeProps): JSX.Element {
   const rootCreateState =
     editingState?.mode === "create" && editingState.parentPath.length === 0 ? editingState : null;
@@ -174,18 +182,22 @@ export function FileTree({
 
       {entries.map((entry) => (
         <FileTreeNode
+          dropTargetPath={dropTargetPath}
           editingPending={editingPending}
           editingState={editingState}
           entry={entry}
           expandedPaths={expandedPaths}
           key={entry.relativePath}
-          selectedPath={selectedPath}
+          primarySelectedPath={primarySelectedPath}
+          selectedPaths={selectedPaths}
+          onActivateEntry={onActivateEntry}
           onCancelEditing={onCancelEditing}
           onContextMenuEntry={onContextMenuEntry}
-          onOpenFile={onOpenFile}
-          onSelectEntry={onSelectEntry}
+          onDragEnd={onDragEnd}
+          onDragOverEntry={onDragOverEntry}
+          onDragStartEntry={onDragStartEntry}
+          onDropEntry={onDropEntry}
           onSubmitEditing={onSubmitEditing}
-          onToggleDirectory={onToggleDirectory}
         />
       ))}
     </div>
@@ -197,17 +209,21 @@ interface FileTreeNodeProps extends FileTreeProps {
 }
 
 function FileTreeNode({
+  dropTargetPath,
   editingPending,
   editingState,
   entry,
   expandedPaths,
-  selectedPath,
+  primarySelectedPath,
+  selectedPaths,
+  onActivateEntry,
   onCancelEditing,
   onContextMenuEntry,
-  onOpenFile,
-  onSelectEntry,
-  onSubmitEditing,
-  onToggleDirectory
+  onDragEnd,
+  onDragOverEntry,
+  onDragStartEntry,
+  onDropEntry,
+  onSubmitEditing
 }: FileTreeNodeProps): JSX.Element {
   const isDirectory = entry.kind === "directory";
   const isExpanded = isDirectory && expandedPaths.has(entry.relativePath);
@@ -219,35 +235,29 @@ function FileTreeNode({
     editingState?.mode === "create" && editingState.parentPath === entry.relativePath
       ? editingState
       : null;
-  const isSelected = selectedPath === entry.relativePath || Boolean(renameState);
+  const isSelected = selectedPaths.has(entry.relativePath) || Boolean(renameState);
+  const isPrimarySelected = primarySelectedPath === entry.relativePath || Boolean(renameState);
+  const isDropTarget = dropTargetPath === entry.relativePath;
   const shouldRenderChildren =
     isExpanded && ((entry.children?.length ?? 0) > 0 || childCreateState !== null);
 
-  const handleClick = (): void => {
-    if (renameState) {
-      return;
-    }
-
-    onSelectEntry(entry.relativePath);
-
-    if (isDirectory) {
-      onToggleDirectory(entry.relativePath);
-      return;
-    }
-
-    onOpenFile(entry.relativePath);
-  };
-
   const handleContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
-    onSelectEntry(entry.relativePath);
     onContextMenuEntry(entry, event.clientX, event.clientY);
   };
 
   return (
-    <div className="tree-node">
+    <div
+      className="tree-node"
+      onDragOver={(event) => {
+        onDragOverEntry(entry, event);
+      }}
+      onDrop={(event) => {
+        onDropEntry(entry, event);
+      }}
+    >
       <div
-        className={`tree-row${isSelected ? " is-selected" : ""}${renameState ? " is-editing" : ""}`}
+        className={`tree-row${isSelected ? " is-selected" : ""}${isPrimarySelected ? " is-primary-selected" : ""}${renameState ? " is-editing" : ""}${isDropTarget ? " is-drop-target" : ""}`}
         onContextMenu={handleContextMenu}
       >
         {renameState ? (
@@ -263,7 +273,18 @@ function FileTreeNode({
             />
           </div>
         ) : (
-          <button className="tree-row__main" onClick={handleClick} type="button">
+          <button
+            className="tree-row__main"
+            draggable
+            onClick={(event) => {
+              onActivateEntry(entry, event);
+            }}
+            onDragEnd={onDragEnd}
+            onDragStart={(event) => {
+              onDragStartEntry(entry, event);
+            }}
+            type="button"
+          >
             <span className="tree-row__caret">{isDirectory ? (isExpanded ? "▾" : "▸") : "·"}</span>
             <span aria-hidden="true" className={`tree-row__icon tree-row__icon--${entry.kind}`} />
             <span className="tree-row__label">{entry.name}</span>
@@ -284,18 +305,22 @@ function FileTreeNode({
 
           {entry.children?.map((child) => (
             <FileTreeNode
+              dropTargetPath={dropTargetPath}
               editingPending={editingPending}
               editingState={editingState}
               entry={child}
               expandedPaths={expandedPaths}
               key={child.relativePath}
-              selectedPath={selectedPath}
+              primarySelectedPath={primarySelectedPath}
+              selectedPaths={selectedPaths}
+              onActivateEntry={onActivateEntry}
               onCancelEditing={onCancelEditing}
               onContextMenuEntry={onContextMenuEntry}
-              onOpenFile={onOpenFile}
-              onSelectEntry={onSelectEntry}
+              onDragEnd={onDragEnd}
+              onDragOverEntry={onDragOverEntry}
+              onDragStartEntry={onDragStartEntry}
+              onDropEntry={onDropEntry}
               onSubmitEditing={onSubmitEditing}
-              onToggleDirectory={onToggleDirectory}
             />
           ))}
         </div>
@@ -303,5 +328,3 @@ function FileTreeNode({
     </div>
   );
 }
-
-

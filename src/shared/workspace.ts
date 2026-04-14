@@ -1,6 +1,7 @@
 import type { InstalledPluginDefinition } from "./plugins";
 import type {
   CreateSourceDatasetRequest,
+  CreateSourceDatasetFromWorkspaceEntriesRequest,
   CreateSourceDatasetResult,
   ExecuteIntegralBlockRequest,
   ExecuteIntegralBlockResult,
@@ -61,6 +62,10 @@ export interface DeleteEntryRequest {
   targetPath: string;
 }
 
+export interface DeleteEntriesRequest {
+  targetPaths: string[];
+}
+
 export interface CreateEntryResult {
   snapshot: WorkspaceSnapshot;
   entry: WorkspaceEntry;
@@ -76,6 +81,46 @@ export interface DeleteEntryResult {
   snapshot: WorkspaceSnapshot;
   deletedRelativePath: string;
   deletedKind: WorkspaceEntryKind;
+}
+
+export interface DeleteEntriesResult {
+  snapshot: WorkspaceSnapshot;
+  deletedRelativePaths: string[];
+}
+
+export interface CopyEntriesRequest {
+  destinationDirectoryPath: string;
+  sourcePaths: string[];
+}
+
+export interface CopyEntriesResult {
+  createdEntries: WorkspaceEntry[];
+  snapshot: WorkspaceSnapshot;
+}
+
+export interface MoveEntriesRequest {
+  destinationDirectoryPath: string;
+  sourcePaths: string[];
+}
+
+export interface MoveEntriesResult {
+  movedEntries: WorkspaceEntry[];
+  previousRelativePaths: string[];
+  snapshot: WorkspaceSnapshot;
+}
+
+export interface CopyExternalEntriesRequest {
+  destinationDirectoryPath: string;
+  sourceAbsolutePaths: string[];
+}
+
+export interface SaveClipboardImageRequest {
+  targetDirectoryPath: string;
+}
+
+export interface SaveClipboardImageResult {
+  entry: WorkspaceEntry;
+  snapshot: WorkspaceSnapshot;
 }
 
 export interface ExecuteIntegralActionRequest {
@@ -113,6 +158,9 @@ export interface IntegralNotesApi {
   browsePythonEntryFile: () => Promise<PythonEntrySelection | null>;
   browsePythonSupportFiles: (entryAbsolutePath: string | null) => Promise<string[] | null>;
   createSourceDataset: (request: CreateSourceDatasetRequest) => Promise<CreateSourceDatasetResult>;
+  createSourceDatasetFromWorkspaceEntries: (
+    request: CreateSourceDatasetFromWorkspaceEntriesRequest
+  ) => Promise<CreateSourceDatasetResult>;
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot | null>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   zoomIn: () => void;
@@ -135,6 +183,14 @@ export interface IntegralNotesApi {
   createEntry: (request: CreateEntryRequest) => Promise<CreateEntryResult>;
   renameEntry: (request: RenameEntryRequest) => Promise<RenameEntryResult>;
   deleteEntry: (request: DeleteEntryRequest) => Promise<DeleteEntryResult>;
+  deleteEntries: (request: DeleteEntriesRequest) => Promise<DeleteEntriesResult>;
+  copyEntries: (request: CopyEntriesRequest) => Promise<CopyEntriesResult>;
+  moveEntries: (request: MoveEntriesRequest) => Promise<MoveEntriesResult>;
+  copyExternalEntries: (request: CopyExternalEntriesRequest) => Promise<CopyEntriesResult>;
+  saveClipboardImage: (request: SaveClipboardImageRequest) => Promise<SaveClipboardImageResult>;
+  writeClipboardText: (text: string) => void;
+  clipboardHasImage: () => boolean;
+  openPathInExternalApp: (relativePath: string) => Promise<void>;
   uninstallPlugin: (pluginId: string) => Promise<UninstallPluginResult>;
   executeIntegralBlock: (
     request: ExecuteIntegralBlockRequest

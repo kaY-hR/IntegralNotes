@@ -17,6 +17,15 @@
 - 記載日時:?
 
 可能なら、wiswigモード以外に、生のマークダウンファイルを編集できるモードに切り替えられると嬉しい
+* 2026-04-14 調査: 実現性は高い。現在の `.md` 読込・保存は `src/main/workspaceService.ts` の `readNote() / saveNote()` に集約されており、主変更点は renderer 側の markdown tab に editor mode を足すことになる
+* 現状の `src/renderer/App.tsx` は markdown tab の `content` / `savedContent` / dirty 判定 / `Ctrl+S` 保存を 1 本化しているため、`WYSIWYG` と `raw markdown` の 2 UI が同じ文字列 state を共有すれば、tab 管理や保存導線はほぼ再利用できる
+* 実装方針としては、`OpenMarkdownTab` に `editorMode: "wysiwyg" | "raw"` を持たせ、`editorFactory` で `MilkdownEditor` と軽量な plain text editor を切り替える構成が最もクリーン
+* 注意点として、`src/renderer/MilkdownEditor.tsx` は mount 時の `initialValue` で初期化する非制御 component なので、`raw -> WYSIWYG` 切替時は mode を `key` に含めて再生成する設計にする必要がある
+* Integral 独自 block は `itg-notes` fenced code block として markdown に保存されており、raw mode で直接編集しても保存経路自体は壊れない。内容が不正でも WYSIWYG 側では custom block view 内で parse error として扱えるため、設計上は許容しやすい
+* 一方で `data-catalog/` 配下の data-note は、Issue 10 の方針により frontmatter を app 上で隠し、本文だけを editor / viewer に渡す設計になっている。そのため「生のマークダウン」を full file と解釈すると current 方針と衝突する
+* そのため clean に進めるなら、まずは `通常ノートは raw markdown 切替を許可する / data-note は本文 raw のみ、または raw 切替対象外にする` のどちらかに限定するのがよい
+* 先に full-file raw 編集まで求めると、Issue 10 の frontmatter 隠蔽方針、保存時の managed metadata merge、user-facing UX をまとめて再設計する必要があり、Issue 3 単体としては重くなる
+* 結論として、`通常 markdown note 向けの source editing mode` として切るなら技術的にも設計的にもかなりクリーンに実装できる。反対に `data-note frontmatter も含めた完全な生ファイル編集` を要求するなら、別 Issue として分離した方がよい
 
 ## [x] 5. blob/chunk/block ベースの解析基盤を設計・実装したい
 - 優先重み:9
@@ -191,3 +200,25 @@
 * 並列な選択肢を出す場面では、ラベル、説明量、button 配置、整列を揃え、UI 上でも「同格の選択肢」であることが伝わるようにしたい
 * 逆に primary / secondary の関係がある操作は、見た目だけ並列にせず、1st action と補助導線の差が明確に分かる構成へ寄せたい
 * Issue 11, 12 の簡素化・導線改善を、用語整理と情報設計まで含めて再定義する Issue として扱いたい
+
+## [ ] 18. エクスプローラーの tree 操作を VS Code 寄りに強化したい
+- Status:completed
+- 優先重み:7
+- 記載日時:2026-04-14-16:10(UTC+9)
+
+* treeview で複数選択を許容したい
+* `Ctrl` + drag で copy、通常 drag-drop で move をできるようにしたい
+* 外部 OS から explorer への drop でも copy として取り込みたい
+* クリップボードからの画像貼り付けを許容し、名前は `image.png` 固定、保存先は選択中 item 基準にしたい
+* 右クリックメニューから `コピー / 貼り付け / 削除 / 名前を変更 / パスのコピー / 相対パスのコピー / DataSetに追加` を実行したい
+* `コピー / 貼り付け / 削除 / 名前を変更` は既存機能がある前提で、コンテキストメニューからも同じ操作を呼べるようにしたい
+* `DataSetに追加` は複数ファイル選択を許容し、必要に応じて original data 登録を経由して source dataset 作成へ繋げたい
+
+## [ ] 19. 表示不可ファイルのタブから外部アプリで開けるようにしたい
+- Status:completed
+- 優先重み:4
+- 記載日時:2026-04-14-16:10(UTC+9)
+
+* main app 上で表示できないファイルを開いている場合、タブ内に `[外部アプリで開く]` button を出したい
+* クリック時はその拡張子に紐づいた既定アプリで file を開きたい
+* 実装は main process 経由で `Process.Start` 相当の OS 既定動作に寄せたい

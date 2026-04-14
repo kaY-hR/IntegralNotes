@@ -2,15 +2,30 @@ import type { WorkspaceFileDocument } from "../shared/workspace";
 
 interface WorkspaceFileViewerProps {
   file: WorkspaceFileDocument;
+  onOpenInExternalApp?: (relativePath: string) => void;
 }
 
-export function WorkspaceFileViewer({ file }: WorkspaceFileViewerProps): JSX.Element {
+export function WorkspaceFileViewer({
+  file,
+  onOpenInExternalApp
+}: WorkspaceFileViewerProps): JSX.Element {
   if (file.kind === "unsupported" || file.content === null) {
     return (
       <div className="workspace-file-viewer workspace-file-viewer--empty">
         <div className="workspace-file-viewer__message">
           <strong>{file.name}</strong>
           <p>この形式はまだ main app 上で表示できません。</p>
+          <div className="workspace-file-viewer__actions">
+            <button
+              className="button button--primary"
+              onClick={() => {
+                onOpenInExternalApp?.(file.relativePath);
+              }}
+              type="button"
+            >
+              外部アプリで開く
+            </button>
+          </div>
         </div>
       </div>
     );
