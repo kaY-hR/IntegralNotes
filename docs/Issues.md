@@ -225,7 +225,8 @@
 * エクスプローラーで表示非対応ファイルをダブルクリックした場合も、タブで開く代わりに OS 既定プログラムで直接開きたい
 * 実装は main process 経由で `Process.Start` 相当の OS 既定動作に寄せたい
 
-## [ ] 20. frontmatter 分離を `data-catalog` 限定ではなく cwd 全体の標準動作にしたい
+## [x] 20. frontmatter 分離を `data-catalog` 限定ではなく cwd 全体の標準動作にしたい
+- Status:completed
 - 優先重み:5
 - 記載日時:2026-04-14-17:04(UTC+9)
 
@@ -235,6 +236,11 @@
 * 保存時は本文だけを更新し、既存 frontmatter は壊さず保持したい
 * `data-catalog` 専用実装ではなく、通常 note でも frontmatter を自然に使えることを目標にしたい
 * `data-note` 専用 metadata の扱いと、一般 Markdown の任意 frontmatter の扱いをどう両立するか整理したい
+* 2026-04-14 実装:
+  - `src/main/frontmatter.ts` に generic frontmatter utility を追加し、`---` / `...` fence を使う Markdown frontmatter を main process 側で標準的に扱うようにした
+  - `src/main/workspaceService.ts` の `.md` read / save を `data-catalog` 条件から外し、`cwd` 配下 Markdown 全体で `frontmatter は保持 / editor・viewer へは本文だけ` に統一した
+  - rename / move 時の Markdown link / image target rewrite は本文だけへ適用し、frontmatter 内の任意 metadata は保持するようにした
+  - `src/main/dataNote.ts` も同じ utility を使うように整理し、`data-note` managed metadata と一般 Markdown frontmatter が同じ基盤上で共存する構成にした
 
 ## [ ] 21. dataset の data-note 本文に canonical data へのリンクを入れたい
 - 優先重み:4

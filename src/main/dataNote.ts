@@ -1,7 +1,10 @@
-interface FrontmatterBlock {
-  body: string;
-  frontmatter: string | null;
-}
+import {
+  type FrontmatterBlock,
+  normalizeMarkdownBody as normalizeBody,
+  normalizeMarkdownNewlines as normalizeNewlines,
+  serializeFrontmatterDocument,
+  splitFrontmatterBlock
+} from "./frontmatter";
 
 type DataNoteTargetType = "original-data" | "dataset";
 
@@ -45,7 +48,6 @@ interface DesiredDataNoteFileAssignment {
 }
 
 const DATA_NOTE_TYPE = "data-note";
-const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?/u;
 const DATA_NOTE_TYPE_PATTERN = /^\s*integralNoteType:\s*(?:"data-note"|'data-note'|data-note)\s*$/mu;
 const COMMON_MANAGED_FRONTMATTER_KEYS = [
   "integralNoteType",
@@ -410,27 +412,6 @@ function buildMergedFrontmatter(
   return `${managedFrontmatter}\n${preservedFrontmatter}`;
 }
 
-function splitFrontmatterBlock(markdown: string): FrontmatterBlock {
-  const match = FRONTMATTER_PATTERN.exec(markdown);
-
-  if (!match) {
-    return {
-      body: markdown,
-      frontmatter: null
-    };
-  }
-
-  return {
-    body: markdown.slice(match[0].length),
-    frontmatter: match[1]
-  };
-}
-
-function serializeFrontmatterDocument(frontmatter: string, body: string): string {
-  const normalizedBody = normalizeBody(body);
-  return `---\n${frontmatter}\n---\n${normalizedBody}`;
-}
-
 function isDataNoteFrontmatter(frontmatter: string | null): boolean {
   return Boolean(frontmatter && DATA_NOTE_TYPE_PATTERN.test(frontmatter));
 }
@@ -536,22 +517,8 @@ function createManagedDataNoteFileName(label: string, sequence: number): string 
   return `${sanitizedLabel}_${sequence}.md`;
 }
 
-function normalizeBody(body: string): string {
-  const normalizedBody = normalizeNewlines(body);
-
-  if (normalizedBody.length === 0) {
-    return "";
-  }
-
-  return normalizedBody.endsWith("\n") ? normalizedBody : `${normalizedBody}\n`;
-}
-
 function trimLeadingBlankLines(value: string): string {
   return value.replace(/^(?:\s*\n)+/u, "");
-}
-
-function normalizeNewlines(value: string): string {
-  return value.replace(/\r\n?/gu, "\n");
 }
 
 function serializeYamlValue(value: unknown): string {

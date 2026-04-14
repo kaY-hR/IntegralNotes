@@ -33,13 +33,17 @@ import {
   buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
   createDataNoteTargetKey,
-  extractDataNoteBody,
-  hasDataNoteFrontmatter,
   isDatasetDataNoteMetadata,
   isOriginalDataNoteMetadata,
-  parseDataNoteTargetInfo,
-  replaceDataNoteBody
+  parseDataNoteTargetInfo
 } from "./dataNote";
+import {
+  extractFrontmatterBody,
+  hasFrontmatterBlock,
+  replaceFrontmatterBody,
+  serializeFrontmatterDocument,
+  splitFrontmatterBlock
+} from "./frontmatter";
 
 interface WorkspaceServiceOptions {
   initialRootPath?: string;
@@ -220,10 +224,9 @@ export class WorkspaceService {
     }
 
     const existingContent = await fs.readFile(absolutePath, "utf8");
-    const nextContent =
-      this.isDataCatalogNotePath(relativePath) && hasDataNoteFrontmatter(existingContent)
-        ? replaceDataNoteBody(existingContent, content)
-        : content;
+    const nextContent = hasFrontmatterBlock(existingContent)
+      ? replaceFrontmatterBody(existingContent, content)
+      : content;
 
     if (existingContent !== nextContent) {
       await fs.writeFile(absolutePath, nextContent, "utf8");
@@ -584,10 +587,7 @@ export class WorkspaceService {
       const markdownContent = await fs.readFile(absolutePath, "utf8");
 
       return {
-        content:
-          this.isDataCatalogNotePath(relativePath) && hasDataNoteFrontmatter(markdownContent)
-            ? extractDataNoteBody(markdownContent)
-            : markdownContent,
+        content: extractFrontmatterBody(markdownContent),
         kind: "markdown",
         modifiedAt: stats.mtime.toISOString(),
         name: path.basename(absolutePath),
@@ -705,10 +705,6 @@ export class WorkspaceService {
     }
 
     return isDirectory || name.length > 0;
-  }
-
-  private isDataCatalogNotePath(relativePath: string): boolean {
-    return relativePath === DATA_CATALOG_DIRECTORY || relativePath.startsWith(`${DATA_CATALOG_DIRECTORY}/`);
   }
 
   private async syncDataCatalogNotes(rootPath: string): Promise<void> {
@@ -944,11 +940,18 @@ export class WorkspaceService {
       markdownPaths.map(async (relativePath) => {
         const absolutePath = this.resolveWorkspacePath(relativePath);
         const currentContent = await fs.readFile(absolutePath, "utf8");
-        const nextContent = rewriteWorkspaceMarkdownReferences(currentContent, normalizedChanges);
+        const parsed = splitFrontmatterBlock(currentContent);
+        const currentBody = parsed.frontmatter === null ? currentContent : parsed.body;
+        const nextBody = rewriteWorkspaceMarkdownReferences(currentBody, normalizedChanges);
 
-        if (nextContent === currentContent) {
+        if (nextBody === currentBody) {
           return;
         }
+
+        const nextContent =
+          parsed.frontmatter === null
+            ? nextBody
+            : serializeFrontmatterDocument(parsed.frontmatter, nextBody);
 
         await fs.writeFile(absolutePath, nextContent, "utf8");
       })

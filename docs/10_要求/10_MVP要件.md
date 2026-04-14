@@ -7,6 +7,8 @@
 - `1 original data = 1 data note` を基本とする
 - data note はユーザーがノート上で参照できる
 - original data / dataset の data note metadata は frontmatter に持たせ、editor / viewer には本文だけを渡す
+- `data-note` に限らず、`cwd` 配下の Markdown は frontmatter があれば app が保持し、editor / viewer には本文だけを渡す
+- Markdown 保存時は本文だけを更新し、既存 frontmatter は壊さず保持する
 - original data の data note file 名は原則 `originalName.md` とする
 - data note file 名が重複する場合は保存前に連番を付けて解消する
 - canonical 実体は `.store/` に置く
@@ -136,6 +138,7 @@
 
 ## 13. ノート内リンク
 
+- `cwd` 配下の Markdown では、frontmatter があっても link / image 補完・open・rename 追従は本文だけを対象にする
 - 通常 note 本文では標準 Markdown link `[label](target)` を使って workspace 内 file へ link できる
 - app が補完で自動挿入する canonical form は `[label](/path/from/cwd)` とする
 - app は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決する
