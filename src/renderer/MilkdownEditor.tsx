@@ -7,7 +7,7 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
 import { useEffect, useRef, useState } from "react";
 
-import type { WorkspaceEntry } from "../shared/workspace";
+import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
@@ -24,6 +24,7 @@ interface MilkdownEditorProps {
   isActive: boolean;
   onChange: (markdown: string) => void;
   onOpenWorkspaceFile: (relativePath: string) => void;
+  onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot) => void;
   onWorkspaceLinkError: (message: string) => void;
   workspaceEntries: WorkspaceEntry[];
 }
@@ -48,6 +49,7 @@ export function MilkdownEditor({
   isActive,
   onChange,
   onOpenWorkspaceFile,
+  onWorkspaceSnapshotChanged,
   onWorkspaceLinkError,
   workspaceEntries
 }: MilkdownEditorProps): JSX.Element {
@@ -55,6 +57,7 @@ export function MilkdownEditor({
   const editorRef = useRef<Crepe | null>(null);
   const onChangeRef = useRef(onChange);
   const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
+  const onWorkspaceSnapshotChangedRef = useRef(onWorkspaceSnapshotChanged);
   const onWorkspaceLinkErrorRef = useRef(onWorkspaceLinkError);
   const isActiveRef = useRef(isActive);
   const lastSyncedMarkdownRef = useRef(initialValue);
@@ -75,6 +78,10 @@ export function MilkdownEditor({
   useEffect(() => {
     onOpenWorkspaceFileRef.current = onOpenWorkspaceFile;
   }, [onOpenWorkspaceFile]);
+
+  useEffect(() => {
+    onWorkspaceSnapshotChangedRef.current = onWorkspaceSnapshotChanged;
+  }, [onWorkspaceSnapshotChanged]);
 
   useEffect(() => {
     onWorkspaceLinkErrorRef.current = onWorkspaceLinkError;
@@ -135,8 +142,48 @@ export function MilkdownEditor({
         return;
       }
 
+      const handleImageUpload = async (file: File): Promise<string> => {
+        try {
+          const content = new Uint8Array(await file.arrayBuffer());
+          const result = await window.integralNotes.saveNoteImage(
+            {
+              contentType: file.type,
+              originalFileName: file.name
+            },
+            content
+          );
+
+          onWorkspaceSnapshotChangedRef.current(result.snapshot);
+          return result.markdownTarget;
+        } catch (error) {
+          const message = toErrorMessage(error);
+          onWorkspaceLinkErrorRef.current(message);
+          throw error;
+        }
+      };
+
+      const proxyImageUrl = async (url: string): Promise<string> => {
+        const relativePath = resolveWorkspaceMarkdownTarget(url);
+
+        if (!relativePath) {
+          return url;
+        }
+
+        try {
+          return await window.integralNotes.resolveWorkspaceFileUrl(relativePath);
+        } catch {
+          return url;
+        }
+      };
+
       editor = new Crepe({
-        featureConfigs: createIntegralSnippetFeatureConfigs(),
+        featureConfigs: {
+          ...createIntegralSnippetFeatureConfigs(),
+          [Crepe.Feature.ImageBlock]: {
+            onUpload: handleImageUpload,
+            proxyDomURL: proxyImageUrl
+          }
+        },
         root: rootElement,
         defaultValue: initialValue
       });
@@ -602,4 +649,8 @@ function computePopupLayout(coords: { bottom: number; top: number }): { maxHeigh
     maxHeight,
     y: Math.max(margin, coords.top - maxHeight - offset)
   };
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "不明なエラーが発生しました。";
 }

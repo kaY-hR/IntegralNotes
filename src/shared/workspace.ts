@@ -123,6 +123,17 @@ export interface SaveClipboardImageResult {
   snapshot: WorkspaceSnapshot;
 }
 
+export interface SaveNoteImageRequest {
+  contentType?: string;
+  originalFileName?: string;
+}
+
+export interface SaveNoteImageResult {
+  entry: WorkspaceEntry;
+  markdownTarget: string;
+  snapshot: WorkspaceSnapshot;
+}
+
 export interface ExecuteIntegralActionRequest {
   actionId: string;
   blockType: string;
@@ -188,8 +199,10 @@ export interface IntegralNotesApi {
   moveEntries: (request: MoveEntriesRequest) => Promise<MoveEntriesResult>;
   copyExternalEntries: (request: CopyExternalEntriesRequest) => Promise<CopyEntriesResult>;
   saveClipboardImage: (request: SaveClipboardImageRequest) => Promise<SaveClipboardImageResult>;
+  saveNoteImage: (request: SaveNoteImageRequest, content: Uint8Array) => Promise<SaveNoteImageResult>;
   writeClipboardText: (text: string) => void;
   clipboardHasImage: () => boolean;
+  resolveWorkspaceFileUrl: (relativePath: string) => Promise<string>;
   openPathInExternalApp: (relativePath: string) => Promise<void>;
   uninstallPlugin: (pluginId: string) => Promise<UninstallPluginResult>;
   executeIntegralBlock: (

@@ -54,8 +54,10 @@ const api: IntegralNotesApi = {
   moveEntries: (request) => ipcRenderer.invoke("workspace:moveEntries", request),
   copyExternalEntries: (request) => ipcRenderer.invoke("workspace:copyExternalEntries", request),
   saveClipboardImage: (request) => ipcRenderer.invoke("workspace:saveClipboardImage", request),
+  saveNoteImage: (request, content) => ipcRenderer.invoke("workspace:saveNoteImage", request, content),
   writeClipboardText: (text) => clipboard.writeText(text),
   clipboardHasImage: () => !clipboard.readImage().isEmpty(),
+  resolveWorkspaceFileUrl: (relativePath) => ipcRenderer.invoke("workspace:resolveFileUrl", relativePath),
   openPathInExternalApp: (relativePath) =>
     ipcRenderer.invoke("workspace:openPathInExternalApp", relativePath),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("plugins:uninstall", pluginId),

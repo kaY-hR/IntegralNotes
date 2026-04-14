@@ -19,12 +19,15 @@ import type {
   RenameEntryResult,
   SaveClipboardImageRequest,
   SaveClipboardImageResult,
+  SaveNoteImageRequest,
+  SaveNoteImageResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
   WorkspaceFileDocument,
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
+  toCanonicalWorkspaceTarget,
   type WorkspacePathChange,
   rewriteWorkspaceMarkdownReferences
 } from "../shared/workspaceLinks";
@@ -55,6 +58,7 @@ interface PersistedWorkspaceState {
 }
 
 const DATA_CATALOG_DIRECTORY = "data-catalog";
+const DATA_DIRECTORY = "Data";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
@@ -442,8 +446,44 @@ export class WorkspaceService {
     };
   }
 
+  async saveNoteImage(
+    request: SaveNoteImageRequest,
+    content: Buffer
+  ): Promise<SaveNoteImageResult> {
+    this.getConfiguredRootPath();
+    await this.ensureWorkspaceReady();
+
+    const destinationDirectoryPath = this.resolveWorkspacePath(DATA_DIRECTORY);
+    await fs.mkdir(destinationDirectoryPath, { recursive: true });
+
+    const preferredFileName = createNoteImageFileName(
+      request.originalFileName,
+      request.contentType
+    );
+    const destinationPath = await createTimestampedImagePath(
+      destinationDirectoryPath,
+      preferredFileName
+    );
+
+    await fs.writeFile(destinationPath, content);
+
+    const entry = await this.getEntryByPath(this.toRelativePath(destinationPath));
+
+    return {
+      entry,
+      markdownTarget: toCanonicalWorkspaceTarget(entry.relativePath),
+      snapshot: await this.getRequiredSnapshot()
+    };
+  }
+
   getAbsolutePath(relativePath: string): string {
     return this.resolveWorkspacePath(relativePath);
+  }
+
+  async resolveWorkspaceFileUrl(relativePath: string): Promise<string> {
+    const absolutePath = this.resolveWorkspacePath(relativePath);
+    const content = await fs.readFile(absolutePath);
+    return `data:${inferMimeType(absolutePath)};base64,${content.toString("base64")}`;
   }
 
   private async ensureDirectoryPath(relativePath: string): Promise<string> {
@@ -1100,6 +1140,75 @@ async function createAvailableImagePath(
   }
 
   throw new Error(`${preferredFileName} の保存先を確保できませんでした。`);
+}
+
+async function createTimestampedImagePath(
+  destinationDirectoryPath: string,
+  preferredFileName: string
+): Promise<string> {
+  const extension = path.extname(preferredFileName);
+  const timestamp = formatLocalTimestamp(new Date());
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const randomSuffix = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, "0");
+    const candidatePath = path.join(
+      destinationDirectoryPath,
+      `${timestamp}-${randomSuffix}${extension}`
+    );
+
+    if (!(await pathExists(candidatePath))) {
+      return candidatePath;
+    }
+  }
+
+  throw new Error("画像の保存先を確保できませんでした。");
+}
+
+function createNoteImageFileName(
+  originalFileName: string | undefined,
+  contentType: string | undefined
+): string {
+  return `image${inferImageExtension(originalFileName, contentType)}`;
+}
+
+function inferImageExtension(
+  originalFileName: string | undefined,
+  contentType: string | undefined
+): string {
+  const fileNameExtension = path.extname(originalFileName?.trim() ?? "").toLowerCase();
+
+  if (IMAGE_EXTENSIONS.has(fileNameExtension)) {
+    return fileNameExtension;
+  }
+
+  switch ((contentType ?? "").trim().toLowerCase()) {
+    case "image/bmp":
+      return ".bmp";
+    case "image/gif":
+      return ".gif";
+    case "image/jpeg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/svg+xml":
+      return ".svg";
+    case "image/webp":
+      return ".webp";
+    default:
+      return ".png";
+  }
+}
+
+function formatLocalTimestamp(value: Date): string {
+  const year = value.getFullYear().toString().padStart(4, "0");
+  const month = (value.getMonth() + 1).toString().padStart(2, "0");
+  const day = value.getDate().toString().padStart(2, "0");
+  const hour = value.getHours().toString().padStart(2, "0");
+  const minute = value.getMinutes().toString().padStart(2, "0");
+
+  return `${year}${month}${day}-${hour}${minute}`;
 }
 
 async function collectMarkdownRelativePaths(

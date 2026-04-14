@@ -17,6 +17,7 @@ import type {
   MoveEntriesRequest,
   RenameEntryRequest,
   SaveClipboardImageRequest,
+  SaveNoteImageRequest,
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
@@ -310,6 +311,14 @@ function registerIpcHandlers(): void {
 
     return workspaceService.savePngImage(request, image.toPNG());
   });
+  ipcMain.handle(
+    "workspace:saveNoteImage",
+    async (_event, request: SaveNoteImageRequest, content: Uint8Array) =>
+      workspaceService.saveNoteImage(request, Buffer.from(content))
+  );
+  ipcMain.handle("workspace:resolveFileUrl", async (_event, relativePath: string) =>
+    workspaceService.resolveWorkspaceFileUrl(relativePath)
+  );
   ipcMain.handle("workspace:openPathInExternalApp", async (_event, relativePath: string) => {
     const errorMessage = await shell.openPath(workspaceService.getAbsolutePath(relativePath));
 

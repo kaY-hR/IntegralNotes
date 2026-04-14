@@ -1925,6 +1925,11 @@ export function App(): JSX.Element {
               openUnsupportedExternally: true
             });
           }}
+          onWorkspaceSnapshotChanged={(snapshot) => {
+            applyWorkspaceSnapshot(snapshot, {
+              statusMessage: "画像を workspace に保存しました"
+            });
+          }}
           onWorkspaceLinkError={(message) => {
             setStatusMessage(message);
           }}

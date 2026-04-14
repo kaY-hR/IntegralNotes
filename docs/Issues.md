@@ -287,7 +287,8 @@
   - `/path` と `path` の両方を resolver で扱い、click 時は `.md / renderable / text / unsupported` を既存 open 導線へ流すようにした
   - rename / move 時は main process で `cwd` 配下 `.md` の Markdown link / image target を更新し、open tab 側も同じ rewrite を適用するようにした
 
-## [ ] 23. Milkdown の画像挿入 / 画像貼り付けで blob URL ではなく workspace 永続画像を保存したい
+## [x] 23. Milkdown の画像挿入 / 画像貼り付けで blob URL ではなく workspace 永続画像を保存したい
+- Status:completed
 - 優先重み:6
 - 記載日時:2026-04-14-17:38(UTC+9)
 
@@ -302,3 +303,11 @@
 * 自動保存先は `Data/` だが、手書き image link は workspace 内の他 path も許容したい
 * IntegralNotes 内の rename / move では、`cwd` 配下 `.md` を走査して image target も自動更新したい
 * explorer 上の画像貼り付け、保存先設定 UI、非 image attachment、外部 URL の自動取込は本 Issue の対象外とする
+* 2026-04-14 実装:
+  - `src/main/workspaceService.ts` に note image 保存 API を追加し、`Data/yyyyMMdd-HHmm-RRR.ext` 形式で永続化して canonical target `![](/Data/...)` を返すようにした
+  - `src/main/main.ts`, `src/main/preload.ts`, `src/shared/workspace.ts` に IPC / 型を追加し、renderer から file bytes を送って保存できるようにした
+  - `src/renderer/MilkdownEditor.tsx` の `Crepe.Feature.ImageBlock` に `onUpload` と `proxyDomURL` を設定し、image insert / paste / drop が同じ永続化 policy を通るようにした
+  - editor 再表示時は workspace path を main process 経由で DOM 用の loadable URL に変換し、再起動後も画像を表示できるようにした
+  - `src/renderer/App.tsx` で画像保存後の workspace snapshot を反映し、`Data/` 配下の新規 file が explorer に現れるようにした
+* 2026-04-15 修正:
+  - Electron renderer で `file://` が `Not allowed to load local resource` になるケースがあったため、`resolveWorkspaceFileUrl()` は `file:` URL ではなく `data:` URL を返すように変更した
