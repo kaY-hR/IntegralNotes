@@ -87,7 +87,8 @@
 * 将来的には frontmatter の内容を使って検索や絞り込みなどに活用できる形にしておきたい
 * data-note の新規生成、保存、読込、表示の各経路で frontmatter を壊さず保持できるようにしたい
 
-## [ ] 11. Python script 実行 block の UI を簡素化したい
+## [x] 11. Python script 実行 block の UI を簡素化したい
+- Status:completed
 - 優先重み:5
 - 記載日時:2026-04-14-10:49(UTC+9)
 
@@ -98,7 +99,8 @@
 * 全体的に余白が大きすぎるため、情報密度を上げたフラットな UI に寄せたい
 * 登録後、自動的に作成したblockを挿入してほしい。
 
-## [ ] 12. Python script 系の input 割り当て導線を分かりやすくしたい
+## [x] 12. Python script 系の input 割り当て導線を分かりやすくしたい
+- Status:completed
 - 優先重み:5
 - 記載日時:2026-04-14-10:53(UTC+9)
 
@@ -164,9 +166,28 @@
 * dataset 再生成時の重複生成や更新方針、GC 時に data-note をどう扱うかも整理したい
 
 ## [x] 16. トップバー「データ登録」メニューからの dialog の UI を改善したい
+- Status:completed
 - 優先重み:5
 - 記載日時:2026-04-14(UTC+9)
 
 * Issue 11, 12 と同様の方針で、`DataRegistrationDialog` の UI を見直したい
 * 現状は情報密度が低く、導線が分かりにくい
 * 余白の縮小、操作の優先度の明確化、表示の簡素化を行いたい
+
+## [x] 17. Python script block / dialog 周りの UI を目的起点で再設計したい
+- Status:completed
+- 優先重み:6
+- 記載日時:2026-04-14-15:50(UTC+9)
+
+* 対象は `PythonScript` 実行 block、dataset 選択 dialog、dataset 作成 dialog を中心とした block / dialog 周り
+* 現状は system 用語の `source dataset` や `元データ` がそのまま前面に出ており、ユーザーが画面の目的を理解しづらい
+* user-facing 文言は `source dataset` ではなく `dataset`、`元データ` ではなく `データファイル` を基本に統一したい
+* その画面に来るユーザーの主目的は「この input slot に使うデータを決めて先へ進むこと」であり、最初に見る情報と primary action はその目的に揃えるべき
+* script 実行 block では、slot ごとの主要操作を `データを割り当て` の 1 つへ寄せたい
+* 現状の `データセットを割り当て` と `元データからデータセットを作成` は見た目だけ並列で、操作の優先度と関係が伝わりにくい
+* 基本導線は「まず既存 dataset を選ぶ」、適切な dataset が無いときの代替導線として「データファイルから新しい dataset を作る」を同一フロー内で案内したい
+* dataset 選択 dialog から、そのまま `データファイル` を選んで dataset を新規作成できる導線を案内したい
+* dataset 作成 dialog では `ファイルを追加` と `フォルダを追加` は並列の選択肢として同じ hierarchy と揃った配置で表現したい
+* 並列な選択肢を出す場面では、ラベル、説明量、button 配置、整列を揃え、UI 上でも「同格の選択肢」であることが伝わるようにしたい
+* 逆に primary / secondary の関係がある操作は、見た目だけ並列にせず、1st action と補助導線の差が明確に分かる構成へ寄せたい
+* Issue 11, 12 の簡素化・導線改善を、用語整理と情報設計まで含めて再定義する Issue として扱いたい

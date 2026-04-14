@@ -1663,6 +1663,26 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   font-size: 0.7rem;
 }
 
+.asset-picker__create-link {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px dashed #b0bcc8;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+
+.asset-picker__create-link:hover {
+  background: #edf3fa;
+  border-color: var(--accent);
+}
+
 .integral-slot-list {
   display: grid;
   gap: 3px;

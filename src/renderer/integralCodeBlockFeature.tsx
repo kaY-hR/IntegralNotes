@@ -17,7 +17,6 @@ import type { ExecuteIntegralBlockResult, IntegralBlockDocument, IntegralDataset
 
 import {
   DatasetPickerDialog,
-  OriginalDataPickerDialog,
   DatasetRenderableView
 } from "./IntegralAssetDialogs";
 import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
@@ -43,16 +42,9 @@ type RunState = {
   summary: string | null;
 };
 
-type SlotDialogState =
-  | {
-      kind: "original-data";
-      slotName: string;
-    }
-  | {
-      kind: "dataset";
-      slotName: string;
-    }
-  | null;
+type SlotDialogState = {
+  slotName: string;
+} | null;
 
 type ParsedIntegralDraft =
   | {
@@ -443,7 +435,7 @@ function IntegralBlockPanel({
             className="integral-code-block__button integral-code-block__button--ghost integral-display-block__picker"
             onClick={() => {
               setInlineError(null);
-              setSlotDialogState({ kind: "dataset", slotName: "source" });
+              setSlotDialogState({ slotName: "source" });
             }}
             type="button"
           >
@@ -459,9 +451,10 @@ function IntegralBlockPanel({
           </div>
         ) : null}
 
-        {slotDialogState?.kind === "dataset" ? (
+        {slotDialogState ? (
           <DatasetPickerDialog
             acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
+            defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
@@ -503,15 +496,9 @@ function IntegralBlockPanel({
                 <div className="integral-slot-row__actions">
                   <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
                     setInlineError(null);
-                    setSlotDialogState({ kind: "dataset", slotName: slot.name });
+                    setSlotDialogState({ slotName: slot.name });
                   }} type="button">
-                    {isAssigned ? "変更" : "Dataset を割り当て"}
-                  </button>
-                  <button className="integral-slot-row__link" onClick={() => {
-                    setInlineError(null);
-                    setSlotDialogState({ kind: "original-data", slotName: slot.name });
-                  }} type="button">
-                    元データから作成
+                    {isAssigned ? "変更" : "データを割り当て"}
                   </button>
                 </div>
               ) : null}
@@ -564,28 +551,15 @@ function IntegralBlockPanel({
           </div>
         ) : null}
 
-        {slotDialogState?.kind === "dataset" ? (
+        {slotDialogState ? (
           <DatasetPickerDialog
             acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
-            onClose={() => {
-              setSlotDialogState(null);
-            }}
-            onError={setInlineError}
-            onSelect={(datasetId) => {
-              onAssignDataset(slotDialogState.slotName, datasetId);
-              setSlotDialogState(null);
-            }}
-          />
-        ) : null}
-
-        {slotDialogState?.kind === "original-data" ? (
-          <OriginalDataPickerDialog
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
-            onSelectDataset={(datasetId) => {
+            onSelect={(datasetId) => {
               onAssignDataset(slotDialogState.slotName, datasetId);
               setSlotDialogState(null);
             }}
@@ -634,28 +608,15 @@ function IntegralBlockPanel({
 
       {runState.status !== "idle" ? <RunStateView runState={runState} /> : null}
 
-      {slotDialogState?.kind === "dataset" ? (
+      {slotDialogState ? (
         <DatasetPickerDialog
           acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
-          onClose={() => {
-            setSlotDialogState(null);
-          }}
-          onError={setInlineError}
-          onSelect={(datasetId) => {
-            onAssignDataset(slotDialogState.slotName, datasetId);
-            setSlotDialogState(null);
-          }}
-        />
-      ) : null}
-
-      {slotDialogState?.kind === "original-data" ? (
-        <OriginalDataPickerDialog
           defaultDatasetName={slotDialogState.slotName}
           onClose={() => {
             setSlotDialogState(null);
           }}
           onError={setInlineError}
-          onSelectDataset={(datasetId) => {
+          onSelect={(datasetId) => {
             onAssignDataset(slotDialogState.slotName, datasetId);
             setSlotDialogState(null);
           }}

@@ -13,17 +13,27 @@ function toErrorMessage(error: unknown): string {
 
 interface DatasetPickerDialogProps {
   acceptedKinds?: string[];
+  defaultDatasetName?: string;
   onClose: () => void;
   onError: (message: string) => void;
+  onImportedOriginalData?: (
+    originalData: readonly IntegralOriginalDataSummary[],
+    kind: "directories" | "files"
+  ) => Promise<void> | void;
   onSelect: (datasetId: string) => void;
 }
 
+type DatasetPickerMode = "select" | "create";
+
 export function DatasetPickerDialog({
   acceptedKinds,
+  defaultDatasetName,
   onClose,
   onError,
+  onImportedOriginalData,
   onSelect
 }: DatasetPickerDialogProps): JSX.Element {
+  const [mode, setMode] = useState<DatasetPickerMode>("select");
   const [datasets, setDatasets] = useState<IntegralDatasetSummary[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
 
@@ -51,19 +61,41 @@ export function DatasetPickerDialog({
     });
   }, [acceptedKinds, datasets]);
 
+  if (mode === "create") {
+    return (
+      <OriginalDataSelectionDialog
+        confirmLabel="Dataset を作成して割り当て"
+        defaultDatasetName={defaultDatasetName}
+        description="データファイルを選んで新しい dataset を作成します。"
+        onClose={() => {
+          setMode("select");
+        }}
+        onError={onError}
+        onImportedOriginalData={onImportedOriginalData}
+        onSelect={async ({ datasetName, originalDataIds }) => {
+          const result = await window.integralNotes.createSourceDataset({
+            name: datasetName,
+            originalDataIds
+          });
+
+          onSelect(result.dataset.datasetId);
+        }}
+        pendingLabel="作成中..."
+        requireDatasetName
+        title="新しい Dataset を作成"
+      />
+    );
+  }
+
   return (
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--asset-picker">
         <div className="dialog-card__header">
-          <h2>Dataset を選択</h2>
-          <p>割り当てる dataset を選んでください。</p>
+          <h2>データを割り当て</h2>
+          <p>既存の dataset を選ぶか、新しく作成してください。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--asset-picker">
-          {acceptedKinds && acceptedKinds.length > 0 ? (
-            <p className="asset-picker__hint">候補 kind: {acceptedKinds.join(", ")}</p>
-          ) : null}
-
           <div className="asset-picker__list">
             {sortedDatasets.length > 0 ? (
               sortedDatasets.map((dataset) => (
@@ -79,7 +111,6 @@ export function DatasetPickerDialog({
                   <div>
                     <strong>{dataset.name}</strong>
                     <div className="asset-picker__meta">
-                      <span>{dataset.datasetId}</span>
                       <span>{dataset.kind}</span>
                       <span>{dataset.renderableCount} renderable</span>
                     </div>
@@ -87,9 +118,19 @@ export function DatasetPickerDialog({
                 </label>
               ))
             ) : (
-              <div className="asset-picker__empty">登録済み dataset がありません。</div>
+              <div className="asset-picker__empty">割り当て可能な dataset がありません。</div>
             )}
           </div>
+
+          <button
+            className="asset-picker__create-link"
+            onClick={() => {
+              setMode("create");
+            }}
+            type="button"
+          >
+            データファイルから新しい dataset を作成
+          </button>
 
           <div className="dialog-actions">
             <button className="button button--ghost" onClick={onClose} type="button">
@@ -218,7 +259,7 @@ export function OriginalDataSelectionDialog({
     const normalizedDatasetName = datasetName.trim();
 
     if (requireDatasetName && normalizedDatasetName.length === 0) {
-      onError("dataset 名を入力してください。");
+      onError("Dataset 名を入力してください。");
       return;
     }
 
@@ -247,13 +288,13 @@ export function OriginalDataSelectionDialog({
         <div className="dialog-card__body dialog-card__body--asset-picker">
           {requireDatasetName ? (
             <label className="dialog-field">
-              <span>Dataset Name</span>
+              <span>Dataset 名</span>
               <input
                 disabled={pending}
                 onChange={(event) => {
                   setDatasetName(event.target.value);
                 }}
-                placeholder="source dataset 名を入力..."
+                placeholder="dataset 名を入力..."
                 type="text"
                 value={datasetName}
               />
@@ -285,8 +326,8 @@ export function OriginalDataSelectionDialog({
 
           <p className="asset-picker__hint">
             {selectedOriginalDataIds.size > 0
-              ? `${selectedOriginalDataIds.size} 件の元データを選択中`
-              : "複数の元データを選択できます。"}
+              ? `${selectedOriginalDataIds.size} 件選択中`
+              : "dataset に含めるデータファイルを選択してください。"}
           </p>
 
           <div className="asset-picker__list">
@@ -316,7 +357,6 @@ export function OriginalDataSelectionDialog({
                     <div>
                       <strong>{entry.originalName}</strong>
                       <div className="asset-picker__meta">
-                        <span>{entry.originalDataId}</span>
                         <span>{entry.sourceKind}</span>
                       </div>
                     </div>
@@ -324,7 +364,7 @@ export function OriginalDataSelectionDialog({
                 );
               })
             ) : (
-              <div className="asset-picker__empty">登録済み元データがありません。</div>
+              <div className="asset-picker__empty">データファイルがありません。先にデータを取り込んでください。</div>
             )}
           </div>
 
@@ -358,9 +398,9 @@ export function OriginalDataPickerDialog({
 }: OriginalDataPickerDialogProps): JSX.Element {
   return (
     <OriginalDataSelectionDialog
-      confirmLabel="source dataset を作成"
+      confirmLabel="Dataset を作成"
       defaultDatasetName={defaultDatasetName}
-      description="複数の元データを選ぶと app が `source-bundle` kind の dataset を、普通の file / directory 群として生成します。"
+      description="データファイルを選んで新しい dataset を作成します。"
       onClose={onClose}
       onError={onError}
       onImportedOriginalData={onImportedOriginalData}
@@ -374,7 +414,7 @@ export function OriginalDataPickerDialog({
       }}
       pendingLabel="作成中..."
       requireDatasetName
-      title="元データから source dataset を作成"
+      title="新しい Dataset を作成"
     />
   );
 }
@@ -446,7 +486,7 @@ export function DatasetRenderableView({ datasetId }: { datasetId: string | null 
   }, [datasetId]);
 
   if (!datasetId) {
-    return <div className="integral-renderable__empty">表示対象 dataset が未設定です。</div>;
+    return <div className="integral-renderable__empty">表示する dataset が未設定です。</div>;
   }
 
   if (error) {

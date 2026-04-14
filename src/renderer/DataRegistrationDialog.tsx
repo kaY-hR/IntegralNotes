@@ -63,13 +63,13 @@ export function DataRegistrationDialog({
       <div className="dialog-card dialog-card--data-registration">
         <div className="dialog-card__header">
           <h2>データ登録</h2>
-          <p>元データの取り込みと dataset の作成</p>
+          <p>データファイルの取り込みと dataset の作成</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--data-registration">
           <section className="data-registration-card">
-            <strong>元データを取り込む</strong>
-            <p>外部ファイルやフォルダを workspace に登録します。</p>
+            <strong>データファイルを取り込む</strong>
+            <p>外部のファイルやフォルダを workspace に登録します。</p>
             <div className="data-registration-card__actions">
               <button
                 className="button button--ghost"
@@ -95,8 +95,8 @@ export function DataRegistrationDialog({
           </section>
 
           <section className="data-registration-card">
-            <strong>Source Dataset を作成</strong>
-            <p>登録済みの元データを組み合わせて dataset を作成します。</p>
+            <strong>Dataset を作成</strong>
+            <p>登録済みのデータファイルを組み合わせて dataset を作成します。</p>
             <div className="data-registration-card__actions">
               <button
                 className="button button--primary"
