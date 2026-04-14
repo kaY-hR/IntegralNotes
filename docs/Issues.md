@@ -140,7 +140,8 @@
   - 次に実装を更新する
   - 最後に、既存の未実装 Issue について、現在の設計に合わせて修正が必要なら見直す
 
-## [ ] 14. dataset / original data の ID prefix を `DTS-` / `ORD-` に変更したい
+## [x] 14. dataset / original data の ID prefix を `DTS-` / `ORD-` に変更したい
+- Status:completed
 - 優先重み:4
 - 記載日時:2026-04-14-13:39(UTC+9)
 
@@ -148,9 +149,10 @@
 * `CNK-...` は `DTS-...`、`BLB-...` は `ORD-...` へ寄せたい
 * 少なくとも `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計`, `docs/Issues.md`, `src/` 配下の表示文言・型名・metadata 例を見直したい
 * `.store/.integral/*.json`, data-note frontmatter / 本文, `Data/` alias 名, `.py-scripts` や block JSON との参照整合も確認したい
-* 未リリース前提なので migration を持たない前提で一気に切り替えるか、開発用 workspace 向けに最小 migration を入れるかを実装前に決めたい
+* 未リリース前提で migration は追加せず、新規生成 ID を `DTS-...` / `ORD-...` に切り替える方針とした
 
-## [ ] 15. dataset 作成時も data-catalog に data-note を生成したい
+## [x] 15. dataset 作成時も data-catalog に data-note を生成したい
+- Status:completed
 - 優先重み:4
 - 記載日時:2026-04-14-13:39(UTC+9)
 

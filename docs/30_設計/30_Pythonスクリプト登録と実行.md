@@ -109,13 +109,13 @@ original data 複数選択の場合:
 
 1. app が新しい source dataset を作る
 2. source dataset は `.store/{datasetId}/` に普通の file / directory 群として materialize される
-3. block の input には source dataset の `CNK-...` を書く
+3. block の input には source dataset の `DTS-...` を書く
 
 ## 6. output 割当
 
 - output slot 名は先に block に書く
 - value は最初 `null`
-- 実行時に app が output dataset を新規作成して `CNK-...` を書き戻す
+- 実行時に app が output dataset を新規作成して `DTS-...` を書き戻す
 
 ## 7. 実行準備
 
@@ -132,10 +132,10 @@ app は実行前に次を行う。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\CNK-7K2M9Q4D"
+    "samples": "C:\\Workspace\\.store\\DTS-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\.store\\CNK-9X4Q2M1A"
+    "result": "C:\\Workspace\\.store\\DTS-9X4Q2M1A"
   },
   "params": {}
 }

@@ -16,13 +16,16 @@ import type {
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
+  buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
+  createDatasetDataNoteFileName,
   createOriginalDataNoteFileName,
-  extractOriginalDataNoteBody,
-  hasOriginalDataNoteFrontmatter,
-  replaceOriginalDataNoteBody,
-  type OriginalDataNoteMetadata
-} from "./originalDataNote";
+  extractDataNoteBody,
+  hasDataNoteFrontmatter,
+  isDatasetDataNoteMetadata,
+  isOriginalDataNoteMetadata,
+  replaceDataNoteBody
+} from "./dataNote";
 
 interface WorkspaceServiceOptions {
   initialRootPath?: string;
@@ -117,7 +120,7 @@ export class WorkspaceService {
       fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
     ]);
-    await this.syncOriginalDataNotes(rootPath);
+    await this.syncDataCatalogNotes(rootPath);
   }
 
   async getSnapshot(): Promise<WorkspaceSnapshot | null> {
@@ -179,8 +182,8 @@ export class WorkspaceService {
 
     const existingContent = await fs.readFile(absolutePath, "utf8");
     const nextContent =
-      this.isDataCatalogNotePath(relativePath) && hasOriginalDataNoteFrontmatter(existingContent)
-        ? replaceOriginalDataNoteBody(existingContent, content)
+      this.isDataCatalogNotePath(relativePath) && hasDataNoteFrontmatter(existingContent)
+        ? replaceDataNoteBody(existingContent, content)
         : content;
 
     if (existingContent !== nextContent) {
@@ -336,8 +339,8 @@ export class WorkspaceService {
 
       return {
         content:
-          this.isDataCatalogNotePath(relativePath) && hasOriginalDataNoteFrontmatter(markdownContent)
-            ? extractOriginalDataNoteBody(markdownContent)
+          this.isDataCatalogNotePath(relativePath) && hasDataNoteFrontmatter(markdownContent)
+            ? extractDataNoteBody(markdownContent)
             : markdownContent,
         kind: "markdown",
         modifiedAt: stats.mtime.toISOString(),
@@ -462,7 +465,7 @@ export class WorkspaceService {
     return relativePath === DATA_CATALOG_DIRECTORY || relativePath.startsWith(`${DATA_CATALOG_DIRECTORY}/`);
   }
 
-  private async syncOriginalDataNotes(rootPath: string): Promise<void> {
+  private async syncDataCatalogNotes(rootPath: string): Promise<void> {
     const metadataRootPath = path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY);
     const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
     const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
@@ -471,30 +474,39 @@ export class WorkspaceService {
       entries
         .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
         .map(async (entry) => {
-          const metadata = await this.readJsonFile<OriginalDataNoteMetadata>(
+          const metadata = await this.readJsonFile<unknown>(
             path.join(metadataRootPath, entry.name)
           );
 
-          if (
-            !metadata ||
-            typeof metadata.originalDataId !== "string" ||
-            typeof metadata.originalName !== "string" ||
-            typeof metadata.createdAt !== "string" ||
-            typeof metadata.aliasRelativePath !== "string" ||
-            typeof metadata.storeRelativePath !== "string" ||
-            (metadata.sourceKind !== "file" && metadata.sourceKind !== "directory")
-          ) {
+          if (isOriginalDataNoteMetadata(metadata)) {
+            const originalName = metadata.originalName.trim();
+            const originalDataId = metadata.originalDataId.trim();
+            const dataNotePath = path.join(
+              dataCatalogRootPath,
+              createOriginalDataNoteFileName(originalName, originalDataId)
+            );
+            const existingContent = await readTextFileIfExists(dataNotePath);
+            const nextContent = buildOriginalDataNoteMarkdown(metadata, existingContent);
+
+            if (normalizeForComparison(existingContent) === nextContent) {
+              return;
+            }
+
+            await fs.writeFile(dataNotePath, nextContent, "utf8");
             return;
           }
 
-          const originalName = metadata.originalName.trim();
-          const originalDataId = metadata.originalDataId.trim();
+          if (!isDatasetDataNoteMetadata(metadata)) {
+            return;
+          }
+
+          const datasetId = metadata.datasetId.trim();
           const dataNotePath = path.join(
             dataCatalogRootPath,
-            createOriginalDataNoteFileName(originalName, originalDataId)
+            createDatasetDataNoteFileName(datasetId)
           );
           const existingContent = await readTextFileIfExists(dataNotePath);
-          const nextContent = buildOriginalDataNoteMarkdown(metadata, existingContent);
+          const nextContent = buildDatasetDataNoteMarkdown(metadata, existingContent);
 
           if (normalizeForComparison(existingContent) === nextContent) {
             return;

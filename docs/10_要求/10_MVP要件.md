@@ -3,10 +3,10 @@
 ## 1. データ登録
 
 - ユーザーは `cwd` 内外のファイルまたはフォルダを `original data` として登録できる
-- original data には一意 ID `BLB-...` を付与する
+- original data には一意 ID `ORD-...` を付与する
 - `1 original data = 1 data note` を基本とする
 - data note はユーザーがノート上で参照できる
-- original data の data note metadata は frontmatter に持たせ、editor / viewer には本文だけを渡す
+- original data / dataset の data note metadata は frontmatter に持たせ、editor / viewer には本文だけを渡す
 - canonical 実体は `.store/` に置く
 - metadata は `.store/.integral/{originalDataId}.json` に置く
 - file original data の実体は `.store/{originalDataId}{ext}` に置く
@@ -44,6 +44,7 @@
 - GUI 上だけ、`1 input slot = N original data items` を許容する
 - `N original data items` を選んだ場合、app は source dataset を新規作成する
 - source dataset の実体も `.store/{datasetId}/` に materialize する
+- source dataset 作成時は対応する data note も `data-catalog/` に自動生成する
 - source dataset 内では custom manifest を置かず、普通の file / directory 群として見えるようにする
 - source dataset 作成時は
   - file original data は hard link
@@ -78,6 +79,7 @@
 - 成功/失敗判定は exit code のみで行う
 - output dataset が空でも「空の結果」として扱う
 - dataset フォルダの実体は `.store/{datasetId}/` を正とする
+- output dataset 作成時は対応する data note も `data-catalog/` に自動生成する
 
 ## 7. kind / format
 

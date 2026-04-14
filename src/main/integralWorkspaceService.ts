@@ -27,9 +27,11 @@ import type {
 import type { InstalledPluginDefinition } from "../shared/plugins";
 import { PluginRegistry } from "./pluginRegistry";
 import {
+  buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
+  createDatasetDataNoteFileName,
   createOriginalDataNoteFileName
-} from "./originalDataNote";
+} from "./dataNote";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
@@ -157,7 +159,7 @@ export class IntegralWorkspaceService {
         this.assertRegisterableOriginalDataPath(rootPath, resolvedSourcePath);
       }
 
-      const originalDataId = createOpaqueId("BLB");
+      const originalDataId = createOpaqueId("ORD");
       const storeRelativePath = createOriginalDataStoreRelativePath(
         originalDataId,
         path.basename(resolvedSourcePath),
@@ -213,7 +215,7 @@ export class IntegralWorkspaceService {
     }
 
     const uniqueOriginalDataIds = Array.from(new Set(originalDataIds));
-    const datasetId = createOpaqueId("CNK");
+    const datasetId = createOpaqueId("DTS");
     const datasetRootPath = this.resolveDatasetRootPath(datasetId);
     const sourceMembers: SourceDatasetMember[] = [];
     const usedEntryNames = new Set<string>();
@@ -255,6 +257,7 @@ export class IntegralWorkspaceService {
     };
 
     await this.writeDatasetMetadata(datasetId, datasetMetadata);
+    await this.writeDatasetNote(datasetMetadata);
 
     return {
       dataset: await this.readDatasetSummary(datasetId)
@@ -353,6 +356,7 @@ export class IntegralWorkspaceService {
     );
 
     return {
+      dataNoteRelativePath: `${DATA_CATALOG_DIRECTORY}/${createDatasetDataNoteFileName(datasetMetadata.datasetId)}`,
       datasetId: datasetMetadata.datasetId,
       createdAt: datasetMetadata.createdAt,
       createdByBlockId: datasetMetadata.createdByBlockId,
@@ -472,7 +476,7 @@ export class IntegralWorkspaceService {
     const outputPaths: Record<string, string | null> = {};
 
     for (const outputSlot of definition.outputSlots) {
-      const nextDatasetId = createOpaqueId("CNK");
+      const nextDatasetId = createOpaqueId("DTS");
       const metadata: DatasetMetadata = {
         datasetId: nextDatasetId,
         createdAt: new Date().toISOString(),
@@ -483,6 +487,7 @@ export class IntegralWorkspaceService {
 
       await fs.mkdir(this.resolveDatasetRootPath(nextDatasetId), { recursive: true });
       await this.writeDatasetMetadata(nextDatasetId, metadata);
+      await this.writeDatasetNote(metadata);
 
       const datasetSummary = await this.readDatasetSummary(nextDatasetId);
       outputDatasetMap.set(outputSlot.name, datasetSummary);
@@ -629,6 +634,20 @@ export class IntegralWorkspaceService {
     await fs.writeFile(dataNotePath, nextContent, "utf8");
   }
 
+  private async writeDatasetNote(metadata: DatasetMetadata): Promise<void> {
+    const dataNotePath = this.resolveWorkspacePath(
+      `${DATA_CATALOG_DIRECTORY}/${createDatasetDataNoteFileName(metadata.datasetId)}`
+    );
+    const existingContent = await readTextFileIfExists(dataNotePath);
+    const nextContent = buildDatasetDataNoteMarkdown(metadata, existingContent);
+
+    if (normalizeForComparison(existingContent) === nextContent) {
+      return;
+    }
+
+    await fs.writeFile(dataNotePath, nextContent, "utf8");
+  }
+
   private async writePythonExecutionLogs(
     scriptRootPath: string,
     stdout: string,
@@ -702,6 +721,7 @@ export class IntegralWorkspaceService {
     ).length;
 
     return {
+      dataNoteRelativePath: `${DATA_CATALOG_DIRECTORY}/${createDatasetDataNoteFileName(metadata.datasetId)}`,
       datasetId: metadata.datasetId,
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
@@ -1109,7 +1129,7 @@ function normalizeSlotNames(slotNames: string[], label: string): string[] {
   return normalized;
 }
 
-function createOpaqueId(prefix: "BLB" | "BLK" | "CNK" | "PYS"): string {
+function createOpaqueId(prefix: "ORD" | "BLK" | "DTS" | "PYS"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 

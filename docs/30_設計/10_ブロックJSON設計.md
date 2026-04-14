@@ -54,7 +54,7 @@ MVP では次を正とする。
   "block-type": "PYS-7K2M9Q4D",
   "params": {},
   "inputs": {
-    "samples": "CNK-7K2M9Q4D"
+    "samples": "DTS-7K2M9Q4D"
   },
   "outputs": {
     "result": null
@@ -73,7 +73,7 @@ MVP では次を正とする。
     "methodName": "Gradient 01"
   },
   "inputs": {
-    "method": "CNK-1A2B3C4D"
+    "method": "DTS-1A2B3C4D"
   },
   "outputs": {
     "raw-result": null
@@ -90,7 +90,7 @@ MVP では次を正とする。
   "block-type": "dataset-view",
   "params": {},
   "inputs": {
-    "source": "CNK-9X4Q2M1A"
+    "source": "DTS-9X4Q2M1A"
   },
   "outputs": {}
 }
@@ -104,7 +104,7 @@ MVP では次を正とする。
 
 ## 実行後更新
 
-実行後は app が `outputs` の `null` を `CNK-...` に更新する。
+実行後は app が `outputs` の `null` を `DTS-...` に更新する。
 
 例:
 
@@ -123,7 +123,7 @@ MVP では次を正とする。
 ```json
 {
   "outputs": {
-    "result": "CNK-9X4Q2M1A"
+    "result": "DTS-9X4Q2M1A"
   }
 }
 ```

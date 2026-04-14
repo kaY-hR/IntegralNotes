@@ -53,6 +53,7 @@ export interface IntegralOriginalDataSummary {
 }
 
 export interface IntegralDatasetSummary {
+  dataNoteRelativePath: string;
   datasetId: string;
   createdAt: string;
   createdByBlockId: string | null;
