@@ -68,9 +68,6 @@ export function MilkdownEditor({
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
-  const workspaceFilePathSetRef = useRef(
-    new Set(workspaceFilesRef.current.map((entry) => entry.relativePath))
-  );
   const [linkCompletion, setLinkCompletion] = useState<LinkCompletionState | null>(null);
 
   useEffect(() => {
@@ -100,7 +97,6 @@ export function MilkdownEditor({
   useEffect(() => {
     const nextWorkspaceFiles = collectWorkspaceFileSuggestions(workspaceEntries);
     workspaceFilesRef.current = nextWorkspaceFiles;
-    workspaceFilePathSetRef.current = new Set(nextWorkspaceFiles.map((entry) => entry.relativePath));
   }, [workspaceEntries]);
 
   useEffect(() => {
@@ -345,11 +341,6 @@ export function MilkdownEditor({
 
       event.preventDefault();
       event.stopPropagation();
-
-      if (!workspaceFilePathSetRef.current.has(relativePath)) {
-        onWorkspaceLinkErrorRef.current(`リンク先が見つかりません: ${relativePath}`);
-        return;
-      }
 
       onOpenWorkspaceFileRef.current(relativePath);
     };

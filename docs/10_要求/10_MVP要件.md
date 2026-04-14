@@ -14,7 +14,8 @@
 - raw text mode でも frontmatter は表示せず、両 mode は同じ本文 string を共有する
 - original data の data note file 名は原則 `originalName.md` とする
 - data note file 名が重複する場合は保存前に連番を付けて解消する
-- dataset の data note 本文には canonical dataset 配下の各 file への標準 Markdown link を箇条書きで自動生成する
+- original data / dataset の data note 本文には canonical data への標準 Markdown link を自動生成する
+- file original data は 1 link、directory original data / dataset は canonical 配下の各 file への箇条書き link とする
 - canonical 実体は `.store/` に置く
 - metadata は `.store/.integral/{originalDataId}.json` に置く
 - file original data の実体は `.store/{originalDataId}{ext}` に置く
@@ -147,7 +148,8 @@
 - app が補完で自動挿入する canonical form は `[label](/path/from/cwd)` とする
 - app は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決する
 - link target は `cwd` 配下の file とし、directory は MVP 対象外とする
-- dataset の data note 本文が自動生成する canonical link も同じ file link form を使い、target は `/.store/{datasetId}/{relativePath}` とする
+- original data / dataset の data note 本文が自動生成する canonical link も同じ file link form を使う
+- file original data の target は `/.store/{originalDataId}{ext}`、directory original data / dataset の target は `/.store/{id}/{relativePath}` とする
 - Milkdown では `[` を打った時点で `cwd` 配下 file 候補を表示できる
 - 候補一覧は file 名を主表示、path を補足表示とする
 - 候補選択時の label は

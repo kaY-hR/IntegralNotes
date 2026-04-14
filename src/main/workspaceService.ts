@@ -764,12 +764,21 @@ export class WorkspaceService {
             );
 
             if (isOriginalDataNoteMetadata(metadata)) {
+              const canonicalFileRelativePaths = await collectCanonicalFileRelativePaths(
+                rootPath,
+                metadata.storeRelativePath
+              );
+
               return {
                 createdAt: metadata.createdAt,
                 preferredLabel: metadata.originalName.trim(),
                 targetKey: createDataNoteTargetKey("original-data", metadata.originalDataId),
                 writeContent: (existingContent?: string) =>
-                  buildOriginalDataNoteMarkdown(metadata, existingContent)
+                  buildOriginalDataNoteMarkdown(
+                    metadata,
+                    existingContent,
+                    canonicalFileRelativePaths
+                  )
               } satisfies ManagedDataNoteSyncItem;
             }
 
@@ -777,13 +786,10 @@ export class WorkspaceService {
               return null;
             }
 
-            const normalizedStoreRelativePath = metadata.storeRelativePath
-              .split(/[\\/]+/u)
-              .filter(Boolean)
-              .join("/");
-            const canonicalFileRelativePaths = (
-              await collectRelativeFilesIfExists(path.join(rootPath, normalizedStoreRelativePath))
-            ).map((relativePath) => `${normalizedStoreRelativePath}/${relativePath}`);
+            const canonicalFileRelativePaths = await collectCanonicalFileRelativePaths(
+              rootPath,
+              metadata.storeRelativePath
+            );
 
             return {
               createdAt: metadata.createdAt,
@@ -1265,6 +1271,35 @@ async function collectRelativeFilesIfExists(
   } catch {
     return [];
   }
+}
+
+async function collectCanonicalFileRelativePaths(
+  rootPath: string,
+  storeRelativePath: string
+): Promise<string[]> {
+  const normalizedStoreRelativePath = storeRelativePath
+    .split(/[\\/]+/u)
+    .filter(Boolean)
+    .join("/");
+  const absolutePath = path.join(rootPath, normalizedStoreRelativePath);
+
+  try {
+    const stats = await fs.stat(absolutePath);
+
+    if (stats.isFile()) {
+      return [normalizedStoreRelativePath];
+    }
+
+    if (stats.isDirectory()) {
+      return (await collectRelativeFilesIfExists(absolutePath)).map(
+        (relativePath) => `${normalizedStoreRelativePath}/${relativePath}`
+      );
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
