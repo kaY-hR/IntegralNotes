@@ -25,6 +25,10 @@ import type {
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
+  type WorkspacePathChange,
+  rewriteWorkspaceMarkdownReferences
+} from "../shared/workspaceLinks";
+import {
   assignDataNoteFileNames,
   buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
@@ -277,12 +281,19 @@ export class WorkspaceService {
     }
 
     await fs.rename(sourcePath, destinationPath);
+    const nextRelativePath = this.toRelativePath(destinationPath);
+    await this.rewriteMarkdownReferences([
+      {
+        nextPath: nextRelativePath,
+        previousPath: request.targetPath
+      }
+    ]);
 
     const snapshot = await this.getRequiredSnapshot();
 
     return {
       snapshot,
-      entry: await this.getEntryByPath(this.toRelativePath(destinationPath)),
+      entry: await this.getEntryByPath(nextRelativePath),
       previousRelativePath: request.targetPath
     };
   }
@@ -374,6 +385,13 @@ export class WorkspaceService {
       previousRelativePaths.push(sourcePath);
       movedEntries.push(movedEntry);
     }
+
+    await this.rewriteMarkdownReferences(
+      previousRelativePaths.map((previousPath, index) => ({
+        nextPath: movedEntries[index]?.relativePath ?? previousPath,
+        previousPath
+      }))
+    );
 
     return {
       movedEntries,
@@ -907,6 +925,35 @@ export class WorkspaceService {
 
     return this.rootPath;
   }
+
+  private async rewriteMarkdownReferences(pathChanges: WorkspacePathChange[]): Promise<void> {
+    const normalizedChanges = pathChanges.filter(
+      (pathChange) =>
+        pathChange.previousPath.trim().length > 0 &&
+        pathChange.nextPath.trim().length > 0 &&
+        pathChange.previousPath !== pathChange.nextPath
+    );
+
+    if (normalizedChanges.length === 0) {
+      return;
+    }
+
+    const markdownPaths = await collectMarkdownRelativePaths(this.getConfiguredRootPath());
+
+    await Promise.all(
+      markdownPaths.map(async (relativePath) => {
+        const absolutePath = this.resolveWorkspacePath(relativePath);
+        const currentContent = await fs.readFile(absolutePath, "utf8");
+        const nextContent = rewriteWorkspaceMarkdownReferences(currentContent, normalizedChanges);
+
+        if (nextContent === currentContent) {
+          return;
+        }
+
+        await fs.writeFile(absolutePath, nextContent, "utf8");
+      })
+    );
+  }
 }
 
 function isProbablyTextFile(buffer: Buffer): boolean {
@@ -1038,6 +1085,29 @@ async function createAvailableImagePath(
   }
 
   throw new Error(`${preferredFileName} の保存先を確保できませんでした。`);
+}
+
+async function collectMarkdownRelativePaths(
+  rootPath: string,
+  currentPath: string = rootPath
+): Promise<string[]> {
+  const entries = await fs.readdir(currentPath, { withFileTypes: true });
+  const relativePaths: string[] = [];
+
+  for (const entry of entries) {
+    const absolutePath = path.join(currentPath, entry.name);
+
+    if (entry.isDirectory()) {
+      relativePaths.push(...(await collectMarkdownRelativePaths(rootPath, absolutePath)));
+      continue;
+    }
+
+    if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".md") {
+      relativePaths.push(path.relative(rootPath, absolutePath).split(path.sep).join("/"));
+    }
+  }
+
+  return relativePaths;
 }
 
 async function readTextFileIfExists(filePath: string): Promise<string | undefined> {

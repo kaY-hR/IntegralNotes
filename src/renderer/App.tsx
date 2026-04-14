@@ -21,6 +21,10 @@ import type {
   WorkspaceSnapshot
 } from "../shared/workspace";
 import type { InstalledPluginDefinition } from "../shared/plugins";
+import {
+  type WorkspacePathChange,
+  rewriteWorkspaceMarkdownReferences
+} from "../shared/workspaceLinks";
 import { DataRegistrationDialog } from "./DataRegistrationDialog";
 import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
@@ -165,6 +169,46 @@ function normalizeRelativePath(relativePath: string): string {
     .split(/[\\/]+/u)
     .filter(Boolean)
     .join("/");
+}
+
+function createPathChange(previousPath: string, nextPath: string): WorkspacePathChange | null {
+  const normalizedPreviousPath = normalizeRelativePath(previousPath);
+  const normalizedNextPath = normalizeRelativePath(nextPath);
+
+  if (
+    normalizedPreviousPath.length === 0 ||
+    normalizedNextPath.length === 0 ||
+    normalizedPreviousPath === normalizedNextPath
+  ) {
+    return null;
+  }
+
+  return {
+    nextPath: normalizedNextPath,
+    previousPath: normalizedPreviousPath
+  };
+}
+
+function createRenamePathChanges(result: RenameEntryResult): WorkspacePathChange[] {
+  const pathChange = createPathChange(result.previousRelativePath, result.entry.relativePath);
+
+  return pathChange ? [pathChange] : [];
+}
+
+function createMovePathChanges(result: MoveEntriesResult): WorkspacePathChange[] {
+  const pathChanges: WorkspacePathChange[] = [];
+
+  for (let index = 0; index < result.previousRelativePaths.length; index += 1) {
+    const previousPath = result.previousRelativePaths[index];
+    const nextPath = result.movedEntries[index]?.relativePath;
+    const pathChange = nextPath ? createPathChange(previousPath, nextPath) : null;
+
+    if (pathChange) {
+      pathChanges.push(pathChange);
+    }
+  }
+
+  return pathChanges;
 }
 
 function collapseNestedSelection(relativePaths: Iterable<string>): string[] {
@@ -935,12 +979,28 @@ export function App(): JSX.Element {
   ]);
 
   const openNote = async (relativePath: string): Promise<void> => {
+    await openWorkspaceFile(relativePath);
+  };
+
+  const openWorkspaceFile = async (
+    relativePath: string,
+    options?: { openUnsupportedExternally?: boolean }
+  ): Promise<void> => {
     const existingTab = openTabs[relativePath];
     const tabId = toTabId(relativePath);
+    const openUnsupportedExternally = options?.openUnsupportedExternally ?? false;
 
     selectSingleEntry(relativePath);
 
     if (existingTab) {
+      if (
+        openUnsupportedExternally &&
+        (existingTab.kind === "unsupported" || existingTab.content === null)
+      ) {
+        await openPathInExternalApp(relativePath);
+        return;
+      }
+
       model.doAction(FlexLayout.Actions.selectTab(tabId));
       setSelectedTabId(tabId);
       setStatusMessage(
@@ -951,6 +1011,14 @@ export function App(): JSX.Element {
 
     try {
       const document = await window.integralNotes.readWorkspaceFile(relativePath);
+
+      if (
+        openUnsupportedExternally &&
+        (document.kind === "unsupported" || document.content === null)
+      ) {
+        await openPathInExternalApp(relativePath);
+        return;
+      }
 
       setOpenTabs((currentTabs) => ({
         ...currentTabs,
@@ -983,6 +1051,42 @@ export function App(): JSX.Element {
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
+  };
+
+  const applyLinkUpdatesToOpenTabs = (
+    pathChanges: WorkspacePathChange[],
+    shouldSkip: (relativePath: string) => boolean = () => false
+  ): void => {
+    if (pathChanges.length === 0) {
+      return;
+    }
+
+    setOpenTabs((currentTabs) => {
+      let hasChanged = false;
+      const nextTabs: Record<string, OpenWorkspaceTab> = { ...currentTabs };
+
+      for (const [relativePath, tab] of Object.entries(currentTabs)) {
+        if (!isMarkdownTab(tab) || shouldSkip(relativePath)) {
+          continue;
+        }
+
+        const nextContent = rewriteWorkspaceMarkdownReferences(tab.content, pathChanges);
+        const nextSavedContent = rewriteWorkspaceMarkdownReferences(tab.savedContent, pathChanges);
+
+        if (nextContent === tab.content && nextSavedContent === tab.savedContent) {
+          continue;
+        }
+
+        nextTabs[relativePath] = {
+          ...tab,
+          content: nextContent,
+          savedContent: nextSavedContent
+        };
+        hasChanged = true;
+      }
+
+      return hasChanged ? nextTabs : currentTabs;
+    });
   };
 
   const saveNote = async (relativePath: string): Promise<void> => {
@@ -1103,8 +1207,10 @@ export function App(): JSX.Element {
   };
 
   const handleRenameResult = async (result: RenameEntryResult): Promise<void> => {
+    const pathChanges = createRenamePathChanges(result);
     setWorkspace(result.snapshot);
     replaceSelection([result.entry.relativePath], result.entry.relativePath);
+    applyLinkUpdatesToOpenTabs(pathChanges, (relativePath) => relativePath === result.previousRelativePath);
 
     if (result.entry.kind === "file") {
       closeTabsMatching((relativePath) => relativePath === result.previousRelativePath);
@@ -1192,10 +1298,16 @@ export function App(): JSX.Element {
       return;
     }
 
+    const pathChanges = createMovePathChanges(result);
     setWorkspace(result.snapshot);
 
     const movedPaths = result.movedEntries.map((entry) => entry.relativePath);
     replaceSelection(movedPaths, movedPaths[0] ?? "");
+    applyLinkUpdatesToOpenTabs(pathChanges, (relativePath) =>
+      result.previousRelativePaths.some(
+        (previousPath) => relativePath === previousPath || relativePath.startsWith(`${previousPath}/`)
+      )
+    );
     closeTabsMatching((relativePath) =>
       result.previousRelativePaths.some(
         (previousPath) => relativePath === previousPath || relativePath.startsWith(`${previousPath}/`)
@@ -1808,6 +1920,15 @@ export function App(): JSX.Element {
           onChange={(markdown) => {
             updateTabContent(relativePath, markdown);
           }}
+          onOpenWorkspaceFile={(relativePath) => {
+            void openWorkspaceFile(relativePath, {
+              openUnsupportedExternally: true
+            });
+          }}
+          onWorkspaceLinkError={(message) => {
+            setStatusMessage(message);
+          }}
+          workspaceEntries={workspace?.entries ?? []}
         />
       );
     }

@@ -212,6 +212,7 @@
 * クリップボードからの画像貼り付けを許容し、名前は `image.png` 固定、保存先は選択中 item 基準にしたい
 * 右クリックメニューから `コピー / 貼り付け / 削除 / 名前を変更 / パスのコピー / 相対パスのコピー / DataSetに追加` を実行したい
 * `コピー / 貼り付け / 削除 / 名前を変更` は既存機能がある前提で、コンテキストメニューからも同じ操作を呼べるようにしたい
+* note editor 内の画像挿入 / 画像貼り付けの永続化は `Issue 23` で別に扱う
 * `DataSetに追加` は複数ファイル選択を許容し、必要に応じて original data 登録を経由して source dataset 作成へ繋げたい
 
 ## [x] 19. 表示不可ファイルのタブから外部アプリで開けるようにしたい
@@ -244,35 +245,46 @@
 * 少なくとも source dataset / derived dataset の両方で一貫した本文テンプレートにしたい
 * frontmatter だけでなく本文からも実体へ辿れるようにして、catalog note を起点に dataset を開きやすくしたい
 * 候補は `標準 Markdown link`, `wiki link`, `app 専用 action` なので、どれを canonical にするかを整理したい
-* 通常 note 向け wiki link と、data-note から `.store` 実体へ飛ぶリンクを同じ記法に載せるべきかは、Issue 22 と合わせて判断したい
+* `通常 note -> workspace file` の link 仕様は `docs/30_設計/60_ノートリンク記法.md` で分離したため、本 Issue では `data-note -> canonical data` に限定して考える
 
-## [ ] 22. Milkdown で Obsidian 風 wiki link `[[aaa.md]]` を表示・編集したい
+## [x] 22. Milkdown で workspace file への Markdown link 補完と open を実装したい
+- Status:completed
 - 優先重み:4
 - 記載日時:2026-04-14-17:12(UTC+9)
 
-* note 本文で `[[aaa.md]]`, `[[aaa|別名]]`, `[[aaa#heading]]` のような Obsidian 風 wiki link を表示・編集できるようにしたい
-* 現状の `src/renderer/MilkdownEditor.tsx` は `Crepe` をほぼ素のまま生成しており、repo 内には wiki link 用の parser / serializer / schema 拡張がまだ入っていない
-* `@milkdown/crepe` は `commonmark` + `gfm` を標準で使う構成なので、少なくとも現状のままでは `[[...]]` は専用リンク記法として自然には扱えなさそう
-* 実装するなら、Milkdown の custom syntax 拡張として `remark` plugin と `parseMarkdown` / `toMarkdown` / ProseMirror schema を追加する方向が第一候補
-* クリック時に workspace 内の `.md` を app 内タブで開くのか、単に text として見せるのか、IntegralNotes 側の link 解決規則も合わせて決めたい
-* 将来の raw markdown mode 追加時も `[[...]]` 記法が壊れず往復できるようにしたい
-* Issue 21 の data-note canonical link 記法と統一するか、通常 note 向け wiki link と data-note 向け実体リンクを分けるか整理したい
-* 比較メモは `docs/30_設計/60_ノートリンク記法.md` を参照
-* 先に決めるべき論点は以下
-  - `通常 note 同士の内部リンク` と `data-note から canonical data へのリンク` を同じ問題として扱うか分けるか
-  - `[[target]]` の `target` を `basename / relative path / file ID` のどれで解決するか
-  - `クリックで app 内 tab を開く / OS 既定アプリで開く / 単に text として見せる` のどれを基本挙動にするか
-  - MVP で `表示だけ / クリック可能 / autocomplete・rename 追従まで` のどこまで入れるか
-* 選択肢は大きく以下の 3 つ
-  - A. `標準 Markdown link` を正とし、wiki link は入れない
-  - B. `通常 note 同士` だけ `[[...]]` を使い、`data-note -> canonical data` は標準 Markdown link か app 専用導線に分ける
-  - C. `通常 note` と `data-note` の両方を wiki link 記法へ寄せる
-* 判断材料は以下
-  - Obsidian 互換をどこまで重視するか
-  - プレーンな Markdown viewer / GitHub / VS Code での可搬性をどこまで重視するか
-  - Milkdown 拡張量と保守コストをどこまで許容するか
-  - raw markdown mode 追加時の往復安定性をどこまで優先するか
-  - rename / duplicate file name / path collision を app 側でどこまで面倒を見るか
-* 現時点の暫定推奨は B
-  - `wiki note link` と `filesystem / canonical data link` は意味が違うため、同じ記法へ無理に載せない方が設計が素直
-  - まずは通常 note 向けの `[[...]]` を独立 Issue として切る方が、Issue 21 と 20 とも衝突しにくい
+* 詳細仕様は `docs/30_設計/60_ノートリンク記法.md` を参照
+* link 記法は Obsidian 風 wiki link ではなく、標準 Markdown link `[label](target)` を使う
+* app が補完で自動挿入する canonical form は `[label](/path/from/cwd)` とする
+* app は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決する
+* Milkdown では `[` 入力時に `cwd` 配下 file 候補を表示し、選択時に `[label](/path)` を挿入したい
+* 候補は `cwd` 配下の全 file を対象とし、file 名を主表示、path を補足表示としたい
+* label は
+  - `.md` では拡張子なし
+  - 非 `.md` では拡張子あり
+  としたい
+* link click 時は既存 workspace file open 経路に寄せたい
+  - `.md` は app 内 tab
+  - renderable / text は app 内 viewer
+  - unsupported は外部アプリ
+* IntegralNotes 内の rename / move では、`cwd` 配下 `.md` を走査して link target を自動更新したい
+* heading link 補完、`data-note -> canonical data` link、外部変更追従は本 Issue の対象外とする
+* 2026-04-14 実装:
+  - Milkdown editor 上で `[` 入力時に workspace file 候補 popup を表示し、選択時に `[label](/path)` を挿入するようにした
+  - `/path` と `path` の両方を resolver で扱い、click 時は `.md / renderable / text / unsupported` を既存 open 導線へ流すようにした
+  - rename / move 時は main process で `cwd` 配下 `.md` の Markdown link / image target を更新し、open tab 側も同じ rewrite を適用するようにした
+
+## [ ] 23. Milkdown の画像挿入 / 画像貼り付けで blob URL ではなく workspace 永続画像を保存したい
+- 優先重み:6
+- 記載日時:2026-04-14-17:38(UTC+9)
+
+* 詳細仕様は `docs/30_設計/70_ノート画像添付.md` を参照
+* note 本文の画像は標準 Markdown image 記法 `![alt](target)` を使う
+* app が自動挿入する canonical form は `![](/Data/yyyyMMdd-HHmm-RRR.ext)` としたい
+* 画像 file の保存先は `Data/` 配下固定とし、file 名は `時刻 + 3 桁 random + 拡張子` で決めたい
+* saved markdown に `blob:` URL や一時 object URL を残さないようにしたい
+* Milkdown の image insert UI と clipboard paste / drop は、可能なら共通 upload hook で同じ永続化 policy を適用したい
+* editor 再表示時は、workspace path を DOM 用 URL へ変換して、app 再起動後も画像が表示されるようにしたい
+* 読み取り時は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決したい
+* 自動保存先は `Data/` だが、手書き image link は workspace 内の他 path も許容したい
+* IntegralNotes 内の rename / move では、`cwd` 配下 `.md` を走査して image target も自動更新したい
+* explorer 上の画像貼り付け、保存先設定 UI、非 image attachment、外部 URL の自動取込は本 Issue の対象外とする

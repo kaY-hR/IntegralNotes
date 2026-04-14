@@ -134,3 +134,37 @@
 - block の `outputs` は最新 dataset へ更新する
 - どこからも参照されない古い dataset は GC 対象にする
 
+## 13. ノート内リンク
+
+- 通常 note 本文では標準 Markdown link `[label](target)` を使って workspace 内 file へ link できる
+- app が補完で自動挿入する canonical form は `[label](/path/from/cwd)` とする
+- app は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決する
+- link target は `cwd` 配下の file とし、directory は MVP 対象外とする
+- Milkdown では `[` を打った時点で `cwd` 配下 file 候補を表示できる
+- 候補一覧は file 名を主表示、path を補足表示とする
+- 候補選択時の label は
+  - `.md` は拡張子なし
+  - それ以外は拡張子あり
+  とする
+- link click 時は既存の workspace file open 経路を使う
+  - `.md` は app 内 tab
+  - renderable / text は app 内 viewer
+  - unsupported は外部アプリ
+- IntegralNotes 内の rename / move では、`cwd` 配下の `.md` を走査して link target を自動更新する
+- heading link 補完、`data-note -> canonical data` link、外部変更追従は MVP 対象外とする
+- 詳細は `docs/30_設計/60_ノートリンク記法.md` を参照
+
+## 14. ノート画像添付
+
+- 通常 note 本文では標準 Markdown image 記法 `![alt](target)` を使って画像を埋め込める
+- note editor 上で image insert / paste / drop した画像は workspace file として永続化する
+- app が自動挿入する canonical form は `![](/Data/yyyyMMdd-HHmm-RRR.ext)` とする
+- 保存先は `Data/` 配下とし、file 名は時刻 + 3 桁 random + 拡張子で決める
+- saved markdown に `blob:` URL や一時 object URL を残さない
+- editor 表示時は workspace path を DOM 用 URL へ変換し、再オープン後も表示できる
+- 読み取り時は `/path/from/cwd` と `path/from/cwd` の両方を受ける
+- 自動保存先は `Data/` だが、手書き image link は workspace 内の他 path も許容する
+- IntegralNotes 内の rename / move では、`cwd` 配下の `.md` を走査して image target も自動更新する
+- explorer 上での画像貼り付け、保存先設定 UI、非 image attachment は MVP 対象外とする
+- 詳細は `docs/30_設計/70_ノート画像添付.md` を参照
+
