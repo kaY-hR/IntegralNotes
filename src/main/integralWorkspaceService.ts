@@ -24,6 +24,8 @@ import type {
   RegisterPythonScriptRequest,
   RegisterPythonScriptResult
 } from "../shared/integral";
+import type { InstalledPluginDefinition } from "../shared/plugins";
+import { PluginRegistry } from "./pluginRegistry";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
@@ -36,6 +38,9 @@ const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
 const DISPLAY_BLOCK_TYPE = "chunk-view";
+const SHIMADZU_PLUGIN_ID = "shimadzu-lc";
+const SHIMADZU_BLOCK_TYPE = "run-sequence";
+const STANDARD_GRAPHS_PLUGIN_ID = "integralnotes.standard-graphs";
 
 const HTML_EXTENSIONS = new Set([".html"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".svg"]);
@@ -84,7 +89,10 @@ interface ExecFileError extends Error {
 }
 
 export class IntegralWorkspaceService {
-  constructor(private readonly workspaceService: WorkspaceService) {}
+  constructor(
+    private readonly workspaceService: WorkspaceService,
+    private readonly pluginRegistry: PluginRegistry
+  ) {}
 
   async describePythonEntryFile(entryAbsolutePath: string): Promise<PythonEntrySelection> {
     await this.workspaceService.ensureWorkspaceReady();
@@ -106,15 +114,16 @@ export class IntegralWorkspaceService {
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
     await this.workspaceService.ensureWorkspaceReady();
 
-    const [blobs, chunks, scripts] = await Promise.all([
+    const [blobs, chunks, scripts, externalPlugins] = await Promise.all([
       this.readBlobSummaries(),
       this.readChunkSummaries(),
-      this.readPythonScriptSummaries()
+      this.readPythonScriptSummaries(),
+      this.pluginRegistry.listInstalledPlugins()
     ]);
 
     return {
       blobs,
-      blockTypes: buildBlockTypeCatalog(scripts),
+      blockTypes: buildBlockTypeCatalog(scripts, externalPlugins),
       chunks,
       scripts
     };
@@ -347,6 +356,10 @@ export class IntegralWorkspaceService {
       };
     }
 
+    if (definition.source === "external-plugin") {
+      return this.executeExternalPluginBlock(normalizedBlock, definition);
+    }
+
     return this.executeGeneralAnalysisBlock(normalizedBlock, definition, catalog.scripts);
   }
 
@@ -505,6 +518,39 @@ export class IntegralWorkspaceService {
       startedAt,
       status: "success",
       summary: `${script.displayName} を実行しました。`
+    };
+  }
+
+  private async executeExternalPluginBlock(
+    block: IntegralBlockDocument,
+    definition: IntegralBlockTypeDefinition
+  ): Promise<ExecuteIntegralBlockResult> {
+    const externalPlugin = definition.externalPlugin;
+    const defaultAction = externalPlugin?.actions?.[0];
+
+    if (!externalPlugin) {
+      throw new Error(`external plugin 情報が見つかりません: ${definition.pluginId}`);
+    }
+
+    if (!defaultAction) {
+      throw new Error(`plugin action が定義されていません: ${definition.pluginId}`);
+    }
+
+    const result = await this.pluginRegistry.executeAction({
+      actionId: defaultAction.id,
+      blockType: externalPlugin.runtimeBlockType,
+      params: block.params,
+      payload: JSON.stringify(block, null, 2)
+    });
+
+    return {
+      block,
+      createdChunks: [],
+      finishedAt: result.finishedAt,
+      logLines: result.logLines,
+      startedAt: result.startedAt,
+      status: "success",
+      summary: result.summary
     };
   }
 
@@ -770,9 +816,112 @@ export class IntegralWorkspaceService {
 }
 
 function buildBlockTypeCatalog(
-  scripts: readonly IntegralScriptAssetSummary[]
+  scripts: readonly IntegralScriptAssetSummary[],
+  externalPlugins: readonly InstalledPluginDefinition[]
 ): IntegralBlockTypeDefinition[] {
-  return [buildDisplayBlockType(), ...scripts.map((script) => buildPythonBlockType(script))];
+  return [
+    buildDisplayBlockType(),
+    ...scripts.map((script) => buildPythonBlockType(script)),
+    ...buildExternalPluginBlockTypes(externalPlugins)
+  ];
+}
+
+function buildExternalPluginBlockTypes(
+  plugins: readonly InstalledPluginDefinition[]
+): IntegralBlockTypeDefinition[] {
+  const blockTypes: IntegralBlockTypeDefinition[] = [];
+  const seenDefinitions = new Set<string>();
+
+  for (const plugin of plugins) {
+    if (plugin.id === STANDARD_GRAPHS_PLUGIN_ID) {
+      continue;
+    }
+
+    for (const block of plugin.blocks) {
+      const definition =
+        plugin.id === SHIMADZU_PLUGIN_ID && block.type === SHIMADZU_BLOCK_TYPE
+          ? buildShimadzuBlockType(plugin, block)
+          : buildGenericExternalPluginBlockType(plugin, block);
+      const definitionKey = `${definition.pluginId}:${definition.blockType}`;
+
+      if (seenDefinitions.has(definitionKey)) {
+        continue;
+      }
+
+      seenDefinitions.add(definitionKey);
+      blockTypes.push(definition);
+    }
+  }
+
+  return blockTypes.sort((left, right) =>
+    `${left.pluginDisplayName} ${left.title}`.localeCompare(
+      `${right.pluginDisplayName} ${right.title}`,
+      "ja"
+    )
+  );
+}
+
+function buildShimadzuBlockType(
+  plugin: InstalledPluginDefinition,
+  block: InstalledPluginDefinition["blocks"][number]
+): IntegralBlockTypeDefinition {
+  return {
+    blockType: SHIMADZU_BLOCK_TYPE,
+    description: "LC のシーケンス条件を編集し、装置操作を実行します。",
+    executionMode: "manual",
+    externalPlugin: {
+      actions: block.actions?.map((action) => ({ ...action })),
+      namespace: plugin.namespace,
+      origin: plugin.origin,
+      rendererMode: plugin.hasRenderer ? "iframe" : undefined,
+      runtimeBlockType: block.type,
+      runtimePluginId: plugin.id,
+      version: plugin.version
+    },
+    inputSlots: [
+      {
+        name: "method"
+      }
+    ],
+    outputSlots: [
+      {
+        name: "raw-result",
+        producedKind: "shimadzu-lc.raw-result"
+      }
+    ],
+    pluginDescription: plugin.description,
+    pluginDisplayName: plugin.displayName,
+    pluginId: SHIMADZU_PLUGIN_ID,
+    source: "external-plugin",
+    title: "Run Sequence"
+  };
+}
+
+function buildGenericExternalPluginBlockType(
+  plugin: InstalledPluginDefinition,
+  block: InstalledPluginDefinition["blocks"][number]
+): IntegralBlockTypeDefinition {
+  return {
+    blockType: block.type,
+    description: block.description,
+    executionMode: "manual",
+    externalPlugin: {
+      actions: block.actions?.map((action) => ({ ...action })),
+      namespace: plugin.namespace,
+      origin: plugin.origin,
+      rendererMode: plugin.hasRenderer ? "iframe" : undefined,
+      runtimeBlockType: block.type,
+      runtimePluginId: plugin.id,
+      version: plugin.version
+    },
+    inputSlots: [],
+    outputSlots: [],
+    pluginDescription: plugin.description,
+    pluginDisplayName: plugin.displayName,
+    pluginId: plugin.id,
+    source: "external-plugin",
+    title: block.title
+  };
 }
 
 function toInspectableSourcePath(memberLabel: string, relativePath: string): string {

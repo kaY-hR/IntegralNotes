@@ -280,7 +280,7 @@ function parsePluginBlockContribution(value: unknown, namespace: string): Plugin
     title === null ||
     description === null ||
     actions === null ||
-    !type.startsWith(`${namespace}.`)
+    !isValidPluginBlockType(type, namespace)
   ) {
     return null;
   }
@@ -291,6 +291,14 @@ function parsePluginBlockContribution(value: unknown, namespace: string): Plugin
     title,
     type
   };
+}
+
+function isValidPluginBlockType(type: string, namespace: string): boolean {
+  if (type.startsWith(`${namespace}.`)) {
+    return true;
+  }
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(type);
 }
 
 function parsePluginActionContributions(value: unknown): PluginActionContribution[] | null {

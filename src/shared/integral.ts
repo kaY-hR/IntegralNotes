@@ -1,7 +1,22 @@
+import type {
+  InstalledPluginOrigin,
+  PluginActionContribution
+} from "./plugins";
+
 export interface IntegralSlotDefinition {
   acceptedKinds?: string[];
   name: string;
   producedKind?: string;
+}
+
+export interface IntegralExternalPluginDefinition {
+  actions?: PluginActionContribution[];
+  namespace: string;
+  origin: InstalledPluginOrigin;
+  rendererMode?: "iframe";
+  runtimeBlockType: string;
+  runtimePluginId: string;
+  version: string;
 }
 
 export interface IntegralBlockDocument extends Record<string, unknown> {
@@ -16,13 +31,14 @@ export interface IntegralBlockDocument extends Record<string, unknown> {
 export interface IntegralBlockTypeDefinition {
   blockType: string;
   description: string;
+  externalPlugin?: IntegralExternalPluginDefinition;
   executionMode: "display" | "manual";
   inputSlots: IntegralSlotDefinition[];
   outputSlots: IntegralSlotDefinition[];
   pluginDescription: string;
   pluginDisplayName: string;
   pluginId: string;
-  source: "builtin" | "python-script";
+  source: "builtin" | "external-plugin" | "python-script";
   title: string;
 }
 

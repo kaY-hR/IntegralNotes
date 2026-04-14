@@ -316,7 +316,7 @@ if (!hasSingleInstanceLock) {
     pluginRegistry = new PluginRegistry({
       installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
     });
-    integralWorkspaceService = new IntegralWorkspaceService(workspaceService);
+    integralWorkspaceService = new IntegralWorkspaceService(workspaceService, pluginRegistry);
     registerIpcHandlers();
     await createMainWindow();
 

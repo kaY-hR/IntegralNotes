@@ -19,6 +19,12 @@ import {
   type PluginManifest
 } from "../shared/plugins";
 
+const LEGACY_SHIMADZU_PLUGIN_ID = "shimadzu.lc";
+const LEGACY_SHIMADZU_BLOCK_TYPE = "LC.Method.Gradient";
+const SHIMADZU_PLUGIN_ID = "shimadzu-lc";
+const SHIMADZU_BLOCK_TYPE = "run-sequence";
+const SHIMADZU_NAMESPACE = "shimadzu-lc";
+
 interface PluginRegistryOptions {
   installRootPath: string;
 }
@@ -215,11 +221,17 @@ export class PluginRegistry {
       return null;
     }
 
+    const normalizedManifest = normalizePluginManifest(manifest);
+
     return {
-      definition: toInstalledPluginDefinition(manifest, "external", pluginRootPath),
-      hostEntryPath: manifest.host ? path.join(pluginRootPath, ...manifest.host.entry.split("/")) : null,
-      manifest,
-      rendererEntryPath: manifest.renderer ? path.join(pluginRootPath, ...manifest.renderer.entry.split("/")) : null,
+      definition: toInstalledPluginDefinition(normalizedManifest, "external", pluginRootPath),
+      hostEntryPath: normalizedManifest.host
+        ? path.join(pluginRootPath, ...normalizedManifest.host.entry.split("/"))
+        : null,
+      manifest: normalizedManifest,
+      rendererEntryPath: normalizedManifest.renderer
+        ? path.join(pluginRootPath, ...normalizedManifest.renderer.entry.split("/"))
+        : null,
       rootPath: pluginRootPath
     };
   }
@@ -323,6 +335,27 @@ export class PluginRegistry {
 
 export function resolveInstalledPluginRootPath(userDataPath: string): string {
   return path.join(userDataPath, "plugins");
+}
+
+function normalizePluginManifest(manifest: PluginManifest): PluginManifest {
+  if (manifest.id !== LEGACY_SHIMADZU_PLUGIN_ID && manifest.id !== SHIMADZU_PLUGIN_ID) {
+    return manifest;
+  }
+
+  return {
+    ...manifest,
+    blocks: manifest.blocks.map((block) =>
+      block.type === LEGACY_SHIMADZU_BLOCK_TYPE
+        ? {
+            ...block,
+            title: "Run Sequence",
+            type: SHIMADZU_BLOCK_TYPE
+          }
+        : block
+    ),
+    id: SHIMADZU_PLUGIN_ID,
+    namespace: SHIMADZU_NAMESPACE
+  };
 }
 
 async function resolveExtractedPluginRootPath(extractRootPath: string): Promise<string> {
