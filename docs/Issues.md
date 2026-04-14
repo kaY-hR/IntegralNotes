@@ -85,3 +85,51 @@
 * 少なくとも当面は frontmatter を UI 上に表示・編集できなくてよい
 * 将来的には frontmatter の内容を使って検索や絞り込みなどに活用できる形にしておきたい
 * data-note の新規生成、保存、読込、表示の各経路で frontmatter を壊さず保持できるようにしたい
+
+## [ ] 11. Python script 実行 block の UI を簡素化したい
+- 優先重み:5
+- 記載日時:2026-04-14-10:49(UTC+9)
+
+* Python script 実行 block では、slot ごとの dataset 割り当てと `block-type` が分かれば十分
+* `plugin-name` の表示枠は不要
+* `input` / `output` 数の表示枠は不要
+* `input slots` / `output slots` の名称表示と、設定済み dataset 表示が分かれていて一覧性が悪い
+* 各 slot は `slot名: 設定dataset名` の形で、一目で把握できる表示にしたい
+* 全体的に余白が大きすぎるため、情報密度を上げたフラットな UI に寄せたい
+
+## [ ] 12. Python script 系の input 割り当て導線を分かりやすくしたい
+- 優先重み:5
+- 記載日時:2026-04-14-10:53(UTC+9)
+
+* 対象は `PythonScript` 登録 dialog と、登録済み script の実行 block の両方
+* input に対する基本操作は、`既存 dataset を割り当てる` か `複数の original data から新しい dataset を作る` の 2 通りである
+* 現状はこの基本導線が UI から読み取りにくく、何を選べばよいか分かりにくい
+* まずは `dataset を選ぶ` のが基本であり、適した dataset が無ければ `original data から作る` こともできる、と伝わる UI にしたい
+* 実装時に具体 UI を検討する前提で、今回の Issue では導線改善の必要性を先に整理しておきたい
+
+## [ ] 13. source dataset の擬似リンク表現を `links.json` から見直したい
+- 優先重み:5
+- 記載日時:2026-04-14-11:00(UTC+9)
+
+* 現状の source dataset は `links.json` ベースで original-data を参照しているが、ユーザーにとって直感的でなく、dataset フォルダを見たときの自然さにも欠ける
+* 方針として、`links.json` や `.inlk` のような custom manifest をやめ、`.store` を canonical storage とする構成へ寄せたい
+* `.store` のイメージは以下
+  - `.store/.integral/{ID}.json` に metadata を置く
+  - `.store/ORD_xxxxx{ext}` または `.store/ORD_xxxxx/` に original data の実体を置く
+  - `.store/DS_xxxxx/` に dataset の実体を置く
+  - システム内部の参照は path ではなく ID を正とする
+* `cwd` 内でシステムが認識した file / directory は `.store` 側を canonical にし、ユーザーから見える側は alias として扱いたい
+  - file は hard link
+  - directory は junction
+* source dataset でも、見た目は普通のファイル / フォルダ群にし、特殊な manifest を見せない構成にしたい
+* `.integral` を無視すれば VS Code / Obsidian など外部ツールからも普通の filesystem として扱える構造に寄せたい
+* 少なくとも以下を整理する必要がある
+  - 同一 volume 制約
+  - file は hard link、directory は junction で扱う前提
+  - visible alias 側の rename / delete / edit をどう扱うか
+  - source / derived dataset の provenance を metadata にどう持つか
+  - name collision をどこで解消するか
+* 進め方は以下の順にしたい
+  - まず関連文書を精査し、`docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` を現在方針へ完全更新する
+  - 次に実装を更新する
+  - 最後に、既存の未実装 Issue について、現在の設計に合わせて修正が必要なら見直す
