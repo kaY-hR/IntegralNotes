@@ -34,6 +34,7 @@ interface WorkspaceFileSuggestion {
 }
 
 interface LinkCompletionState {
+  maxHeight: number;
   query: string;
   replaceFrom: number;
   replaceTo: number;
@@ -58,6 +59,7 @@ export function MilkdownEditor({
   const isActiveRef = useRef(isActive);
   const lastSyncedMarkdownRef = useRef(initialValue);
   const linkCompletionRef = useRef<LinkCompletionState | null>(null);
+  const completionPanelRef = useRef<HTMLDivElement | null>(null);
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
@@ -94,6 +96,22 @@ export function MilkdownEditor({
 
   useEffect(() => {
     linkCompletionRef.current = linkCompletion;
+  }, [linkCompletion]);
+
+  useEffect(() => {
+    const completionPanel = completionPanelRef.current;
+
+    if (!completionPanel || !linkCompletion) {
+      return;
+    }
+
+    const selectedItem = completionPanel.querySelector<HTMLElement>(
+      ".editor-link-completion__item--selected"
+    );
+
+    selectedItem?.scrollIntoView({
+      block: "nearest"
+    });
   }, [linkCompletion]);
 
   useEffect(() => {
@@ -202,6 +220,7 @@ export function MilkdownEditor({
 
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         setLinkCompletion(null);
         return;
       }
@@ -212,6 +231,7 @@ export function MilkdownEditor({
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
+        event.stopPropagation();
         setLinkCompletion((current) =>
           current
             ? {
@@ -225,6 +245,7 @@ export function MilkdownEditor({
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
+        event.stopPropagation();
         setLinkCompletion((current) =>
           current
             ? {
@@ -238,6 +259,7 @@ export function MilkdownEditor({
 
       if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
+        event.stopPropagation();
         const selectedCandidate =
           matches[Math.min(completionState.selectedIndex, matches.length - 1)];
 
@@ -283,11 +305,11 @@ export function MilkdownEditor({
       onOpenWorkspaceFileRef.current(relativePath);
     };
 
-    rootElement.addEventListener("keydown", handleEditorKeyDown);
+    rootElement.addEventListener("keydown", handleEditorKeyDown, true);
     rootElement.addEventListener("click", handleEditorClick);
 
     return () => {
-      rootElement.removeEventListener("keydown", handleEditorKeyDown);
+      rootElement.removeEventListener("keydown", handleEditorKeyDown, true);
       rootElement.removeEventListener("click", handleEditorClick);
     };
   }, []);
@@ -383,8 +405,10 @@ export function MilkdownEditor({
       {linkCompletion ? (
         <div
           className="editor-link-completion"
+          ref={completionPanelRef}
           style={{
             left: `${linkCompletion.x}px`,
+            maxHeight: `${linkCompletion.maxHeight}px`,
             top: `${linkCompletion.y}px`
           }}
         >
@@ -466,13 +490,15 @@ function computeLinkCompletionState(
 
   try {
     const coords = view.coordsAtPos(from);
+    const popupLayout = computePopupLayout(coords);
     return {
+      maxHeight: popupLayout.maxHeight,
       query,
       replaceFrom,
       replaceTo: from,
       selectedIndex: 0,
       x: clampPopupCoordinate(coords.left, 360, window.innerWidth),
-      y: clampPopupCoordinate(coords.bottom + 8, 280, window.innerHeight)
+      y: popupLayout.y
     };
   } catch {
     return null;
@@ -498,7 +524,7 @@ function getVisibleWorkspaceFileSuggestions(
       return left.suggestion.relativePath.localeCompare(right.suggestion.relativePath, "ja");
     });
 
-  return ranked.slice(0, 12).map((entry) => entry.suggestion);
+  return ranked.map((entry) => entry.suggestion);
 }
 
 function scoreWorkspaceSuggestion(
@@ -544,4 +570,36 @@ function toWorkspaceLinkLabel(fileName: string): string {
 
 function clampPopupCoordinate(value: number, panelSize: number, viewportSize: number): number {
   return Math.max(12, Math.min(value, viewportSize - panelSize - 12));
+}
+
+function computePopupLayout(coords: { bottom: number; top: number }): { maxHeight: number; y: number } {
+  const preferredMaxHeight = 320;
+  const margin = 12;
+  const offset = 8;
+  const minimumHeight = 96;
+  const availableBelow = Math.max(0, window.innerHeight - coords.bottom - margin);
+  const availableAbove = Math.max(0, coords.top - margin);
+  const openBelow = availableBelow >= minimumHeight || availableBelow >= availableAbove;
+
+  if (openBelow) {
+    const maxHeight = Math.max(
+      Math.min(preferredMaxHeight, availableBelow),
+      Math.min(preferredMaxHeight, availableAbove, minimumHeight)
+    );
+
+    return {
+      maxHeight,
+      y: Math.max(margin, coords.bottom + offset)
+    };
+  }
+
+  const maxHeight = Math.max(
+    Math.min(preferredMaxHeight, availableAbove),
+    Math.min(preferredMaxHeight, availableBelow, minimumHeight)
+  );
+
+  return {
+    maxHeight,
+    y: Math.max(margin, coords.top - maxHeight - offset)
+  };
 }
