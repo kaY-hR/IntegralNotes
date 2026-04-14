@@ -25,31 +25,38 @@ interface PersistedWorkspaceState {
   rootPath?: string;
 }
 
-interface BlobArtifactMetadata {
-  blobId: string;
+interface OriginalDataNoteMetadata {
+  originalDataId?: string;
+  blobId?: string;
   createdAt?: string;
   originalName?: string;
   sourceKind?: "directory" | "file";
 }
 
-interface ChunkArtifactMetadata {
+interface DatasetNoteMetadata {
   kind?: string;
 }
 
-interface SourceChunkLinks {
+interface SourceDatasetLinks {
   members?: Array<{
-    blobId: string;
+    blobId?: string;
+    originalDataId?: string;
     target: string;
   }>;
 }
 
 const NOTES_DIRECTORY = "Notes";
-const ARTIFACTS_DIRECTORY = "Artifacts";
-const BLOBS_DIRECTORY = ".blob";
-const LEGACY_BLOBS_DIRECTORY = "blob";
-const CHUNKS_DIRECTORY = "chunk";
-const LEGACY_CHUNKS_DIRECTORY = ".chunk";
+const DATA_CATALOG_DIRECTORY = "data-catalog";
+const LEGACY_DATA_CATALOG_DIRECTORIES = ["Artifacts"];
+const ORIGINAL_DATA_DIRECTORY = ".original-data";
+const LEGACY_ORIGINAL_DATA_DIRECTORIES = [".blob", "blob"];
+const DATASETS_DIRECTORY = "dataset";
+const LEGACY_DATASET_DIRECTORIES = ["chunk", ".chunk"];
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
+const ORIGINAL_DATA_METADATA_FILE = "original-data.json";
+const LEGACY_ORIGINAL_DATA_METADATA_FILE = "blob.json";
+const DATASET_METADATA_FILE = "dataset.json";
+const LEGACY_DATASET_METADATA_FILE = "chunk.json";
 const HTML_EXTENSIONS = new Set([".htm", ".html"]);
 const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
 const TEXT_EXTENSIONS = new Set([
@@ -126,17 +133,18 @@ export class WorkspaceService {
 
     await fs.mkdir(rootPath, { recursive: true });
     await this.migrateLegacyIntegralStorageLayout(rootPath);
+    await this.migrateLegacyIntegralMetadataFileNames(rootPath);
     await Promise.all([
       fs.mkdir(path.join(rootPath, NOTES_DIRECTORY), { recursive: true }),
-      fs.mkdir(path.join(rootPath, ARTIFACTS_DIRECTORY), { recursive: true }),
-      fs.mkdir(path.join(rootPath, BLOBS_DIRECTORY), { recursive: true }),
-      fs.mkdir(path.join(rootPath, CHUNKS_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, DATA_CATALOG_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, ORIGINAL_DATA_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, DATASETS_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
     ]);
-    await this.migrateLegacyBlobArtifactNotes(rootPath);
+    await this.migrateLegacyOriginalDataNotes(rootPath);
     await Promise.all([
-      this.syncBlobArtifactNotes(rootPath),
-      this.syncSourceChunkLinks(rootPath)
+      this.syncOriginalDataNotes(rootPath),
+      this.syncSourceDatasetLinks(rootPath)
     ]);
   }
 
@@ -466,8 +474,39 @@ export class WorkspaceService {
   }
 
   private async migrateLegacyIntegralStorageLayout(rootPath: string): Promise<void> {
-    await this.migrateDirectory(path.join(rootPath, LEGACY_BLOBS_DIRECTORY), path.join(rootPath, BLOBS_DIRECTORY));
-    await this.migrateDirectory(path.join(rootPath, LEGACY_CHUNKS_DIRECTORY), path.join(rootPath, CHUNKS_DIRECTORY));
+    for (const legacyDirectoryName of LEGACY_DATA_CATALOG_DIRECTORIES) {
+      await this.migrateDirectory(
+        path.join(rootPath, legacyDirectoryName),
+        path.join(rootPath, DATA_CATALOG_DIRECTORY)
+      );
+    }
+
+    for (const legacyDirectoryName of LEGACY_ORIGINAL_DATA_DIRECTORIES) {
+      await this.migrateDirectory(
+        path.join(rootPath, legacyDirectoryName),
+        path.join(rootPath, ORIGINAL_DATA_DIRECTORY)
+      );
+    }
+
+    for (const legacyDirectoryName of LEGACY_DATASET_DIRECTORIES) {
+      await this.migrateDirectory(
+        path.join(rootPath, legacyDirectoryName),
+        path.join(rootPath, DATASETS_DIRECTORY)
+      );
+    }
+  }
+
+  private async migrateLegacyIntegralMetadataFileNames(rootPath: string): Promise<void> {
+    await this.migrateMetadataFiles(
+      path.join(rootPath, ORIGINAL_DATA_DIRECTORY),
+      LEGACY_ORIGINAL_DATA_METADATA_FILE,
+      ORIGINAL_DATA_METADATA_FILE
+    );
+    await this.migrateMetadataFiles(
+      path.join(rootPath, DATASETS_DIRECTORY),
+      LEGACY_DATASET_METADATA_FILE,
+      DATASET_METADATA_FILE
+    );
   }
 
   private async migrateDirectory(legacyPath: string, nextPath: string): Promise<void> {
@@ -500,112 +539,143 @@ export class WorkspaceService {
     }
   }
 
-  private async migrateLegacyBlobArtifactNotes(rootPath: string): Promise<void> {
-    const blobsRootPath = path.join(rootPath, BLOBS_DIRECTORY);
-    const artifactsRootPath = path.join(rootPath, ARTIFACTS_DIRECTORY);
-    const entries = await fs.readdir(blobsRootPath, { withFileTypes: true });
+  private async migrateMetadataFiles(
+    rootDirectoryPath: string,
+    legacyFileName: string,
+    nextFileName: string
+  ): Promise<void> {
+    if (!(await this.pathExists(rootDirectoryPath))) {
+      return;
+    }
+
+    const entries = await fs.readdir(rootDirectoryPath, { withFileTypes: true });
 
     await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
         .map(async (entry) => {
-          const metadata = await this.readJsonFile<BlobArtifactMetadata>(
-            path.join(blobsRootPath, entry.name, "blob.json")
-          );
+          const entryRootPath = path.join(rootDirectoryPath, entry.name);
+          const legacyPath = path.join(entryRootPath, legacyFileName);
+          const nextPath = path.join(entryRootPath, nextFileName);
 
-          if (!metadata?.blobId) {
+          if (!(await this.pathExists(legacyPath)) || (await this.pathExists(nextPath))) {
             return;
           }
 
-          const nextArtifactPath = path.join(
-            artifactsRootPath,
-            createBlobArtifactFileName(metadata.originalName ?? metadata.blobId, metadata.blobId)
-          );
-
-          if (await this.pathExists(nextArtifactPath)) {
-            return;
-          }
-
-          const legacyArtifactPath = path.join(artifactsRootPath, `${metadata.blobId}.md`);
-
-          if (!(await this.pathExists(legacyArtifactPath))) {
-            return;
-          }
-
-          await fs.rename(legacyArtifactPath, nextArtifactPath);
+          await fs.rename(legacyPath, nextPath);
         })
     );
   }
 
-  private async syncBlobArtifactNotes(rootPath: string): Promise<void> {
-    const blobsRootPath = path.join(rootPath, BLOBS_DIRECTORY);
-    const artifactsRootPath = path.join(rootPath, ARTIFACTS_DIRECTORY);
-    const entries = await fs.readdir(blobsRootPath, { withFileTypes: true });
+  private async migrateLegacyOriginalDataNotes(rootPath: string): Promise<void> {
+    const originalDataRootPath = path.join(rootPath, ORIGINAL_DATA_DIRECTORY);
+    const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
+    const entries = await fs.readdir(originalDataRootPath, { withFileTypes: true });
 
     await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
         .map(async (entry) => {
-          const metadata = await this.readJsonFile<BlobArtifactMetadata>(
-            path.join(blobsRootPath, entry.name, "blob.json")
+          const metadata = await this.readOriginalDataNoteMetadata(
+            path.join(originalDataRootPath, entry.name)
           );
+          const originalDataId = metadata?.originalDataId ?? metadata?.blobId;
 
-          if (!metadata?.blobId) {
+          if (!metadata || !originalDataId) {
             return;
           }
 
-          const originalName = metadata.originalName?.trim() || metadata.blobId;
-          const artifactPath = path.join(
-            artifactsRootPath,
-            createBlobArtifactFileName(originalName, metadata.blobId)
+          const nextDataNotePath = path.join(
+            dataCatalogRootPath,
+            createOriginalDataNoteFileName(metadata.originalName ?? originalDataId, originalDataId)
+          );
+
+          if (await this.pathExists(nextDataNotePath)) {
+            return;
+          }
+
+          const legacyDataNotePath = path.join(dataCatalogRootPath, `${originalDataId}.md`);
+
+          if (!(await this.pathExists(legacyDataNotePath))) {
+            return;
+          }
+
+          await fs.rename(legacyDataNotePath, nextDataNotePath);
+        })
+    );
+  }
+
+  private async syncOriginalDataNotes(rootPath: string): Promise<void> {
+    const originalDataRootPath = path.join(rootPath, ORIGINAL_DATA_DIRECTORY);
+    const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
+    const entries = await fs.readdir(originalDataRootPath, { withFileTypes: true });
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const metadata = await this.readOriginalDataNoteMetadata(
+            path.join(originalDataRootPath, entry.name)
+          );
+          const originalDataId = metadata?.originalDataId ?? metadata?.blobId;
+
+          if (!metadata || !originalDataId) {
+            return;
+          }
+
+          const originalName = metadata.originalName?.trim() || originalDataId;
+          const dataNotePath = path.join(
+            dataCatalogRootPath,
+            createOriginalDataNoteFileName(originalName, originalDataId)
           );
           const payloadRelativePath = path
-            .relative(path.dirname(artifactPath), path.join(blobsRootPath, metadata.blobId, "payload"))
+            .relative(path.dirname(dataNotePath), path.join(originalDataRootPath, originalDataId, "payload"))
             .split(path.sep)
             .join("/");
           const lines = [
-            `# ${originalName}_${metadata.blobId}`,
+            `# ${originalName}_${originalDataId}`,
             "",
             `- Original Name: ${originalName}`,
-            `- Blob ID: ${metadata.blobId}`,
+            `- Original Data ID: ${originalDataId}`,
             `- Source Kind: ${metadata.sourceKind ?? "file"}`,
             metadata.createdAt ? `- Created At: ${metadata.createdAt}` : null,
             `- Payload: \`${payloadRelativePath}\``
           ].filter((line): line is string => line !== null);
 
-          await fs.writeFile(artifactPath, `${lines.join("\n")}\n`, "utf8");
+          await fs.writeFile(dataNotePath, `${lines.join("\n")}\n`, "utf8");
         })
     );
   }
 
-  private async syncSourceChunkLinks(rootPath: string): Promise<void> {
-    const chunksRootPath = path.join(rootPath, CHUNKS_DIRECTORY);
-    const entries = await fs.readdir(chunksRootPath, { withFileTypes: true });
+  private async syncSourceDatasetLinks(rootPath: string): Promise<void> {
+    const datasetRootPath = path.join(rootPath, DATASETS_DIRECTORY);
+    const entries = await fs.readdir(datasetRootPath, { withFileTypes: true });
 
     await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
         .map(async (entry) => {
-          const chunkRootPath = path.join(chunksRootPath, entry.name);
-          const metadata = await this.readJsonFile<ChunkArtifactMetadata>(
-            path.join(chunkRootPath, "chunk.json")
-          );
+          const datasetPath = path.join(datasetRootPath, entry.name);
+          const metadata = await this.readDatasetNoteMetadata(datasetPath);
 
           if (metadata?.kind !== "source-bundle") {
             return;
           }
 
-          const links = await this.readJsonFile<SourceChunkLinks>(path.join(chunkRootPath, "links.json"));
+          const links = await this.readJsonFile<SourceDatasetLinks>(path.join(datasetPath, "links.json"));
 
           if (!links?.members || links.members.length === 0) {
             return;
           }
 
-          const nextLinks: SourceChunkLinks = {
+          const nextLinks: SourceDatasetLinks = {
             members: links.members.map((member) => ({
-              blobId: member.blobId,
+              originalDataId: member.originalDataId ?? member.blobId,
               target: path
-                .relative(chunkRootPath, path.join(rootPath, BLOBS_DIRECTORY, member.blobId, "payload"))
+                .relative(
+                  datasetPath,
+                  path.join(rootPath, ORIGINAL_DATA_DIRECTORY, member.originalDataId ?? member.blobId ?? "", "payload")
+                )
                 .split(path.sep)
                 .join("/")
             }))
@@ -616,11 +686,35 @@ export class WorkspaceService {
           }
 
           await fs.writeFile(
-            path.join(chunkRootPath, "links.json"),
+            path.join(datasetPath, "links.json"),
             JSON.stringify(nextLinks, null, 2),
             "utf8"
           );
         })
+    );
+  }
+
+  private async readOriginalDataNoteMetadata(
+    originalDataRootPath: string
+  ): Promise<OriginalDataNoteMetadata | null> {
+    return (
+      (await this.readJsonFile<OriginalDataNoteMetadata>(
+        path.join(originalDataRootPath, ORIGINAL_DATA_METADATA_FILE)
+      )) ??
+      (await this.readJsonFile<OriginalDataNoteMetadata>(
+        path.join(originalDataRootPath, LEGACY_ORIGINAL_DATA_METADATA_FILE)
+      ))
+    );
+  }
+
+  private async readDatasetNoteMetadata(datasetRootPath: string): Promise<DatasetNoteMetadata | null> {
+    return (
+      (await this.readJsonFile<DatasetNoteMetadata>(
+        path.join(datasetRootPath, DATASET_METADATA_FILE)
+      )) ??
+      (await this.readJsonFile<DatasetNoteMetadata>(
+        path.join(datasetRootPath, LEGACY_DATASET_METADATA_FILE)
+      ))
     );
   }
 
@@ -693,9 +787,9 @@ export class WorkspaceService {
   }
 }
 
-function createBlobArtifactFileName(originalName: string, blobId: string): string {
+function createOriginalDataNoteFileName(originalName: string, originalDataId: string): string {
   const normalizedOriginalName = sanitizeFileNameSegment(originalName);
-  return `${normalizedOriginalName}_${blobId}.md`;
+  return `${normalizedOriginalName}_${originalDataId}.md`;
 }
 
 function sanitizeFileNameSegment(value: string): string {
@@ -704,7 +798,7 @@ function sanitizeFileNameSegment(value: string): string {
     .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
     .replace(/[. ]+$/gu, "");
 
-  return sanitized.length > 0 ? sanitized : "blob";
+  return sanitized.length > 0 ? sanitized : "original-data";
 }
 
 function isProbablyTextFile(buffer: Buffer): boolean {
@@ -753,3 +847,5 @@ function inferMimeType(assetPath: string): string {
 function escapeHtmlAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }
+
+

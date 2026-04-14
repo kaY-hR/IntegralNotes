@@ -26,9 +26,9 @@
 - `params`
   - plugin 固有設定
 - `inputs`
-  - slot 名 -> `chunkId | null`
+  - slot 名 -> `datasetId | null`
 - `outputs`
-  - slot 名 -> `chunkId | null`
+  - slot 名 -> `datasetId | null`
 
 ## 型
 
@@ -41,8 +41,8 @@ MVP では次を正とする。
 補足:
 
 - `inputs / outputs` の value に配列は持たない
-- `1 slot = 1 chunk` を固定する
-- UI 上の blob 複数選択は source chunk 生成で吸収する
+- `1 slot = 1 dataset` を固定する
+- UI 上の original data 複数選択は source dataset 生成で吸収する
 
 ## Python block 例
 
@@ -86,7 +86,7 @@ MVP では次を正とする。
 {
   "id": "BLK-7A8B9C0D",
   "plugin": "core-display",
-  "block-type": "chunk-view",
+  "block-type": "dataset-view",
   "params": {},
   "inputs": {
     "source": "CNK-9X4Q2M1A"
@@ -136,3 +136,4 @@ MVP では次を block JSON に入れない。
 - 元ファイルの絶対パス
 - run ID
 - kind 制約 enforcement 情報
+

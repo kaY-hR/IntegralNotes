@@ -1,12 +1,12 @@
 import type { InstalledPluginDefinition } from "./plugins";
 import type {
-  CreateSourceChunkRequest,
-  CreateSourceChunkResult,
+  CreateSourceDatasetRequest,
+  CreateSourceDatasetResult,
   ExecuteIntegralBlockRequest,
   ExecuteIntegralBlockResult,
-  ImportBlobsResult,
+  ImportOriginalDataResult,
   IntegralAssetCatalog,
-  IntegralChunkInspection,
+  IntegralDatasetInspection,
   PythonEntrySelection,
   RegisterPythonScriptRequest,
   RegisterPythonScriptResult
@@ -112,16 +112,16 @@ export interface UninstallPluginResult {
 export interface IntegralNotesApi {
   browsePythonEntryFile: () => Promise<PythonEntrySelection | null>;
   browsePythonSupportFiles: (entryAbsolutePath: string | null) => Promise<string[] | null>;
-  createSourceChunk: (request: CreateSourceChunkRequest) => Promise<CreateSourceChunkResult>;
+  createSourceDataset: (request: CreateSourceDatasetRequest) => Promise<CreateSourceDatasetResult>;
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot | null>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
   getIntegralAssetCatalog: () => Promise<IntegralAssetCatalog>;
-  importBlobDirectories: () => Promise<ImportBlobsResult | null>;
-  importBlobFiles: () => Promise<ImportBlobsResult | null>;
-  inspectChunk: (chunkId: string) => Promise<IntegralChunkInspection>;
+  importOriginalDataDirectories: () => Promise<ImportOriginalDataResult | null>;
+  importOriginalDataFiles: () => Promise<ImportOriginalDataResult | null>;
+  inspectDataset: (datasetId: string) => Promise<IntegralDatasetInspection>;
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
@@ -143,3 +143,5 @@ export interface IntegralNotesApi {
     request: ExecuteIntegralActionRequest
   ) => Promise<ExecuteIntegralActionResult>;
 }
+
+

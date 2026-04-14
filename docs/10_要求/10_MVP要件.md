@@ -2,10 +2,10 @@
 
 ## 1. データ登録
 
-- ユーザーはファイルまたはフォルダを `blob` として登録できる
-- blob には一意 ID `BLB-...` を付与する
-- `1 blob = 1 artifact note` を基本とする
-- artifact note はユーザーがノート上で参照できる
+- ユーザーはファイルまたはフォルダを `original data` として登録できる
+- original data には一意 ID `BLB-...` を付与する
+- `1 original data = 1 data note` を基本とする
+- data note はユーザーがノート上で参照できる
 
 ## 2. 処理 block
 
@@ -23,14 +23,14 @@
 - `id` は `BLK-...`
 - app は `id` がなければ自動補完する
 - `inputs / outputs` は slot 名を key に持つ
-- `inputs / outputs` の値は `chunkId` または `null`
+- `inputs / outputs` の値は `datasetId` または `null`
 
 ## 3. 処理入出力
 
-- 内部契約は `1 input slot = 1 chunk`
-- 内部契約は `1 output slot = 1 chunk`
-- GUI 上だけ、`1 input slot = N blobs` を許容する
-- `N blobs` を選んだ場合、app は source chunk を新規作成する
+- 内部契約は `1 input slot = 1 dataset`
+- 内部契約は `1 output slot = 1 dataset`
+- GUI 上だけ、`1 input slot = N original data items` を許容する
+- `N original data items` を選んだ場合、app は source dataset を新規作成する
 
 ## 4. Python 汎用解析
 
@@ -54,17 +54,17 @@
 ## 6. Python 実行
 
 - 実行時には `analysis-args.json` を生成する
-- `inputs / outputs` には chunk フォルダの絶対パスを渡す
-- output chunk フォルダは app 側で事前作成する
-- Python スクリプトは output chunk フォルダへ自由に書き込める
+- `inputs / outputs` には dataset フォルダの絶対パスを渡す
+- output dataset フォルダは app 側で事前作成する
+- Python スクリプトは output dataset フォルダへ自由に書き込める
 - 成功/失敗判定は exit code のみで行う
-- output chunk が空でも「空の結果」として扱う
+- output dataset が空でも「空の結果」として扱う
 
 ## 7. kind / format
 
-- chunk は `chunk.json.kind` を持つ
-- source chunk の `kind` は `source-bundle`
-- derived chunk の `kind` は、plugin/script が明示しない限り `block-type.slotName`
+- dataset は `dataset.json.kind` を持つ
+- source dataset の `kind` は `source-bundle`
+- derived dataset の `kind` は、plugin/script が明示しない限り `block-type.slotName`
 - slot 定義は `acceptedKinds` / `producedKind` を表現できる
 - ただし MVP では enforcement しない
 
@@ -89,17 +89,18 @@
 
 - 装置 plugin も共通 block schema を使う
 - 必要なら custom UI を持てる
-- 装置 plugin も chunk を input に取り、chunk を output にできる
+- 装置 plugin も dataset を input に取り、dataset を output にできる
 
 ## 11. Provenance
 
-- すべての chunk は `chunk.json` を持つ
-- derived chunk には `createdByBlockId` を持たせる
-- source chunk では `createdByBlockId` は `null` でよい
+- すべての dataset は `dataset.json` を持つ
+- derived dataset には `createdByBlockId` を持たせる
+- source dataset では `createdByBlockId` は `null` でよい
 
 ## 12. GC
 
-- chunk は immutable
-- 再実行時は新しい output chunk を作る
-- block の `outputs` は最新 chunk へ更新する
-- どこからも参照されない古い chunk は GC 対象にする
+- dataset は immutable
+- 再実行時は新しい output dataset を作る
+- block の `outputs` は最新 dataset へ更新する
+- どこからも参照されない古い dataset は GC 対象にする
+

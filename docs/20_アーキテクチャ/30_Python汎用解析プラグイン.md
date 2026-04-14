@@ -164,10 +164,10 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\chunk\\CNK-7K2M9Q4D"
+    "samples": "C:\\Workspace\\dataset\\CNK-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\chunk\\CNK-9X4Q2M1A"
+    "result": "C:\\Workspace\\dataset\\CNK-9X4Q2M1A"
   },
   "params": {}
 }
@@ -185,7 +185,7 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 - exit code が 0 なら成功
 - それ以外は失敗
 
-output chunk が空でも、成功なら空の結果として確定する。
+output dataset が空でも、成功なら空の結果として確定する。
 
 ## Python 環境
 
@@ -204,3 +204,4 @@ MVP では Python 環境を本体が管理しない。
 - import/file access 解析による同梱候補サジェスト
 - Python 実行環境の per-script 指定
 - 別 sandbox 実行
+

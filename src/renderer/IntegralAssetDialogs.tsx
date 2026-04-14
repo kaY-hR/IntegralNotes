@@ -2,44 +2,44 @@ import * as FlexLayout from "flexlayout-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
-  IntegralBlobSummary,
-  IntegralChunkInspection,
-  IntegralChunkSummary
+  IntegralDatasetInspection,
+  IntegralDatasetSummary,
+  IntegralOriginalDataSummary
 } from "../shared/integral";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "不明なエラーが発生しました。";
 }
 
-interface ChunkPickerDialogProps {
+interface DatasetPickerDialogProps {
   acceptedKinds?: string[];
   onClose: () => void;
   onError: (message: string) => void;
-  onSelect: (chunkId: string) => void;
+  onSelect: (datasetId: string) => void;
 }
 
-export function ChunkPickerDialog({
+export function DatasetPickerDialog({
   acceptedKinds,
   onClose,
   onError,
   onSelect
-}: ChunkPickerDialogProps): JSX.Element {
-  const [chunks, setChunks] = useState<IntegralChunkSummary[]>([]);
-  const [selectedChunkId, setSelectedChunkId] = useState("");
+}: DatasetPickerDialogProps): JSX.Element {
+  const [datasets, setDatasets] = useState<IntegralDatasetSummary[]>([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState("");
 
   useEffect(() => {
     void window.integralNotes
       .getIntegralAssetCatalog()
       .then((catalog) => {
-        setChunks(catalog.chunks);
+        setDatasets(catalog.datasets);
       })
       .catch((error) => {
         onError(toErrorMessage(error));
       });
   }, [onError]);
 
-  const sortedChunks = useMemo(() => {
-    return [...chunks].sort((left, right) => {
+  const sortedDatasets = useMemo(() => {
+    return [...datasets].sort((left, right) => {
       const leftPreferred = acceptedKinds?.includes(left.kind) ?? false;
       const rightPreferred = acceptedKinds?.includes(right.kind) ?? false;
 
@@ -49,15 +49,15 @@ export function ChunkPickerDialog({
 
       return right.createdAt.localeCompare(left.createdAt);
     });
-  }, [acceptedKinds, chunks]);
+  }, [acceptedKinds, datasets]);
 
   return (
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--asset-picker">
         <div className="dialog-card__header">
-          <p className="dialog-card__eyebrow">Chunk Picker</p>
-          <h2>Chunk を選択</h2>
-          <p>slot には 1 つの chunk だけを割り当てます。</p>
+          <p className="dialog-card__eyebrow">Dataset Picker</p>
+          <h2>Dataset を選択</h2>
+          <p>slot には 1 つの dataset だけを割り当てます。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--asset-picker">
@@ -66,28 +66,28 @@ export function ChunkPickerDialog({
           ) : null}
 
           <div className="asset-picker__list">
-            {sortedChunks.length > 0 ? (
-              sortedChunks.map((chunk) => (
-                <label className="asset-picker__row" key={chunk.chunkId}>
+            {sortedDatasets.length > 0 ? (
+              sortedDatasets.map((dataset) => (
+                <label className="asset-picker__row" key={dataset.datasetId}>
                   <input
-                    checked={selectedChunkId === chunk.chunkId}
-                    name="chunk-picker"
+                    checked={selectedDatasetId === dataset.datasetId}
+                    name="dataset-picker"
                     onChange={() => {
-                      setSelectedChunkId(chunk.chunkId);
+                      setSelectedDatasetId(dataset.datasetId);
                     }}
                     type="radio"
                   />
                   <div>
-                    <strong>{chunk.chunkId}</strong>
+                    <strong>{dataset.datasetId}</strong>
                     <div className="asset-picker__meta">
-                      <span>{chunk.kind}</span>
-                      <span>{chunk.renderableCount} renderable</span>
+                      <span>{dataset.kind}</span>
+                      <span>{dataset.renderableCount} renderable</span>
                     </div>
                   </div>
                 </label>
               ))
             ) : (
-              <div className="asset-picker__empty">登録済み chunk がありません。</div>
+              <div className="asset-picker__empty">登録済み dataset がありません。</div>
             )}
           </div>
 
@@ -97,9 +97,9 @@ export function ChunkPickerDialog({
             </button>
             <button
               className="button button--primary"
-              disabled={!selectedChunkId}
+              disabled={!selectedDatasetId}
               onClick={() => {
-                onSelect(selectedChunkId);
+                onSelect(selectedDatasetId);
               }}
               type="button"
             >
@@ -112,87 +112,90 @@ export function ChunkPickerDialog({
   );
 }
 
-interface BlobPickerDialogProps {
+interface OriginalDataPickerDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedBlobs?: (
-    blobs: readonly IntegralBlobSummary[],
+  onImportedOriginalData?: (
+    originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSelectChunk: (chunkId: string) => void;
+  onSelectDataset: (datasetId: string) => void;
 }
 
-interface BlobSelectionDialogProps {
+interface OriginalDataSelectionDialogProps {
   confirmLabel: string;
   description: string;
-  initialSelectedBlobIds?: readonly string[];
+  initialSelectedOriginalDataIds?: readonly string[];
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedBlobs?: (
-    blobs: readonly IntegralBlobSummary[],
+  onImportedOriginalData?: (
+    originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSelect: (blobIds: string[]) => Promise<void> | void;
+  onSelect: (originalDataIds: string[]) => Promise<void> | void;
   pendingLabel?: string;
   title: string;
 }
 
-export function BlobSelectionDialog({
+export function OriginalDataSelectionDialog({
   confirmLabel,
   description,
-  initialSelectedBlobIds = [],
+  initialSelectedOriginalDataIds = [],
   onClose,
   onError,
-  onImportedBlobs,
+  onImportedOriginalData,
   onSelect,
   pendingLabel,
   title
-}: BlobSelectionDialogProps): JSX.Element {
-  const [blobs, setBlobs] = useState<IntegralBlobSummary[]>([]);
-  const [selectedBlobIds, setSelectedBlobIds] = useState<Set<string>>(
-    () => new Set(initialSelectedBlobIds)
+}: OriginalDataSelectionDialogProps): JSX.Element {
+  const [originalData, setOriginalData] = useState<IntegralOriginalDataSummary[]>([]);
+  const [selectedOriginalDataIds, setSelectedOriginalDataIds] = useState<Set<string>>(
+    () => new Set(initialSelectedOriginalDataIds)
   );
   const [pending, setPending] = useState(false);
   const selectionSeed = useMemo(
-    () => [...initialSelectedBlobIds].sort((left, right) => left.localeCompare(right, "ja")).join("\u0000"),
-    [initialSelectedBlobIds]
+    () =>
+      [...initialSelectedOriginalDataIds]
+        .sort((left, right) => left.localeCompare(right, "ja"))
+        .join("\u0000"),
+    [initialSelectedOriginalDataIds]
   );
 
-  const reloadBlobs = async (): Promise<void> => {
+  const reloadOriginalData = async (): Promise<void> => {
     const catalog = await window.integralNotes.getIntegralAssetCatalog();
-    setBlobs(catalog.blobs);
+    setOriginalData(catalog.originalData);
   };
 
   useEffect(() => {
-    setSelectedBlobIds(new Set(initialSelectedBlobIds));
+    setSelectedOriginalDataIds(new Set(initialSelectedOriginalDataIds));
   }, [selectionSeed]);
 
   useEffect(() => {
-    void reloadBlobs().catch((error) => {
+    void reloadOriginalData().catch((error) => {
       onError(toErrorMessage(error));
     });
   }, [onError]);
 
-  const importBlobs = async (kind: "directories" | "files"): Promise<void> => {
+  const importOriginalData = async (kind: "directories" | "files"): Promise<void> => {
     setPending(true);
 
     try {
       const result =
         kind === "files"
-          ? await window.integralNotes.importBlobFiles()
-          : await window.integralNotes.importBlobDirectories();
+          ? await window.integralNotes.importOriginalDataFiles()
+          : await window.integralNotes.importOriginalDataDirectories();
 
       if (!result) {
         return;
       }
 
-      setSelectedBlobIds((current) => {
+      setSelectedOriginalDataIds((current) => {
         const next = new Set(current);
-        result.blobs.forEach((blob) => next.add(blob.blobId));
+        result.originalData.forEach((entry) => next.add(entry.originalDataId));
         return next;
       });
-      await reloadBlobs();
-      await onImportedBlobs?.(result.blobs, kind);
+      await reloadOriginalData();
+      await onImportedOriginalData?.(result.originalData, kind);
     } catch (error) {
       onError(toErrorMessage(error));
     } finally {
@@ -204,7 +207,7 @@ export function BlobSelectionDialog({
     setPending(true);
 
     try {
-      await onSelect(Array.from(selectedBlobIds));
+      await onSelect(Array.from(selectedOriginalDataIds));
     } catch (error) {
       onError(toErrorMessage(error));
     } finally {
@@ -216,7 +219,7 @@ export function BlobSelectionDialog({
     <div className="dialog-backdrop">
       <div className="dialog-card dialog-card--asset-picker">
         <div className="dialog-card__header">
-          <p className="dialog-card__eyebrow">Blob Picker</p>
+          <p className="dialog-card__eyebrow">Original Data Picker</p>
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
@@ -227,7 +230,7 @@ export function BlobSelectionDialog({
               className="button button--ghost"
               disabled={pending}
               onClick={() => {
-                void importBlobs("files");
+                void importOriginalData("files");
               }}
               type="button"
             >
@@ -237,7 +240,7 @@ export function BlobSelectionDialog({
               className="button button--ghost"
               disabled={pending}
               onClick={() => {
-                void importBlobs("directories");
+                void importOriginalData("directories");
               }}
               type="button"
             >
@@ -246,28 +249,28 @@ export function BlobSelectionDialog({
           </div>
 
           <p className="asset-picker__hint">
-            {selectedBlobIds.size > 0
-              ? `${selectedBlobIds.size} 件の blob を選択中`
-              : "複数 blob を選択できます。"}
+            {selectedOriginalDataIds.size > 0
+              ? `${selectedOriginalDataIds.size} 件の元データを選択中`
+              : "複数の元データを選択できます。"}
           </p>
 
           <div className="asset-picker__list">
-            {blobs.length > 0 ? (
-              blobs.map((blob) => {
-                const checked = selectedBlobIds.has(blob.blobId);
+            {originalData.length > 0 ? (
+              originalData.map((entry) => {
+                const checked = selectedOriginalDataIds.has(entry.originalDataId);
 
                 return (
-                  <label className="asset-picker__row" key={blob.blobId}>
+                  <label className="asset-picker__row" key={entry.originalDataId}>
                     <input
                       checked={checked}
                       onChange={() => {
-                        setSelectedBlobIds((current) => {
+                        setSelectedOriginalDataIds((current) => {
                           const next = new Set(current);
 
                           if (checked) {
-                            next.delete(blob.blobId);
+                            next.delete(entry.originalDataId);
                           } else {
-                            next.add(blob.blobId);
+                            next.add(entry.originalDataId);
                           }
 
                           return next;
@@ -276,17 +279,17 @@ export function BlobSelectionDialog({
                       type="checkbox"
                     />
                     <div>
-                      <strong>{blob.originalName}</strong>
+                      <strong>{entry.originalName}</strong>
                       <div className="asset-picker__meta">
-                        <span>{blob.blobId}</span>
-                        <span>{blob.sourceKind}</span>
+                        <span>{entry.originalDataId}</span>
+                        <span>{entry.sourceKind}</span>
                       </div>
                     </div>
                   </label>
                 );
               })
             ) : (
-              <div className="asset-picker__empty">登録済み blob がありません。</div>
+              <div className="asset-picker__empty">登録済み元データがありません。</div>
             )}
           </div>
 
@@ -296,7 +299,7 @@ export function BlobSelectionDialog({
             </button>
             <button
               className="button button--primary"
-              disabled={pending || selectedBlobIds.size === 0}
+              disabled={pending || selectedOriginalDataIds.size === 0}
               onClick={() => {
                 void commitSelection();
               }}
@@ -311,34 +314,34 @@ export function BlobSelectionDialog({
   );
 }
 
-export function BlobPickerDialog({
+export function OriginalDataPickerDialog({
   onClose,
   onError,
-  onImportedBlobs,
-  onSelectChunk
-}: BlobPickerDialogProps): JSX.Element {
+  onImportedOriginalData,
+  onSelectDataset
+}: OriginalDataPickerDialogProps): JSX.Element {
   return (
-    <BlobSelectionDialog
-      confirmLabel="Create Source Chunk"
-      description="複数 blob を選ぶと app が `source-bundle` chunk を生成します。"
+    <OriginalDataSelectionDialog
+      confirmLabel="source dataset を作成"
+      description="複数の元データを選ぶと app が `source-bundle` kind の dataset を生成します。"
       onClose={onClose}
       onError={onError}
-      onImportedBlobs={onImportedBlobs}
-      onSelect={async (blobIds) => {
-        const result = await window.integralNotes.createSourceChunk({
-          blobIds
+      onImportedOriginalData={onImportedOriginalData}
+      onSelect={async (originalDataIds) => {
+        const result = await window.integralNotes.createSourceDataset({
+          originalDataIds
         });
 
-        onSelectChunk(result.chunk.chunkId);
+        onSelectDataset(result.dataset.datasetId);
       }}
       pendingLabel="作成中..."
-      title="Blob から source chunk を作成"
+      title="元データから source dataset を作成"
     />
   );
 }
 
-export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JSX.Element {
-  const [inspection, setInspection] = useState<IntegralChunkInspection | null>(null);
+export function DatasetRenderableView({ datasetId }: { datasetId: string | null }): JSX.Element {
+  const [inspection, setInspection] = useState<IntegralDatasetInspection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const model = useMemo(() => {
     if (!inspection || inspection.renderables.length === 0) {
@@ -362,7 +365,7 @@ export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JS
             enableDeleteWhenEmpty: false,
             children: inspection.renderables.map((renderable) => ({
               type: "tab",
-              id: `renderable::${inspection.chunkId}::${renderable.relativePath}`,
+              id: `renderable::${inspection.datasetId}::${renderable.relativePath}`,
               component: "renderable",
               name: renderable.name,
               config: renderable
@@ -374,7 +377,7 @@ export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JS
   }, [inspection]);
 
   useEffect(() => {
-    if (!chunkId) {
+    if (!datasetId) {
       setInspection(null);
       setError(null);
       return;
@@ -386,7 +389,7 @@ export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JS
     setError(null);
 
     void window.integralNotes
-      .inspectChunk(chunkId)
+      .inspectDataset(datasetId)
       .then((result) => {
         if (!cancelled) {
           setInspection(result);
@@ -401,10 +404,10 @@ export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JS
     return () => {
       cancelled = true;
     };
-  }, [chunkId]);
+  }, [datasetId]);
 
-  if (!chunkId) {
-    return <div className="integral-renderable__empty">表示対象 chunk が未設定です。</div>;
+  if (!datasetId) {
+    return <div className="integral-renderable__empty">表示対象 dataset が未設定です。</div>;
   }
 
   if (error) {
@@ -412,7 +415,7 @@ export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JS
   }
 
   if (!inspection) {
-    return <div className="integral-renderable__empty">chunk を読み込み中...</div>;
+    return <div className="integral-renderable__empty">dataset を読み込み中...</div>;
   }
 
   if (inspection.renderables.length === 0) {
@@ -420,7 +423,7 @@ export function ChunkRenderableView({ chunkId }: { chunkId: string | null }): JS
   }
 
   const renderableFactory = (node: FlexLayout.TabNode): JSX.Element => {
-    const renderable = node.getConfig() as IntegralChunkInspection["renderables"][number];
+    const renderable = node.getConfig() as IntegralDatasetInspection["renderables"][number];
 
     return (
       <section className="integral-renderable-card">

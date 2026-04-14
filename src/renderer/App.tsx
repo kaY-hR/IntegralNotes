@@ -2,7 +2,7 @@ import * as FlexLayout from "flexlayout-react";
 import { useEffect, useRef, useState } from "react";
 
 import type {
-  IntegralBlobSummary,
+  IntegralOriginalDataSummary,
   RegisterPythonScriptResult
 } from "../shared/integral";
 import type {
@@ -520,39 +520,39 @@ export function App(): JSX.Element {
     setPythonScriptDialogOpen(true);
   };
 
-  const handleImportedBlobs = async (
-    blobs: readonly IntegralBlobSummary[],
+  const handleImportedOriginalData = async (
+    originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ): Promise<void> => {
     const unit = kind === "files" ? "ファイル" : "フォルダ";
-    await refreshWorkspace(`${blobs.length} 件の${unit} blob を登録しました。`);
+    await refreshWorkspace(`${originalData.length} 件の${unit}元データを登録しました。`);
   };
 
-  const importBlobFiles = async (): Promise<void> => {
+  const importOriginalDataFiles = async (): Promise<void> => {
     try {
-      const result = await window.integralNotes.importBlobFiles();
+      const result = await window.integralNotes.importOriginalDataFiles();
 
       if (!result) {
-        setStatusMessage("blob 登録をキャンセルしました。");
+        setStatusMessage("元データ登録をキャンセルしました。");
         return;
       }
 
-      await refreshWorkspace(`${result.blobs.length} 件のファイル blob を登録しました。`);
+      await refreshWorkspace(`${result.originalData.length} 件のファイル元データを登録しました。`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
   };
 
-  const importBlobDirectories = async (): Promise<void> => {
+  const importOriginalDataDirectories = async (): Promise<void> => {
     try {
-      const result = await window.integralNotes.importBlobDirectories();
+      const result = await window.integralNotes.importOriginalDataDirectories();
 
       if (!result) {
-        setStatusMessage("blob 登録をキャンセルしました。");
+        setStatusMessage("元データ登録をキャンセルしました。");
         return;
       }
 
-      await refreshWorkspace(`${result.blobs.length} 件のフォルダ blob を登録しました。`);
+      await refreshWorkspace(`${result.originalData.length} 件のフォルダ元データを登録しました。`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
@@ -1542,12 +1542,12 @@ export function App(): JSX.Element {
             setDataRegistrationDialogOpen(false);
           }}
           onError={setStatusMessage}
-          onImportDirectories={() => importBlobDirectories()}
-          onImportFiles={() => importBlobFiles()}
-          onImportedBlobs={handleImportedBlobs}
-          onSourceChunkCreated={(chunkId) => {
+          onImportDirectories={() => importOriginalDataDirectories()}
+          onImportFiles={() => importOriginalDataFiles()}
+          onImportedOriginalData={handleImportedOriginalData}
+          onSourceDatasetCreated={(datasetId) => {
             setDataRegistrationDialogOpen(false);
-            setStatusMessage(`${chunkId} を source chunk として作成しました。`);
+            setStatusMessage(`${datasetId} を source dataset として作成しました。`);
           }}
         />
       ) : null}
@@ -1558,7 +1558,7 @@ export function App(): JSX.Element {
             setPythonScriptDialogOpen(false);
           }}
           onError={setStatusMessage}
-          onImportedBlobs={handleImportedBlobs}
+          onImportedOriginalData={handleImportedOriginalData}
           onRegistered={handlePythonScriptRegistered}
         />
       ) : null}
@@ -1587,3 +1587,5 @@ export function App(): JSX.Element {
     </div>
   );
 }
+
+

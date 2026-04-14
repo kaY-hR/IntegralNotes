@@ -42,17 +42,17 @@ export interface IntegralBlockTypeDefinition {
   title: string;
 }
 
-export interface IntegralBlobSummary {
-  artifactRelativePath: string;
-  blobId: string;
+export interface IntegralOriginalDataSummary {
+  dataNoteRelativePath: string;
+  originalDataId: string;
   createdAt: string;
   originalName: string;
   payloadRelativePath: string;
   sourceKind: "directory" | "file";
 }
 
-export interface IntegralChunkSummary {
-  chunkId: string;
+export interface IntegralDatasetSummary {
+  datasetId: string;
   createdAt: string;
   createdByBlockId: string | null;
   hasRenderableFiles: boolean;
@@ -67,7 +67,7 @@ export interface IntegralRenderableFile {
   relativePath: string;
 }
 
-export interface IntegralChunkInspection extends IntegralChunkSummary {
+export interface IntegralDatasetInspection extends IntegralDatasetSummary {
   fileNames: string[];
   renderables: IntegralRenderableFile[];
 }
@@ -83,9 +83,9 @@ export interface IntegralScriptAssetSummary {
 }
 
 export interface IntegralAssetCatalog {
-  blobs: IntegralBlobSummary[];
+  datasets: IntegralDatasetSummary[];
   blockTypes: IntegralBlockTypeDefinition[];
-  chunks: IntegralChunkSummary[];
+  originalData: IntegralOriginalDataSummary[];
   scripts: IntegralScriptAssetSummary[];
 }
 
@@ -109,16 +109,16 @@ export interface RegisterPythonScriptResult {
   script: IntegralScriptAssetSummary;
 }
 
-export interface ImportBlobsResult {
-  blobs: IntegralBlobSummary[];
+export interface ImportOriginalDataResult {
+  originalData: IntegralOriginalDataSummary[];
 }
 
-export interface CreateSourceChunkRequest {
-  blobIds: string[];
+export interface CreateSourceDatasetRequest {
+  originalDataIds: string[];
 }
 
-export interface CreateSourceChunkResult {
-  chunk: IntegralChunkSummary;
+export interface CreateSourceDatasetResult {
+  dataset: IntegralDatasetSummary;
 }
 
 export interface ExecuteIntegralBlockRequest {
@@ -127,10 +127,12 @@ export interface ExecuteIntegralBlockRequest {
 
 export interface ExecuteIntegralBlockResult {
   block: IntegralBlockDocument;
-  createdChunks: IntegralChunkSummary[];
+  createdDatasets: IntegralDatasetSummary[];
   finishedAt: string;
   logLines: string[];
   startedAt: string;
   status: "success";
   summary: string;
 }
+
+

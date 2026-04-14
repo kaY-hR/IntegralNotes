@@ -16,9 +16,9 @@ import { createRoot } from "react-dom/client";
 import type { ExecuteIntegralBlockResult, IntegralBlockDocument } from "../shared/integral";
 
 import {
-  ChunkPickerDialog,
-  BlobPickerDialog,
-  ChunkRenderableView
+  DatasetPickerDialog,
+  OriginalDataPickerDialog,
+  DatasetRenderableView
 } from "./IntegralAssetDialogs";
 import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
 import {
@@ -45,11 +45,11 @@ type RunState = {
 
 type SlotDialogState =
   | {
-      kind: "blobs";
+      kind: "original-data";
       slotName: string;
     }
   | {
-      kind: "chunk";
+      kind: "dataset";
       slotName: string;
     }
   | null;
@@ -223,12 +223,12 @@ class IntegralNotesBlockView implements NodeView {
 
     this.root.render(
       <IntegralBlockPanel
-        onAssignChunk={(slotName, chunkId) => {
+        onAssignDataset={(slotName, datasetId) => {
           const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
             ...currentBlock,
             inputs: {
               ...currentBlock.inputs,
-              [slotName]: chunkId
+              [slotName]: datasetId
             }
           }));
 
@@ -357,14 +357,14 @@ class IntegralNotesBlockView implements NodeView {
 }
 
 function IntegralBlockPanel({
-  onAssignChunk,
+  onAssignDataset,
   onUpdateParams,
   onRun,
   parsed,
   runState,
   selected
 }: {
-  onAssignChunk: (slotName: string, chunkId: string) => void;
+  onAssignDataset: (slotName: string, datasetId: string) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
   onRun: () => void;
   parsed: ParsedIntegralDraft;
@@ -388,7 +388,7 @@ function IntegralBlockPanel({
   const blockDefinition = getIntegralBlockDefinition(parsed.block.plugin, parsed.block["block-type"]);
   const isDisplayBlock =
     blockDefinition?.pluginId === "core-display" &&
-    blockDefinition.blockType === "chunk-view";
+    blockDefinition.executionMode === "display";
   const hasCustomRenderer =
     blockDefinition?.source === "external-plugin" &&
     blockDefinition.externalPlugin?.rendererMode === "iframe";
@@ -420,14 +420,14 @@ function IntegralBlockPanel({
             className="integral-code-block__button integral-code-block__button--ghost integral-display-block__picker"
             onClick={() => {
               setInlineError(null);
-              setSlotDialogState({ kind: "chunk", slotName: "source" });
+              setSlotDialogState({ kind: "dataset", slotName: "source" });
             }}
             type="button"
           >
-            {parsed.block.inputs.source ?? "chunk を選択"}
+            {parsed.block.inputs.source ?? "dataset を選択"}
           </button>
 
-          <ChunkRenderableView chunkId={parsed.block.inputs.source ?? null} />
+          <DatasetRenderableView datasetId={parsed.block.inputs.source ?? null} />
         </div>
 
         {inlineError ? (
@@ -436,15 +436,15 @@ function IntegralBlockPanel({
           </div>
         ) : null}
 
-        {slotDialogState?.kind === "chunk" ? (
-          <ChunkPickerDialog
+        {slotDialogState?.kind === "dataset" ? (
+          <DatasetPickerDialog
             acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
-            onSelect={(chunkId) => {
-              onAssignChunk(slotDialogState.slotName, chunkId);
+            onSelect={(datasetId) => {
+              onAssignDataset(slotDialogState.slotName, datasetId);
               setSlotDialogState(null);
             }}
           />
@@ -471,15 +471,15 @@ function IntegralBlockPanel({
               <div className="integral-slot-row__actions">
                 <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
                   setInlineError(null);
-                  setSlotDialogState({ kind: "chunk", slotName: slot.name });
+                  setSlotDialogState({ kind: "dataset", slotName: slot.name });
                 }} type="button">
-                  Chunk
+                  Dataset
                 </button>
                 <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
                   setInlineError(null);
-                  setSlotDialogState({ kind: "blobs", slotName: slot.name });
+                  setSlotDialogState({ kind: "original-data", slotName: slot.name });
                 }} type="button">
-                  Blob
+                  Original Data
                 </button>
               </div>
             </div>
@@ -528,28 +528,28 @@ function IntegralBlockPanel({
           </div>
         ) : null}
 
-        {slotDialogState?.kind === "chunk" ? (
-          <ChunkPickerDialog
+        {slotDialogState?.kind === "dataset" ? (
+          <DatasetPickerDialog
             acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
-            onSelect={(chunkId) => {
-              onAssignChunk(slotDialogState.slotName, chunkId);
+            onSelect={(datasetId) => {
+              onAssignDataset(slotDialogState.slotName, datasetId);
               setSlotDialogState(null);
             }}
           />
         ) : null}
 
-        {slotDialogState?.kind === "blobs" ? (
-          <BlobPickerDialog
+        {slotDialogState?.kind === "original-data" ? (
+          <OriginalDataPickerDialog
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
-            onSelectChunk={(chunkId) => {
-              onAssignChunk(slotDialogState.slotName, chunkId);
+            onSelectDataset={(datasetId) => {
+              onAssignDataset(slotDialogState.slotName, datasetId);
               setSlotDialogState(null);
             }}
           />
@@ -603,28 +603,28 @@ function IntegralBlockPanel({
 
       {runState.status !== "idle" ? <RunStateView runState={runState} /> : null}
 
-      {slotDialogState?.kind === "chunk" ? (
-        <ChunkPickerDialog
+      {slotDialogState?.kind === "dataset" ? (
+        <DatasetPickerDialog
           acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
           onClose={() => {
             setSlotDialogState(null);
           }}
           onError={setInlineError}
-          onSelect={(chunkId) => {
-            onAssignChunk(slotDialogState.slotName, chunkId);
+          onSelect={(datasetId) => {
+            onAssignDataset(slotDialogState.slotName, datasetId);
             setSlotDialogState(null);
           }}
         />
       ) : null}
 
-      {slotDialogState?.kind === "blobs" ? (
-        <BlobPickerDialog
+      {slotDialogState?.kind === "original-data" ? (
+        <OriginalDataPickerDialog
           onClose={() => {
             setSlotDialogState(null);
           }}
           onError={setInlineError}
-          onSelectChunk={(chunkId) => {
-            onAssignChunk(slotDialogState.slotName, chunkId);
+          onSelectDataset={(datasetId) => {
+            onAssignDataset(slotDialogState.slotName, datasetId);
             setSlotDialogState(null);
           }}
         />
@@ -792,3 +792,5 @@ function formatErrorMessage(error: unknown): string {
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+

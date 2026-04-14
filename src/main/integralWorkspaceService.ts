@@ -6,17 +6,17 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import type {
-  CreateSourceChunkRequest,
-  CreateSourceChunkResult,
+  CreateSourceDatasetRequest,
+  CreateSourceDatasetResult,
   ExecuteIntegralBlockRequest,
   ExecuteIntegralBlockResult,
-  ImportBlobsResult,
+  ImportOriginalDataResult,
   IntegralAssetCatalog,
-  IntegralBlobSummary,
+  IntegralOriginalDataSummary,
   IntegralBlockDocument,
   IntegralBlockTypeDefinition,
-  IntegralChunkInspection,
-  IntegralChunkSummary,
+  IntegralDatasetInspection,
+  IntegralDatasetSummary,
   IntegralRenderableFile,
   IntegralScriptAssetSummary,
   IntegralSlotDefinition,
@@ -30,14 +30,18 @@ import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
 
-const ARTIFACTS_DIRECTORY = "Artifacts";
-const BLOBS_DIRECTORY = ".blob";
-const CHUNKS_DIRECTORY = "chunk";
+const DATA_CATALOG_DIRECTORY = "data-catalog";
+const ORIGINAL_DATA_DIRECTORY = ".original-data";
+const DATASETS_DIRECTORY = "dataset";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
+const ORIGINAL_DATA_METADATA_FILE = "original-data.json";
+const LEGACY_ORIGINAL_DATA_METADATA_FILE = "blob.json";
+const DATASET_METADATA_FILE = "dataset.json";
+const LEGACY_DATASET_METADATA_FILE = "chunk.json";
 
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
-const DISPLAY_BLOCK_TYPE = "chunk-view";
+const DISPLAY_BLOCK_TYPE = "dataset-view";
 const SHIMADZU_PLUGIN_ID = "shimadzu-lc";
 const SHIMADZU_BLOCK_TYPE = "run-sequence";
 const STANDARD_GRAPHS_PLUGIN_ID = "integralnotes.standard-graphs";
@@ -46,23 +50,23 @@ const HTML_EXTENSIONS = new Set([".html"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".svg"]);
 const TEXT_EXTENSIONS = new Set([".txt", ".md", ".json", ".csv"]);
 
-interface BlobMetadata {
-  blobId: string;
+interface OriginalDataMetadata {
+  originalDataId: string;
   createdAt: string;
   originalName: string;
   sourceKind: "directory" | "file";
 }
 
-interface ChunkMetadata {
-  chunkId: string;
+interface DatasetMetadata {
+  datasetId: string;
   createdAt: string;
   createdByBlockId: string | null;
   kind: string;
 }
 
-interface SourceChunkLinks {
+interface SourceDatasetLinks {
   members: Array<{
-    blobId: string;
+    originalDataId: string;
     target: string;
   }>;
 }
@@ -114,38 +118,38 @@ export class IntegralWorkspaceService {
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
     await this.workspaceService.ensureWorkspaceReady();
 
-    const [blobs, chunks, scripts, externalPlugins] = await Promise.all([
-      this.readBlobSummaries(),
-      this.readChunkSummaries(),
+    const [originalData, datasets, scripts, externalPlugins] = await Promise.all([
+      this.readOriginalDataSummaries(),
+      this.readDatasetSummaries(),
       this.readPythonScriptSummaries(),
       this.pluginRegistry.listInstalledPlugins()
     ]);
 
     return {
-      blobs,
+      datasets,
       blockTypes: buildBlockTypeCatalog(scripts, externalPlugins),
-      chunks,
+      originalData,
       scripts
     };
   }
 
-  async importBlobPaths(sourcePaths: string[]): Promise<ImportBlobsResult> {
+  async importOriginalDataPaths(sourcePaths: string[]): Promise<ImportOriginalDataResult> {
     await this.workspaceService.ensureWorkspaceReady();
 
     if (sourcePaths.length === 0) {
-      throw new Error("blob として登録するファイルまたはフォルダを選択してください。");
+      throw new Error("元データとして登録するファイルまたはフォルダを選択してください。");
     }
 
-    const importedBlobs: IntegralBlobSummary[] = [];
+    const importedOriginalData: IntegralOriginalDataSummary[] = [];
 
     for (const sourcePath of sourcePaths) {
       const resolvedSourcePath = path.resolve(sourcePath);
       const sourceStats = await fs.stat(resolvedSourcePath);
-      const blobId = createOpaqueId("BLB");
-      const blobRootPath = this.resolveBlobRootPath(blobId);
-      const payloadRootPath = path.join(blobRootPath, "payload");
-      const metadata: BlobMetadata = {
-        blobId,
+      const originalDataId = createOpaqueId("BLB");
+      const originalDataRootPath = this.resolveOriginalDataRootPath(originalDataId);
+      const payloadRootPath = path.join(originalDataRootPath, "payload");
+      const metadata: OriginalDataMetadata = {
+        originalDataId,
         createdAt: new Date().toISOString(),
         originalName: path.basename(resolvedSourcePath),
         sourceKind: sourceStats.isDirectory() ? "directory" : "file"
@@ -159,63 +163,63 @@ export class IntegralWorkspaceService {
         await fs.copyFile(resolvedSourcePath, path.join(payloadRootPath, path.basename(resolvedSourcePath)));
       }
 
-      await this.writeBlobMetadata(blobId, metadata);
-      await this.writeBlobArtifactNote(metadata);
-      importedBlobs.push(this.toBlobSummary(metadata));
+      await this.writeOriginalDataMetadata(originalDataId, metadata);
+      await this.writeOriginalDataNote(metadata);
+      importedOriginalData.push(this.toOriginalDataSummary(metadata));
     }
 
     return {
-      blobs: importedBlobs
+      originalData: importedOriginalData
     };
   }
 
-  async createSourceChunk(request: CreateSourceChunkRequest): Promise<CreateSourceChunkResult> {
+  async createSourceDataset(request: CreateSourceDatasetRequest): Promise<CreateSourceDatasetResult> {
     await this.workspaceService.ensureWorkspaceReady();
 
-    const blobIds = request.blobIds
-      .map((blobId) => blobId.trim())
-      .filter((blobId) => blobId.length > 0);
+    const originalDataIds = request.originalDataIds
+      .map((originalDataId) => originalDataId.trim())
+      .filter((originalDataId) => originalDataId.length > 0);
 
-    if (blobIds.length === 0) {
-      throw new Error("source chunk を作るには少なくとも 1 つの blob が必要です。");
+    if (originalDataIds.length === 0) {
+      throw new Error("source dataset を作るには少なくとも 1 つの元データが必要です。");
     }
 
-    const uniqueBlobIds = Array.from(new Set(blobIds));
-    const chunkId = createOpaqueId("CNK");
-    const chunkRootPath = this.resolveChunkRootPath(chunkId);
-    const chunkMetadata: ChunkMetadata = {
-      chunkId,
+    const uniqueOriginalDataIds = Array.from(new Set(originalDataIds));
+    const datasetId = createOpaqueId("CNK");
+    const datasetRootPath = this.resolveDatasetRootPath(datasetId);
+    const datasetMetadata: DatasetMetadata = {
+      datasetId,
       createdAt: new Date().toISOString(),
       createdByBlockId: null,
       kind: "source-bundle"
     };
-    const links: SourceChunkLinks = {
+    const links: SourceDatasetLinks = {
       members: []
     };
 
-    await fs.mkdir(chunkRootPath, { recursive: true });
+    await fs.mkdir(datasetRootPath, { recursive: true });
 
-    for (const blobId of uniqueBlobIds) {
-      const blobMetadata = await this.readBlobMetadata(blobId);
+    for (const originalDataId of uniqueOriginalDataIds) {
+      const originalDataMetadata = await this.readOriginalDataMetadata(originalDataId);
 
-      if (blobMetadata === null) {
-        throw new Error(`blob が見つかりません: ${blobId}`);
+      if (originalDataMetadata === null) {
+        throw new Error(`元データが見つかりません: ${originalDataId}`);
       }
 
       links.members.push({
-        blobId,
+        originalDataId,
         target: path
-          .relative(chunkRootPath, path.join(this.resolveBlobRootPath(blobId), "payload"))
+          .relative(datasetRootPath, path.join(this.resolveOriginalDataRootPath(originalDataId), "payload"))
           .split(path.sep)
           .join("/")
       });
     }
 
-    await this.writeChunkMetadata(chunkId, chunkMetadata);
-    await fs.writeFile(path.join(chunkRootPath, "links.json"), JSON.stringify(links, null, 2), "utf8");
+    await this.writeDatasetMetadata(datasetId, datasetMetadata);
+    await fs.writeFile(path.join(datasetRootPath, "links.json"), JSON.stringify(links, null, 2), "utf8");
 
     return {
-      chunk: await this.readChunkSummary(chunkId)
+      dataset: await this.readDatasetSummary(datasetId)
     };
   }
 
@@ -292,17 +296,17 @@ export class IntegralWorkspaceService {
     };
   }
 
-  async inspectChunk(chunkId: string): Promise<IntegralChunkInspection> {
+  async inspectDataset(datasetId: string): Promise<IntegralDatasetInspection> {
     await this.workspaceService.ensureWorkspaceReady();
 
-    const chunkMetadata = await this.readChunkMetadata(chunkId);
+    const datasetMetadata = await this.readDatasetMetadata(datasetId);
 
-    if (chunkMetadata === null) {
-      throw new Error(`chunk が見つかりません: ${chunkId}`);
+    if (datasetMetadata === null) {
+      throw new Error(`dataset が見つかりません: ${datasetId}`);
     }
 
-    const chunkRootPath = this.resolveChunkRootPath(chunkId);
-    const inspectableFiles = await this.collectInspectableFiles(chunkRootPath, chunkMetadata);
+    const datasetRootPath = this.resolveDatasetRootPath(datasetId);
+    const inspectableFiles = await this.collectInspectableFiles(datasetRootPath, datasetMetadata);
     const relativeFilePaths = inspectableFiles.map((entry) => entry.relativePath);
     const renderables = await Promise.all(
       inspectableFiles
@@ -311,12 +315,12 @@ export class IntegralWorkspaceService {
     );
 
     return {
-      chunkId: chunkMetadata.chunkId,
-      createdAt: chunkMetadata.createdAt,
-      createdByBlockId: chunkMetadata.createdByBlockId,
+      datasetId: datasetMetadata.datasetId,
+      createdAt: datasetMetadata.createdAt,
+      createdByBlockId: datasetMetadata.createdByBlockId,
       fileNames: relativeFilePaths,
       hasRenderableFiles: renderables.length > 0,
-      kind: chunkMetadata.kind,
+      kind: datasetMetadata.kind,
       renderableCount: renderables.length,
       renderables
     };
@@ -347,7 +351,7 @@ export class IntegralWorkspaceService {
 
       return {
         block: normalizedBlock,
-        createdChunks: [],
+        createdDatasets: [],
         finishedAt: now,
         logLines: [],
         startedAt: now,
@@ -386,12 +390,12 @@ export class IntegralWorkspaceService {
     return absolutePath;
   }
 
-  private resolveBlobRootPath(blobId: string): string {
-    return this.resolveWorkspacePath(`${BLOBS_DIRECTORY}/${blobId}`);
+  private resolveOriginalDataRootPath(originalDataId: string): string {
+    return this.resolveWorkspacePath(`${ORIGINAL_DATA_DIRECTORY}/${originalDataId}`);
   }
 
-  private resolveChunkRootPath(chunkId: string): string {
-    return this.resolveWorkspacePath(`${CHUNKS_DIRECTORY}/${chunkId}`);
+  private resolveDatasetRootPath(datasetId: string): string {
+    return this.resolveWorkspacePath(`${DATASETS_DIRECTORY}/${datasetId}`);
   }
 
   private resolvePythonScriptRootPath(scriptId: string): string {
@@ -408,14 +412,14 @@ export class IntegralWorkspaceService {
     }
 
     for (const inputSlot of definition.inputSlots) {
-      const chunkId = block.inputs[inputSlot.name];
+      const datasetId = block.inputs[inputSlot.name];
 
-      if (!chunkId) {
+      if (!datasetId) {
         throw new Error(`input slot が未設定です: ${inputSlot.name}`);
       }
 
-      if ((await this.readChunkMetadata(chunkId)) === null) {
-        throw new Error(`input chunk が見つかりません: ${chunkId}`);
+      if ((await this.readDatasetMetadata(datasetId)) === null) {
+        throw new Error(`input dataset が見つかりません: ${datasetId}`);
       }
     }
 
@@ -426,30 +430,30 @@ export class IntegralWorkspaceService {
     }
 
     const scriptRootPath = this.resolvePythonScriptRootPath(script.scriptId);
-    const outputChunkMap = new Map<string, IntegralChunkSummary>();
+    const outputDatasetMap = new Map<string, IntegralDatasetSummary>();
     const outputPaths: Record<string, string | null> = {};
 
     for (const outputSlot of definition.outputSlots) {
-      const nextChunkId = createOpaqueId("CNK");
-      const metadata: ChunkMetadata = {
-        chunkId: nextChunkId,
+      const nextDatasetId = createOpaqueId("CNK");
+      const metadata: DatasetMetadata = {
+        datasetId: nextDatasetId,
         createdAt: new Date().toISOString(),
         createdByBlockId: block.id ?? null,
         kind: outputSlot.producedKind?.trim() || `${block["block-type"]}.${outputSlot.name}`
       };
 
-      await fs.mkdir(this.resolveChunkRootPath(nextChunkId), { recursive: true });
-      await this.writeChunkMetadata(nextChunkId, metadata);
+      await fs.mkdir(this.resolveDatasetRootPath(nextDatasetId), { recursive: true });
+      await this.writeDatasetMetadata(nextDatasetId, metadata);
 
-      const chunkSummary = await this.readChunkSummary(nextChunkId);
-      outputChunkMap.set(outputSlot.name, chunkSummary);
-      outputPaths[outputSlot.name] = this.resolveChunkRootPath(nextChunkId);
+      const datasetSummary = await this.readDatasetSummary(nextDatasetId);
+      outputDatasetMap.set(outputSlot.name, datasetSummary);
+      outputPaths[outputSlot.name] = this.resolveDatasetRootPath(nextDatasetId);
     }
 
     const inputPaths = Object.fromEntries(
       definition.inputSlots.map((slot) => {
-        const chunkId = block.inputs[slot.name];
-        return [slot.name, chunkId ? this.resolveChunkRootPath(chunkId) : null];
+        const datasetId = block.inputs[slot.name];
+        return [slot.name, datasetId ? this.resolveDatasetRootPath(datasetId) : null];
       })
     );
     const startedAt = new Date().toISOString();
@@ -498,13 +502,13 @@ export class IntegralWorkspaceService {
     await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
 
     const finishedAt = new Date().toISOString();
-    const createdChunks = definition.outputSlots
-      .map((slot) => outputChunkMap.get(slot.name))
-      .filter((chunk): chunk is IntegralChunkSummary => chunk !== undefined);
+    const createdDatasets = definition.outputSlots
+      .map((slot) => outputDatasetMap.get(slot.name))
+      .filter((dataset): dataset is IntegralDatasetSummary => dataset !== undefined);
     const nextOutputs = { ...block.outputs };
 
     for (const outputSlot of definition.outputSlots) {
-      nextOutputs[outputSlot.name] = outputChunkMap.get(outputSlot.name)?.chunkId ?? null;
+      nextOutputs[outputSlot.name] = outputDatasetMap.get(outputSlot.name)?.datasetId ?? null;
     }
 
     return {
@@ -512,7 +516,7 @@ export class IntegralWorkspaceService {
         ...block,
         outputs: nextOutputs
       },
-      createdChunks,
+      createdDatasets,
       finishedAt,
       logLines: [...splitLogLines(stdout), ...splitLogLines(stderr)],
       startedAt,
@@ -545,7 +549,7 @@ export class IntegralWorkspaceService {
 
     return {
       block,
-      createdChunks: [],
+      createdDatasets: [],
       finishedAt: result.finishedAt,
       logLines: result.logLines,
       startedAt: result.startedAt,
@@ -554,43 +558,46 @@ export class IntegralWorkspaceService {
     };
   }
 
-  private async writeBlobMetadata(blobId: string, metadata: BlobMetadata): Promise<void> {
-    await fs.mkdir(this.resolveBlobRootPath(blobId), { recursive: true });
+  private async writeOriginalDataMetadata(originalDataId: string, metadata: OriginalDataMetadata): Promise<void> {
+    await fs.mkdir(this.resolveOriginalDataRootPath(originalDataId), { recursive: true });
     await fs.writeFile(
-      path.join(this.resolveBlobRootPath(blobId), "blob.json"),
+      path.join(this.resolveOriginalDataRootPath(originalDataId), ORIGINAL_DATA_METADATA_FILE),
       JSON.stringify(metadata, null, 2),
       "utf8"
     );
   }
 
-  private async writeChunkMetadata(chunkId: string, metadata: ChunkMetadata): Promise<void> {
-    await fs.mkdir(this.resolveChunkRootPath(chunkId), { recursive: true });
+  private async writeDatasetMetadata(datasetId: string, metadata: DatasetMetadata): Promise<void> {
+    await fs.mkdir(this.resolveDatasetRootPath(datasetId), { recursive: true });
     await fs.writeFile(
-      path.join(this.resolveChunkRootPath(chunkId), "chunk.json"),
+      path.join(this.resolveDatasetRootPath(datasetId), DATASET_METADATA_FILE),
       JSON.stringify(metadata, null, 2),
       "utf8"
     );
   }
 
-  private async writeBlobArtifactNote(metadata: BlobMetadata): Promise<void> {
-    const artifactPath = this.resolveWorkspacePath(
-      `${ARTIFACTS_DIRECTORY}/${createBlobArtifactFileName(metadata.originalName, metadata.blobId)}`
+  private async writeOriginalDataNote(metadata: OriginalDataMetadata): Promise<void> {
+    const dataNotePath = this.resolveWorkspacePath(
+      `${DATA_CATALOG_DIRECTORY}/${createOriginalDataNoteFileName(metadata.originalName, metadata.originalDataId)}`
     );
     const payloadRelativePath = path
-      .relative(path.dirname(artifactPath), path.join(this.resolveBlobRootPath(metadata.blobId), "payload"))
+      .relative(
+        path.dirname(dataNotePath),
+        path.join(this.resolveOriginalDataRootPath(metadata.originalDataId), "payload")
+      )
       .split(path.sep)
       .join("/");
     const lines = [
-      `# ${metadata.originalName}_${metadata.blobId}`,
+      `# ${metadata.originalName}_${metadata.originalDataId}`,
       "",
       `- Original Name: ${metadata.originalName}`,
-      `- Blob ID: ${metadata.blobId}`,
+      `- Original Data ID: ${metadata.originalDataId}`,
       `- Source Kind: ${metadata.sourceKind}`,
       `- Created At: ${metadata.createdAt}`,
       `- Payload: \`${payloadRelativePath}\``
     ];
 
-    await fs.writeFile(artifactPath, `${lines.join("\n")}\n`, "utf8");
+    await fs.writeFile(dataNotePath, `${lines.join("\n")}\n`, "utf8");
   }
 
   private async writePythonExecutionLogs(
@@ -604,63 +611,75 @@ export class IntegralWorkspaceService {
     ]);
   }
 
-  private async readBlobMetadata(blobId: string): Promise<BlobMetadata | null> {
-    return readJsonFile<BlobMetadata>(path.join(this.resolveBlobRootPath(blobId), "blob.json"));
+  private async readOriginalDataMetadata(originalDataId: string): Promise<OriginalDataMetadata | null> {
+    return (
+      (await readJsonFile<OriginalDataMetadata>(
+        path.join(this.resolveOriginalDataRootPath(originalDataId), ORIGINAL_DATA_METADATA_FILE)
+      )) ??
+      (await readJsonFile<OriginalDataMetadata>(
+        path.join(this.resolveOriginalDataRootPath(originalDataId), LEGACY_ORIGINAL_DATA_METADATA_FILE)
+      ))
+    );
   }
 
-  private async readChunkMetadata(chunkId: string): Promise<ChunkMetadata | null> {
-    return readJsonFile<ChunkMetadata>(path.join(this.resolveChunkRootPath(chunkId), "chunk.json"));
+  private async readDatasetMetadata(datasetId: string): Promise<DatasetMetadata | null> {
+    return (
+      (await readJsonFile<DatasetMetadata>(
+        path.join(this.resolveDatasetRootPath(datasetId), DATASET_METADATA_FILE)
+      )) ??
+      (await readJsonFile<DatasetMetadata>(
+        path.join(this.resolveDatasetRootPath(datasetId), LEGACY_DATASET_METADATA_FILE)
+      ))
+    );
   }
 
-  private async readBlobSummaries(): Promise<IntegralBlobSummary[]> {
-    const blobsRootPath = this.resolveWorkspacePath(BLOBS_DIRECTORY);
-    const entries = await fs.readdir(blobsRootPath, { withFileTypes: true });
+  private async readOriginalDataSummaries(): Promise<IntegralOriginalDataSummary[]> {
+    const originalDataRootPath = this.resolveWorkspacePath(ORIGINAL_DATA_DIRECTORY);
+    const entries = await fs.readdir(originalDataRootPath, { withFileTypes: true });
     const summaries = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
         .map(async (entry) => {
-          const metadata = await readJsonFile<BlobMetadata>(
-            path.join(blobsRootPath, entry.name, "blob.json")
-          );
+          const metadata = await this.readOriginalDataMetadata(entry.name);
 
-          return metadata ? this.toBlobSummary(metadata) : null;
+          return metadata ? this.toOriginalDataSummary(metadata) : null;
         })
     );
 
     return summaries
-      .filter((summary): summary is IntegralBlobSummary => summary !== null)
+      .filter((summary): summary is IntegralOriginalDataSummary => summary !== null)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  private async readChunkSummaries(): Promise<IntegralChunkSummary[]> {
-    const chunksRootPath = this.resolveWorkspacePath(CHUNKS_DIRECTORY);
-    const entries = await fs.readdir(chunksRootPath, { withFileTypes: true });
+  private async readDatasetSummaries(): Promise<IntegralDatasetSummary[]> {
+    const datasetRootPath = this.resolveWorkspacePath(DATASETS_DIRECTORY);
+    const entries = await fs.readdir(datasetRootPath, { withFileTypes: true });
     const summaries = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
-        .map((entry) => this.readChunkSummary(entry.name).catch(() => null))
+        .map((entry) => this.readDatasetSummary(entry.name).catch(() => null))
     );
 
     return summaries
-      .filter((summary): summary is IntegralChunkSummary => summary !== null)
+      .filter((summary): summary is IntegralDatasetSummary => summary !== null)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  private async readChunkSummary(chunkId: string): Promise<IntegralChunkSummary> {
-    const metadata = await this.readChunkMetadata(chunkId);
+  private async readDatasetSummary(datasetId: string): Promise<IntegralDatasetSummary> {
+    const metadata = await this.readDatasetMetadata(datasetId);
 
     if (metadata === null) {
-      throw new Error(`chunk が見つかりません: ${chunkId}`);
+      throw new Error(`dataset が見つかりません: ${datasetId}`);
     }
 
-    const chunkRootPath = this.resolveChunkRootPath(chunkId);
-    const inspectableFiles = await this.collectInspectableFiles(chunkRootPath, metadata);
+    const datasetRootPath = this.resolveDatasetRootPath(datasetId);
+    const inspectableFiles = await this.collectInspectableFiles(datasetRootPath, metadata);
     const renderableCount = inspectableFiles.filter((entry) =>
       isRenderableExtension(path.extname(entry.relativePath))
     ).length;
 
     return {
-      chunkId: metadata.chunkId,
+      datasetId: metadata.datasetId,
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
       hasRenderableFiles: renderableCount > 0,
@@ -733,21 +752,21 @@ export class IntegralWorkspaceService {
   }
 
   private async collectInspectableFiles(
-    chunkRootPath: string,
-    metadata: ChunkMetadata
+    datasetRootPath: string,
+    metadata: DatasetMetadata
   ): Promise<InspectableFileEntry[]> {
     if (metadata.kind !== "source-bundle") {
-      const relativeFilePaths = (await collectRelativeFiles(chunkRootPath)).filter(
-        (relativePath) => relativePath !== "chunk.json" && relativePath !== "links.json"
+      const relativeFilePaths = (await collectRelativeFiles(datasetRootPath)).filter(
+        (relativePath) => relativePath !== DATASET_METADATA_FILE && relativePath !== "links.json"
       );
 
       return relativeFilePaths.map((relativePath) => ({
-        absolutePath: path.join(chunkRootPath, relativePath),
+        absolutePath: path.join(datasetRootPath, relativePath),
         relativePath
       }));
     }
 
-    const links = await readJsonFile<SourceChunkLinks>(path.join(chunkRootPath, "links.json"));
+    const links = await readJsonFile<SourceDatasetLinks>(path.join(datasetRootPath, "links.json"));
 
     if (!links) {
       return [];
@@ -756,14 +775,20 @@ export class IntegralWorkspaceService {
     const inspectableFiles: InspectableFileEntry[] = [];
 
     for (const member of links.members) {
-      const payloadRootPath = this.resolveSourceBundleTargetPath(chunkRootPath, member.target);
+      const payloadRootPath = this.resolveSourceBundleTargetPath(datasetRootPath, member.target);
 
       if (!(await pathExists(payloadRootPath))) {
         continue;
       }
 
-      const blobMetadata = await this.readBlobMetadata(member.blobId);
-      const memberLabel = blobMetadata?.originalName?.trim() || member.blobId;
+      const originalDataId = member.originalDataId;
+
+      if (!originalDataId) {
+        continue;
+      }
+
+      const originalDataMetadata = await this.readOriginalDataMetadata(originalDataId);
+      const memberLabel = originalDataMetadata?.originalName?.trim() || originalDataId;
       const memberFiles = await collectRelativeFiles(payloadRootPath);
 
       for (const relativePath of memberFiles) {
@@ -779,25 +804,25 @@ export class IntegralWorkspaceService {
     );
   }
 
-  private resolveSourceBundleTargetPath(chunkRootPath: string, target: string): string {
-    const absolutePath = path.resolve(chunkRootPath, target);
+  private resolveSourceBundleTargetPath(datasetRootPath: string, target: string): string {
+    const absolutePath = path.resolve(datasetRootPath, target);
     const rootPath = this.getRootPath();
     const normalizedRelative = path.relative(rootPath, absolutePath);
 
     if (normalizedRelative.startsWith("..") || path.isAbsolute(normalizedRelative)) {
-      throw new Error("source chunk links.json がワークスペース外を指しています。");
+      throw new Error("source dataset の links.json がワークスペース外を指しています。");
     }
 
     return absolutePath;
   }
 
-  private toBlobSummary(metadata: BlobMetadata): IntegralBlobSummary {
+  private toOriginalDataSummary(metadata: OriginalDataMetadata): IntegralOriginalDataSummary {
     return {
-      artifactRelativePath: `${ARTIFACTS_DIRECTORY}/${createBlobArtifactFileName(metadata.originalName, metadata.blobId)}`,
-      blobId: metadata.blobId,
+      dataNoteRelativePath: `${DATA_CATALOG_DIRECTORY}/${createOriginalDataNoteFileName(metadata.originalName, metadata.originalDataId)}`,
+      originalDataId: metadata.originalDataId,
       createdAt: metadata.createdAt,
       originalName: metadata.originalName,
-      payloadRelativePath: `${BLOBS_DIRECTORY}/${metadata.blobId}/payload`,
+      payloadRelativePath: `${ORIGINAL_DATA_DIRECTORY}/${metadata.originalDataId}/payload`,
       sourceKind: metadata.sourceKind
     };
   }
@@ -941,7 +966,7 @@ function toInspectableSourcePath(memberLabel: string, relativePath: string): str
 function buildDisplayBlockType(): IntegralBlockTypeDefinition {
   return {
     blockType: DISPLAY_BLOCK_TYPE,
-    description: "chunk 内の html / image / text を自動検出して標準表示します。",
+    description: "dataset 内の html / image / text を自動検出して標準表示します。",
     executionMode: "display",
     inputSlots: [
       {
@@ -953,7 +978,7 @@ function buildDisplayBlockType(): IntegralBlockTypeDefinition {
     pluginDisplayName: "Core Display",
     pluginId: BUILTIN_DISPLAY_PLUGIN_ID,
     source: "builtin",
-    title: "Chunk Viewer"
+    title: "Dataset Viewer"
   };
 }
 
@@ -1049,9 +1074,9 @@ function createOpaqueId(prefix: "BLB" | "BLK" | "CNK" | "PYS"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 
-function createBlobArtifactFileName(originalName: string, blobId: string): string {
+function createOriginalDataNoteFileName(originalName: string, originalDataId: string): string {
   const normalizedOriginalName = sanitizeFileNameSegment(originalName);
-  return `${normalizedOriginalName}_${blobId}.md`;
+  return `${normalizedOriginalName}_${originalDataId}.md`;
 }
 
 function sanitizeFileNameSegment(value: string): string {
@@ -1060,7 +1085,7 @@ function sanitizeFileNameSegment(value: string): string {
     .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
     .replace(/[. ]+$/gu, "");
 
-  return sanitized.length > 0 ? sanitized : "blob";
+  return sanitized.length > 0 ? sanitized : "original-data";
 }
 
 async function collectRelativeFiles(rootPath: string, basePath = rootPath): Promise<string[]> {
@@ -1177,3 +1202,5 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
 function isMissingPathError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
+
+

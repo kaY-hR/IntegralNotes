@@ -1,30 +1,30 @@
 import { useState } from "react";
 
-import type { IntegralBlobSummary } from "../shared/integral";
+import type { IntegralOriginalDataSummary } from "../shared/integral";
 
-import { BlobPickerDialog } from "./IntegralAssetDialogs";
+import { OriginalDataPickerDialog } from "./IntegralAssetDialogs";
 
 interface DataRegistrationDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
   onImportDirectories: () => Promise<void>;
   onImportFiles: () => Promise<void>;
-  onImportedBlobs?: (
-    blobs: readonly IntegralBlobSummary[],
+  onImportedOriginalData?: (
+    originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSourceChunkCreated: (chunkId: string) => void;
+  onSourceDatasetCreated: (datasetId: string) => void;
 }
 
-type DataRegistrationMode = "menu" | "source-chunk";
+type DataRegistrationMode = "menu" | "source-dataset";
 
 export function DataRegistrationDialog({
   onClose,
   onError,
   onImportDirectories,
   onImportFiles,
-  onImportedBlobs,
-  onSourceChunkCreated
+  onImportedOriginalData,
+  onSourceDatasetCreated
 }: DataRegistrationDialogProps): JSX.Element {
   const [mode, setMode] = useState<DataRegistrationMode>("menu");
   const [pendingAction, setPendingAction] = useState<"directories" | "files" | null>(null);
@@ -43,16 +43,16 @@ export function DataRegistrationDialog({
     }
   };
 
-  if (mode === "source-chunk") {
+  if (mode === "source-dataset") {
     return (
-      <BlobPickerDialog
+      <OriginalDataPickerDialog
         onClose={() => {
           setMode("menu");
         }}
         onError={onError}
-        onImportedBlobs={onImportedBlobs}
-        onSelectChunk={(chunkId) => {
-          onSourceChunkCreated(chunkId);
+        onImportedOriginalData={onImportedOriginalData}
+        onSelectDataset={(datasetId) => {
+          onSourceDatasetCreated(datasetId);
         }}
       />
     );
@@ -64,13 +64,13 @@ export function DataRegistrationDialog({
         <div className="dialog-card__header">
           <p className="dialog-card__eyebrow">Data Intake</p>
           <h2>データ登録</h2>
-          <p>blob 登録と source chunk 作成の入口をここに集約します。</p>
+          <p>元データの登録と source dataset 作成の入口をここに集約します。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--data-registration">
           <section className="data-registration-card">
             <div>
-              <strong>Blob を登録</strong>
+              <strong>元データを登録</strong>
               <p>元データを file / directory 単位で workspace に取り込みます。</p>
             </div>
             <div className="data-registration-card__actions">
@@ -82,7 +82,7 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                {pendingAction === "files" ? "登録中..." : "ファイルを blob 登録"}
+                {pendingAction === "files" ? "登録中..." : "ファイルを元データ登録"}
               </button>
               <button
                 className="button button--ghost"
@@ -92,26 +92,26 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                {pendingAction === "directories" ? "登録中..." : "フォルダを blob 登録"}
+                {pendingAction === "directories" ? "登録中..." : "フォルダを元データ登録"}
               </button>
             </div>
           </section>
 
           <section className="data-registration-card">
             <div>
-              <strong>Chunk を作成</strong>
-              <p>複数 blob を選び、`links.json` ベースの source chunk を作成します。</p>
+              <strong>Dataset を作成</strong>
+              <p>複数の元データを選び、`links.json` ベースの source dataset を作成します。</p>
             </div>
             <div className="data-registration-card__actions">
               <button
                 className="button button--primary"
                 disabled={pendingAction !== null}
                 onClick={() => {
-                  setMode("source-chunk");
+                  setMode("source-dataset");
                 }}
                 type="button"
               >
-                source chunk を作成
+                source dataset を作成
               </button>
             </div>
           </section>

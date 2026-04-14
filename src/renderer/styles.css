@@ -1504,7 +1504,7 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   color: var(--text-0);
 }
 
-.python-slot-editor__chunk-button {
+.python-slot-editor__dataset-button {
   justify-content: flex-start;
   min-width: 0;
   overflow: hidden;
@@ -1799,3 +1799,4 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
     text-align: left;
   }
 }
+

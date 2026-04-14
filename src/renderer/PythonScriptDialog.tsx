@@ -2,25 +2,25 @@ import { useMemo, useState } from "react";
 
 import type {
   IntegralBlockDocument,
-  IntegralBlobSummary,
+  IntegralOriginalDataSummary,
   RegisterPythonScriptResult
 } from "../shared/integral";
 
-import { BlobSelectionDialog } from "./IntegralAssetDialogs";
+import { OriginalDataSelectionDialog } from "./IntegralAssetDialogs";
 import { INTEGRAL_BLOCK_LANGUAGE } from "./integralBlockRegistry";
 
 interface PythonScriptDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedBlobs?: (
-    blobs: readonly IntegralBlobSummary[],
+  onImportedOriginalData?: (
+    originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
   onRegistered: (result: RegisterPythonScriptResult, blockMarkdown: string) => void;
 }
 
 interface InputSlotDraft {
-  blobIds: string[];
+  originalDataIds: string[];
   id: string;
   name: string;
 }
@@ -36,7 +36,7 @@ function toErrorMessage(error: unknown): string {
 
 function createInputSlotDraft(name = ""): InputSlotDraft {
   return {
-    blobIds: [],
+    originalDataIds: [],
     id: crypto.randomUUID(),
     name
   };
@@ -64,7 +64,7 @@ function toIntegralCodeBlock(value: unknown): string {
 export function PythonScriptDialog({
   onClose,
   onError,
-  onImportedBlobs,
+  onImportedOriginalData,
   onRegistered
 }: PythonScriptDialogProps): JSX.Element {
   const [entryAbsolutePath, setEntryAbsolutePath] = useState("");
@@ -171,20 +171,20 @@ export function PythonScriptDialog({
       const inputEntries = await Promise.all(
         inputSlots
           .map((slot) => ({
-            blobIds: slot.blobIds,
+            originalDataIds: slot.originalDataIds,
             name: slot.name.trim()
           }))
           .filter((slot) => slot.name.length > 0)
           .map(async (slot) => {
-            if (slot.blobIds.length === 0) {
+            if (slot.originalDataIds.length === 0) {
               return [slot.name, null] as const;
             }
 
-            const sourceChunk = await window.integralNotes.createSourceChunk({
-              blobIds: slot.blobIds
+            const sourceDataset = await window.integralNotes.createSourceDataset({
+              originalDataIds: slot.originalDataIds
             });
 
-            return [slot.name, sourceChunk.chunk.chunkId] as const;
+            return [slot.name, sourceDataset.dataset.datasetId] as const;
           })
       );
       const initialBlock: IntegralBlockDocument = {
@@ -341,16 +341,16 @@ export function PythonScriptDialog({
                     value={slot.name}
                   />
                   <button
-                    className="button button--ghost python-slot-editor__chunk-button"
+                    className="button button--ghost python-slot-editor__dataset-button"
                     disabled={pending}
                     onClick={() => {
                       setSlotPickerTargetId(slot.id);
                     }}
                     type="button"
                   >
-                    {slot.blobIds.length > 0
-                      ? `${slot.blobIds.length} 件の blob を選択中`
-                      : "blobを選択..."}
+                    {slot.originalDataIds.length > 0
+                      ? `${slot.originalDataIds.length} 件の元データを選択中`
+                      : "元データを選択..."}
                   </button>
                   <button
                     className="button button--ghost"
@@ -448,27 +448,29 @@ export function PythonScriptDialog({
       </div>
 
       {slotPickerTargetId ? (
-        <BlobSelectionDialog
-          confirmLabel="この blob を使う"
-          description="選択した blob 群から、登録時に source chunk を自動作成します。"
-          initialSelectedBlobIds={
-            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.blobIds ?? []
+        <OriginalDataSelectionDialog
+          confirmLabel="この元データを使う"
+          description="選択した元データ群から、登録時に source dataset を自動作成します。"
+          initialSelectedOriginalDataIds={
+            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.originalDataIds ?? []
           }
           onClose={() => {
             setSlotPickerTargetId(null);
           }}
           onError={onError}
-          onImportedBlobs={onImportedBlobs}
-          onSelect={(blobIds) => {
+          onImportedOriginalData={onImportedOriginalData}
+          onSelect={(originalDataIds) => {
             updateInputSlot(slotPickerTargetId, (current) => ({
               ...current,
-              blobIds
+              originalDataIds
             }));
             setSlotPickerTargetId(null);
           }}
-          title="Input 用 blob を選択"
+          title="Input 用元データを選択"
         />
       ) : null}
     </div>
   );
 }
+
+

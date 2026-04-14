@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 
 import type {
-  CreateSourceChunkRequest,
+  CreateSourceDatasetRequest,
   ExecuteIntegralBlockRequest,
   RegisterPythonScriptRequest
 } from "../shared/integral";
@@ -137,7 +137,7 @@ function registerIpcHandlers(): void {
     return snapshot;
   });
   ipcMain.handle("integral:getAssetCatalog", async () => getIntegralWorkspaceService().listAssetCatalog());
-  ipcMain.handle("integral:importBlobFiles", async () => {
+  ipcMain.handle("integral:importOriginalDataFiles", async () => {
     if (!mainWindow) {
       throw new Error("main window is not available.");
     }
@@ -145,16 +145,16 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
       properties: ["openFile", "multiSelections"],
-      title: "Import Files as Blobs"
+      title: "Import Files as Original Data"
     });
 
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
 
-    return getIntegralWorkspaceService().importBlobPaths(result.filePaths);
+    return getIntegralWorkspaceService().importOriginalDataPaths(result.filePaths);
   });
-  ipcMain.handle("integral:importBlobDirectories", async () => {
+  ipcMain.handle("integral:importOriginalDataDirectories", async () => {
     if (!mainWindow) {
       throw new Error("main window is not available.");
     }
@@ -162,20 +162,20 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
       properties: ["openDirectory", "multiSelections"],
-      title: "Import Folders as Blobs"
+      title: "Import Folders as Original Data"
     });
 
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
 
-    return getIntegralWorkspaceService().importBlobPaths(result.filePaths);
+    return getIntegralWorkspaceService().importOriginalDataPaths(result.filePaths);
   });
-  ipcMain.handle("integral:createSourceChunk", async (_event, request: CreateSourceChunkRequest) =>
-    getIntegralWorkspaceService().createSourceChunk(request)
+  ipcMain.handle("integral:createSourceDataset", async (_event, request: CreateSourceDatasetRequest) =>
+    getIntegralWorkspaceService().createSourceDataset(request)
   );
-  ipcMain.handle("integral:inspectChunk", async (_event, chunkId: string) =>
-    getIntegralWorkspaceService().inspectChunk(chunkId)
+  ipcMain.handle("integral:inspectDataset", async (_event, datasetId: string) =>
+    getIntegralWorkspaceService().inspectDataset(datasetId)
   );
   ipcMain.handle("integral:browsePythonEntryFile", async () => {
     if (!mainWindow) {
@@ -336,3 +336,5 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+

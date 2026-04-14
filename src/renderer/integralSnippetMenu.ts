@@ -92,3 +92,5 @@ function toSnippetKeySegment(type: string): string {
 
   return trimmed.length > 0 ? trimmed : "block";
 }
+
+

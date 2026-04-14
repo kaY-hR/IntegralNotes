@@ -39,3 +39,5 @@ export function WorkspaceFileViewer({ file }: WorkspaceFileViewerProps): JSX.Ele
     </div>
   );
 }
+
+

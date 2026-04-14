@@ -6,6 +6,9 @@ import type {
 import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
 
 export const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
+const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
+const DISPLAY_BLOCK_TYPE = "dataset-view";
+const LEGACY_DISPLAY_BLOCK_TYPE = "chunk-view";
 
 export interface IntegralJsonBlock extends IntegralBlockDocument {}
 
@@ -15,7 +18,17 @@ export function getIntegralBlockDefinition(
   pluginId: string,
   blockType: string
 ): IntegralBlockDefinition | null {
-  return getInstalledIntegralBlockDefinition(pluginId, blockType);
+  const exactMatch = getInstalledIntegralBlockDefinition(pluginId, blockType);
+
+  if (exactMatch !== null) {
+    return exactMatch;
+  }
+
+  if (pluginId === BUILTIN_DISPLAY_PLUGIN_ID && blockType === LEGACY_DISPLAY_BLOCK_TYPE) {
+    return getInstalledIntegralBlockDefinition(pluginId, DISPLAY_BLOCK_TYPE);
+  }
+
+  return null;
 }
 
 export function isIntegralBlockLanguage(language: string): boolean {
@@ -85,14 +98,14 @@ export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
       <section className="integral-json-preview__section">
         <div className="integral-json-preview__section-header">
           <span>Input Slots</span>
-          <span>{inputEntries.length > 0 ? "chunk refs" : "empty"}</span>
+          <span>{inputEntries.length > 0 ? "dataset refs" : "empty"}</span>
         </div>
 
         <div className="integral-json-preview__chips">
           {inputEntries.length > 0 ? (
-            inputEntries.map(([slotName, chunkId]) => (
+            inputEntries.map(([slotName, datasetId]) => (
               <span className="integral-json-preview__chip" key={`input-${slotName}`}>
-                {slotName}: {chunkId ?? "null"}
+                {slotName}: {datasetId ?? "null"}
               </span>
             ))
           ) : (
@@ -104,14 +117,14 @@ export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
       <section className="integral-json-preview__section">
         <div className="integral-json-preview__section-header">
           <span>Output Slots</span>
-          <span>{outputEntries.length > 0 ? "latest chunks" : "empty"}</span>
+          <span>{outputEntries.length > 0 ? "latest datasets" : "empty"}</span>
         </div>
 
         <div className="integral-json-preview__chips">
           {outputEntries.length > 0 ? (
-            outputEntries.map(([slotName, chunkId]) => (
+            outputEntries.map(([slotName, datasetId]) => (
               <span className="integral-json-preview__chip" key={`output-${slotName}`}>
-                {slotName}: {chunkId ?? "null"}
+                {slotName}: {datasetId ?? "null"}
               </span>
             ))
           ) : (
@@ -160,3 +173,5 @@ function createBlockId(): string {
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+

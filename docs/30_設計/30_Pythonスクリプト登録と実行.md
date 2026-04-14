@@ -102,26 +102,26 @@ app は次を行う。
 
 各 input slot には次を指定できる。
 
-- 既存 chunk 1 つ
-- blob 複数選択
+- 既存 dataset 1 つ
+- original data 複数選択
 
-blob 複数選択の場合:
+original data 複数選択の場合:
 
-1. app が新しい source chunk を作る
-2. block の input には source chunk の `CNK-...` を書く
+1. app が新しい source dataset を作る
+2. block の input には source dataset の `CNK-...` を書く
 
 ## 6. output 割当
 
 - output slot 名は先に block に書く
 - value は最初 `null`
-- 実行時に app が output chunk を新規作成して `CNK-...` を書き戻す
+- 実行時に app が output dataset を新規作成して `CNK-...` を書き戻す
 
 ## 7. 実行準備
 
 app は実行前に次を行う。
 
-1. input chunk を確認する
-2. output slot ごとに新しい chunk フォルダを作る
+1. input dataset を確認する
+2. output slot ごとに新しい dataset フォルダを作る
 3. `analysis-args.json` を `.py-scripts/PYS-.../` に書く
 
 ## 8. analysis-args.json
@@ -131,10 +131,10 @@ app は実行前に次を行う。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\chunk\\CNK-7K2M9Q4D"
+    "samples": "C:\\Workspace\\dataset\\CNK-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\chunk\\CNK-9X4Q2M1A"
+    "result": "C:\\Workspace\\dataset\\CNK-9X4Q2M1A"
   },
   "params": {}
 }
@@ -161,7 +161,7 @@ app は実行前に次を行う。
 
 ### 補足
 
-- output chunk が空でも成功なら空の結果として確定する
+- output dataset が空でも成功なら空の結果として確定する
 - stdout / stderr は log に残す
 
 ## 10. script 更新
@@ -177,3 +177,4 @@ app は実行前に次を行う。
 ### 任意オプション
 
 - 外部登録時に「既存 `PYS-...` を上書き」があってよい
+

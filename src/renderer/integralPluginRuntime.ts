@@ -4,9 +4,9 @@ import type {
 } from "../shared/integral";
 
 let assetCatalog: IntegralAssetCatalog = {
-  blobs: [],
+  datasets: [],
   blockTypes: [],
-  chunks: [],
+  originalData: [],
   scripts: []
 };
 let loadAssetCatalogPromise: Promise<void> | null = null;
@@ -31,9 +31,9 @@ export async function initializeIntegralPluginRuntime(): Promise<void> {
 
 export function resetIntegralPluginRuntime(): void {
   assetCatalog = {
-    blobs: [],
+    datasets: [],
     blockTypes: [],
-    chunks: [],
+    originalData: [],
     scripts: []
   };
   loadAssetCatalogPromise = null;
@@ -57,3 +57,5 @@ export function getInstalledIntegralBlockDefinition(
 export function getAvailableIntegralBlockTypes(): readonly IntegralBlockTypeDefinition[] {
   return assetCatalog.blockTypes;
 }
+
+

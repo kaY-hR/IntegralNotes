@@ -676,3 +676,5 @@ function isPluginHostRunner(
 function escapeHtmlAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }
+
+

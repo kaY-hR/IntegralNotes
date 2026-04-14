@@ -25,16 +25,16 @@ const api: IntegralNotesApi = {
   browsePythonEntryFile: () => ipcRenderer.invoke("integral:browsePythonEntryFile"),
   browsePythonSupportFiles: (entryAbsolutePath) =>
     ipcRenderer.invoke("integral:browsePythonSupportFiles", entryAbsolutePath),
-  createSourceChunk: (request) => ipcRenderer.invoke("integral:createSourceChunk", request),
+  createSourceDataset: (request) => ipcRenderer.invoke("integral:createSourceDataset", request),
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
   zoomIn: () => adjustZoomLevel("in"),
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),
   getIntegralAssetCatalog: () => ipcRenderer.invoke("integral:getAssetCatalog"),
-  importBlobDirectories: () => ipcRenderer.invoke("integral:importBlobDirectories"),
-  importBlobFiles: () => ipcRenderer.invoke("integral:importBlobFiles"),
-  inspectChunk: (chunkId) => ipcRenderer.invoke("integral:inspectChunk", chunkId),
+  importOriginalDataDirectories: () => ipcRenderer.invoke("integral:importOriginalDataDirectories"),
+  importOriginalDataFiles: () => ipcRenderer.invoke("integral:importOriginalDataFiles"),
+  inspectDataset: (datasetId) => ipcRenderer.invoke("integral:inspectDataset", datasetId),
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
@@ -53,3 +53,5 @@ const api: IntegralNotesApi = {
 };
 
 contextBridge.exposeInMainWorld("integralNotes", api);
+
+
