@@ -94,9 +94,9 @@
 * Python script 実行 block では、slot ごとの dataset 割り当てと `block-type` が分かれば十分
 * `plugin-name` の表示枠は不要
 * `input` / `output` 数の表示枠は不要
-* `input slots` / `output slots` の名称表示と、設定済み dataset 表示が分かれていて一覧性が悪い
-* 各 slot は `slot名: 設定dataset名` の形で、一目で把握できる表示にしたい
+* `input slots` / `output slots` の設定済み datasetは不要。登録時に必要なのはslot名のみ
 * 全体的に余白が大きすぎるため、情報密度を上げたフラットな UI に寄せたい
+* 登録後、自動的に作成したblockを挿入してほしい。
 
 ## [ ] 12. Python script 系の input 割り当て導線を分かりやすくしたい
 - 優先重み:5
@@ -106,6 +106,7 @@
 * input に対する基本操作は、`既存 dataset を割り当てる` か `複数の original data から新しい dataset を作る` の 2 通りである
 * 現状はこの基本導線が UI から読み取りにくく、何を選べばよいか分かりにくい
 * まずは `dataset を選ぶ` のが基本であり、適した dataset が無ければ `original data から作る` こともできる、と伝わる UI にしたい
+* dataset割り当て後、idが見えているが、名称を出すようにしてほしい
 * 実装時に具体 UI を検討する前提で、今回の Issue では導線改善の必要性を先に整理しておきたい
 
 ## [x] 13. source dataset の擬似リンク表現を `links.json` から見直したい
