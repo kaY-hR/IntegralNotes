@@ -323,7 +323,7 @@ export function OriginalDataPickerDialog({
   return (
     <OriginalDataSelectionDialog
       confirmLabel="source dataset を作成"
-      description="複数の元データを選ぶと app が `source-bundle` kind の dataset を生成します。"
+      description="複数の元データを選ぶと app が `source-bundle` kind の dataset を、普通の file / directory 群として生成します。"
       onClose={onClose}
       onError={onError}
       onImportedOriginalData={onImportedOriginalData}

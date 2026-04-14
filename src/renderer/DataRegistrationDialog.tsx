@@ -71,7 +71,10 @@ export function DataRegistrationDialog({
           <section className="data-registration-card">
             <div>
               <strong>元データを登録</strong>
-              <p>元データを file / directory 単位で workspace に取り込みます。</p>
+              <p>
+                外部の file / directory を取り込む場合は canonical 実体を `.store` にコピーし、`Data/`
+                に alias を置きます。すでに `cwd` 内にある場合は今の path を保ったまま alias 化します。
+              </p>
             </div>
             <div className="data-registration-card__actions">
               <button
@@ -82,7 +85,7 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                {pendingAction === "files" ? "登録中..." : "ファイルを元データ登録"}
+                {pendingAction === "files" ? "登録中..." : "ファイルを取り込む"}
               </button>
               <button
                 className="button button--ghost"
@@ -92,7 +95,7 @@ export function DataRegistrationDialog({
                 }}
                 type="button"
               >
-                {pendingAction === "directories" ? "登録中..." : "フォルダを元データ登録"}
+                {pendingAction === "directories" ? "登録中..." : "フォルダを取り込む"}
               </button>
             </div>
           </section>
@@ -100,7 +103,7 @@ export function DataRegistrationDialog({
           <section className="data-registration-card">
             <div>
               <strong>Dataset を作成</strong>
-              <p>複数の元データを選び、`links.json` ベースの source dataset を作成します。</p>
+              <p>複数の元データから、普通の file / directory 群として扱える source dataset を作成します。</p>
             </div>
             <div className="data-registration-card__actions">
               <button

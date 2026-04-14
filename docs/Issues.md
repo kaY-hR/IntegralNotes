@@ -107,7 +107,8 @@
 * まずは `dataset を選ぶ` のが基本であり、適した dataset が無ければ `original data から作る` こともできる、と伝わる UI にしたい
 * 実装時に具体 UI を検討する前提で、今回の Issue では導線改善の必要性を先に整理しておきたい
 
-## [ ] 13. source dataset の擬似リンク表現を `links.json` から見直したい
+## [x] 13. source dataset の擬似リンク表現を `links.json` から見直したい
+- Status:completed
 - 優先重み:5
 - 記載日時:2026-04-14-11:00(UTC+9)
 
@@ -115,14 +116,18 @@
 * 方針として、`links.json` や `.inlk` のような custom manifest をやめ、`.store` を canonical storage とする構成へ寄せたい
 * `.store` のイメージは以下
   - `.store/.integral/{ID}.json` に metadata を置く
-  - `.store/ORD_xxxxx{ext}` または `.store/ORD_xxxxx/` に original data の実体を置く
-  - `.store/DS_xxxxx/` に dataset の実体を置く
+  - `.store/{originalDataId}{ext}` または `.store/{originalDataId}/` に original data の実体を置く
+  - `.store/{datasetId}/` に dataset の実体を置く
   - システム内部の参照は path ではなく ID を正とする
-* `cwd` 内でシステムが認識した file / directory は `.store` 側を canonical にし、ユーザーから見える側は alias として扱いたい
+* original data の能動登録は `cwd` 内外の両方を扱いたい
+  - `cwd` 外から登録した場合は `.store` に canonical 実体をコピーし、`Data/` に alias を置く
+  - すでに `cwd` 内にある対象を登録した場合は `.store` 側を canonical にし、元の path を alias として残す
+* システムが認識した file / directory は `.store` 側を canonical にし、ユーザーから見える側は alias として扱いたい
   - file は hard link
   - directory は junction
 * source dataset でも、見た目は普通のファイル / フォルダ群にし、特殊な manifest を見せない構成にしたい
 * `.integral` を無視すれば VS Code / Obsidian など外部ツールからも普通の filesystem として扱える構造に寄せたい
+* 未リリース前提なので後方互換コードは持たず、旧レイアウト / 旧 block type の救済は残さない
 * 少なくとも以下を整理する必要がある
   - 同一 volume 制約
   - file は hard link、directory は junction で扱う前提

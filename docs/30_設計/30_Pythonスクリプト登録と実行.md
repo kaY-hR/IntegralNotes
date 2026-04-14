@@ -108,7 +108,8 @@ app は次を行う。
 original data 複数選択の場合:
 
 1. app が新しい source dataset を作る
-2. block の input には source dataset の `CNK-...` を書く
+2. source dataset は `.store/{datasetId}/` に普通の file / directory 群として materialize される
+3. block の input には source dataset の `CNK-...` を書く
 
 ## 6. output 割当
 
@@ -131,10 +132,10 @@ app は実行前に次を行う。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\dataset\\CNK-7K2M9Q4D"
+    "samples": "C:\\Workspace\\.store\\CNK-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\dataset\\CNK-9X4Q2M1A"
+    "result": "C:\\Workspace\\.store\\CNK-9X4Q2M1A"
   },
   "params": {}
 }

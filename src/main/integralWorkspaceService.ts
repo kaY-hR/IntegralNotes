@@ -31,13 +31,11 @@ import { WorkspaceService } from "./workspaceService";
 const execFileAsync = promisify(execFile);
 
 const DATA_CATALOG_DIRECTORY = "data-catalog";
-const ORIGINAL_DATA_DIRECTORY = ".original-data";
-const DATASETS_DIRECTORY = "dataset";
+const DATA_DIRECTORY = "Data";
+const NOTES_DIRECTORY = "Notes";
+const STORE_DIRECTORY = ".store";
+const STORE_METADATA_DIRECTORY = ".integral";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
-const ORIGINAL_DATA_METADATA_FILE = "original-data.json";
-const LEGACY_ORIGINAL_DATA_METADATA_FILE = "blob.json";
-const DATASET_METADATA_FILE = "dataset.json";
-const LEGACY_DATASET_METADATA_FILE = "chunk.json";
 
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
@@ -51,10 +49,17 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".svg"]);
 const TEXT_EXTENSIONS = new Set([".txt", ".md", ".json", ".csv"]);
 
 interface OriginalDataMetadata {
+  aliasRelativePath: string;
   originalDataId: string;
   createdAt: string;
   originalName: string;
+  storeRelativePath: string;
   sourceKind: "directory" | "file";
+}
+
+interface SourceDatasetMember {
+  entryName: string;
+  originalDataId: string;
 }
 
 interface DatasetMetadata {
@@ -62,13 +67,8 @@ interface DatasetMetadata {
   createdAt: string;
   createdByBlockId: string | null;
   kind: string;
-}
-
-interface SourceDatasetLinks {
-  members: Array<{
-    originalDataId: string;
-    target: string;
-  }>;
+  sourceMembers?: SourceDatasetMember[];
+  storeRelativePath: string;
 }
 
 interface InspectableFileEntry {
@@ -143,25 +143,49 @@ export class IntegralWorkspaceService {
     const importedOriginalData: IntegralOriginalDataSummary[] = [];
 
     for (const sourcePath of sourcePaths) {
+      const rootPath = this.getRootPath();
       const resolvedSourcePath = path.resolve(sourcePath);
       const sourceStats = await fs.stat(resolvedSourcePath);
+      const sourceKind = sourceStats.isDirectory() ? "directory" : "file";
+      const sourceInsideWorkspace = this.isWorkspacePath(rootPath, resolvedSourcePath);
+
+      if (sourceInsideWorkspace) {
+        this.assertRegisterableOriginalDataPath(rootPath, resolvedSourcePath);
+      }
+
       const originalDataId = createOpaqueId("BLB");
-      const originalDataRootPath = this.resolveOriginalDataRootPath(originalDataId);
-      const payloadRootPath = path.join(originalDataRootPath, "payload");
+      const storeRelativePath = createOriginalDataStoreRelativePath(
+        originalDataId,
+        path.basename(resolvedSourcePath),
+        sourceKind
+      );
+      const aliasRelativePath = await this.resolveOriginalDataAliasRelativePath(
+        rootPath,
+        resolvedSourcePath,
+        originalDataId,
+        sourceKind
+      );
+      const storeAbsolutePath = this.resolveWorkspacePath(storeRelativePath);
+      const aliasAbsolutePath = this.resolveWorkspacePath(aliasRelativePath);
       const metadata: OriginalDataMetadata = {
+        aliasRelativePath,
         originalDataId,
         createdAt: new Date().toISOString(),
         originalName: path.basename(resolvedSourcePath),
-        sourceKind: sourceStats.isDirectory() ? "directory" : "file"
+        storeRelativePath,
+        sourceKind
       };
 
-      await fs.mkdir(payloadRootPath, { recursive: true });
+      await fs.mkdir(path.dirname(storeAbsolutePath), { recursive: true });
+      await fs.mkdir(path.dirname(aliasAbsolutePath), { recursive: true });
 
-      if (sourceStats.isDirectory()) {
-        await fs.cp(resolvedSourcePath, payloadRootPath, { force: true, recursive: true });
+      if (sourceInsideWorkspace) {
+        await fs.rename(resolvedSourcePath, storeAbsolutePath);
       } else {
-        await fs.copyFile(resolvedSourcePath, path.join(payloadRootPath, path.basename(resolvedSourcePath)));
+        await this.copyOriginalDataIntoStore(resolvedSourcePath, storeAbsolutePath, sourceKind);
       }
+
+      await this.createVisibleAlias(storeAbsolutePath, aliasAbsolutePath, metadata.sourceKind);
 
       await this.writeOriginalDataMetadata(originalDataId, metadata);
       await this.writeOriginalDataNote(metadata);
@@ -187,15 +211,8 @@ export class IntegralWorkspaceService {
     const uniqueOriginalDataIds = Array.from(new Set(originalDataIds));
     const datasetId = createOpaqueId("CNK");
     const datasetRootPath = this.resolveDatasetRootPath(datasetId);
-    const datasetMetadata: DatasetMetadata = {
-      datasetId,
-      createdAt: new Date().toISOString(),
-      createdByBlockId: null,
-      kind: "source-bundle"
-    };
-    const links: SourceDatasetLinks = {
-      members: []
-    };
+    const sourceMembers: SourceDatasetMember[] = [];
+    const usedEntryNames = new Set<string>();
 
     await fs.mkdir(datasetRootPath, { recursive: true });
 
@@ -206,17 +223,34 @@ export class IntegralWorkspaceService {
         throw new Error(`元データが見つかりません: ${originalDataId}`);
       }
 
-      links.members.push({
+      const entryName = createUniqueSourceMemberEntryName(
+        originalDataMetadata.originalName,
         originalDataId,
-        target: path
-          .relative(datasetRootPath, path.join(this.resolveOriginalDataRootPath(originalDataId), "payload"))
-          .split(path.sep)
-          .join("/")
+        usedEntryNames
+      );
+      const originalDataPath = this.resolveOriginalDataStorePath(originalDataMetadata);
+
+      await this.createVisibleAlias(
+        originalDataPath,
+        path.join(datasetRootPath, entryName),
+        originalDataMetadata.sourceKind
+      );
+      sourceMembers.push({
+        entryName,
+        originalDataId
       });
     }
 
+    const datasetMetadata: DatasetMetadata = {
+      datasetId,
+      createdAt: new Date().toISOString(),
+      createdByBlockId: null,
+      kind: "source-bundle",
+      sourceMembers,
+      storeRelativePath: createDatasetStoreRelativePath(datasetId)
+    };
+
     await this.writeDatasetMetadata(datasetId, datasetMetadata);
-    await fs.writeFile(path.join(datasetRootPath, "links.json"), JSON.stringify(links, null, 2), "utf8");
 
     return {
       dataset: await this.readDatasetSummary(datasetId)
@@ -390,12 +424,12 @@ export class IntegralWorkspaceService {
     return absolutePath;
   }
 
-  private resolveOriginalDataRootPath(originalDataId: string): string {
-    return this.resolveWorkspacePath(`${ORIGINAL_DATA_DIRECTORY}/${originalDataId}`);
+  private resolveStoreMetadataRootPath(): string {
+    return this.resolveWorkspacePath(`${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}`);
   }
 
   private resolveDatasetRootPath(datasetId: string): string {
-    return this.resolveWorkspacePath(`${DATASETS_DIRECTORY}/${datasetId}`);
+    return this.resolveWorkspacePath(createDatasetStoreRelativePath(datasetId));
   }
 
   private resolvePythonScriptRootPath(scriptId: string): string {
@@ -439,7 +473,8 @@ export class IntegralWorkspaceService {
         datasetId: nextDatasetId,
         createdAt: new Date().toISOString(),
         createdByBlockId: block.id ?? null,
-        kind: outputSlot.producedKind?.trim() || `${block["block-type"]}.${outputSlot.name}`
+        kind: outputSlot.producedKind?.trim() || `${block["block-type"]}.${outputSlot.name}`,
+        storeRelativePath: createDatasetStoreRelativePath(nextDatasetId)
       };
 
       await fs.mkdir(this.resolveDatasetRootPath(nextDatasetId), { recursive: true });
@@ -559,18 +594,18 @@ export class IntegralWorkspaceService {
   }
 
   private async writeOriginalDataMetadata(originalDataId: string, metadata: OriginalDataMetadata): Promise<void> {
-    await fs.mkdir(this.resolveOriginalDataRootPath(originalDataId), { recursive: true });
+    await fs.mkdir(this.resolveStoreMetadataRootPath(), { recursive: true });
     await fs.writeFile(
-      path.join(this.resolveOriginalDataRootPath(originalDataId), ORIGINAL_DATA_METADATA_FILE),
+      path.join(this.resolveStoreMetadataRootPath(), `${originalDataId}.json`),
       JSON.stringify(metadata, null, 2),
       "utf8"
     );
   }
 
   private async writeDatasetMetadata(datasetId: string, metadata: DatasetMetadata): Promise<void> {
-    await fs.mkdir(this.resolveDatasetRootPath(datasetId), { recursive: true });
+    await fs.mkdir(this.resolveStoreMetadataRootPath(), { recursive: true });
     await fs.writeFile(
-      path.join(this.resolveDatasetRootPath(datasetId), DATASET_METADATA_FILE),
+      path.join(this.resolveStoreMetadataRootPath(), `${datasetId}.json`),
       JSON.stringify(metadata, null, 2),
       "utf8"
     );
@@ -580,10 +615,14 @@ export class IntegralWorkspaceService {
     const dataNotePath = this.resolveWorkspacePath(
       `${DATA_CATALOG_DIRECTORY}/${createOriginalDataNoteFileName(metadata.originalName, metadata.originalDataId)}`
     );
-    const payloadRelativePath = path
+    const aliasRelativePath = path
+      .relative(path.dirname(dataNotePath), this.resolveOriginalDataAliasPath(metadata))
+      .split(path.sep)
+      .join("/");
+    const storeRelativePath = path
       .relative(
         path.dirname(dataNotePath),
-        path.join(this.resolveOriginalDataRootPath(metadata.originalDataId), "payload")
+        this.resolveOriginalDataStorePath(metadata)
       )
       .split(path.sep)
       .join("/");
@@ -594,7 +633,8 @@ export class IntegralWorkspaceService {
       `- Original Data ID: ${metadata.originalDataId}`,
       `- Source Kind: ${metadata.sourceKind}`,
       `- Created At: ${metadata.createdAt}`,
-      `- Payload: \`${payloadRelativePath}\``
+      `- Alias Path: \`${aliasRelativePath}\``,
+      `- Store Path: \`${storeRelativePath}\``
     ];
 
     await fs.writeFile(dataNotePath, `${lines.join("\n")}\n`, "utf8");
@@ -612,37 +652,27 @@ export class IntegralWorkspaceService {
   }
 
   private async readOriginalDataMetadata(originalDataId: string): Promise<OriginalDataMetadata | null> {
-    return (
-      (await readJsonFile<OriginalDataMetadata>(
-        path.join(this.resolveOriginalDataRootPath(originalDataId), ORIGINAL_DATA_METADATA_FILE)
-      )) ??
-      (await readJsonFile<OriginalDataMetadata>(
-        path.join(this.resolveOriginalDataRootPath(originalDataId), LEGACY_ORIGINAL_DATA_METADATA_FILE)
-      ))
+    return readJsonFile<OriginalDataMetadata>(
+      path.join(this.resolveStoreMetadataRootPath(), `${originalDataId}.json`)
     );
   }
 
   private async readDatasetMetadata(datasetId: string): Promise<DatasetMetadata | null> {
-    return (
-      (await readJsonFile<DatasetMetadata>(
-        path.join(this.resolveDatasetRootPath(datasetId), DATASET_METADATA_FILE)
-      )) ??
-      (await readJsonFile<DatasetMetadata>(
-        path.join(this.resolveDatasetRootPath(datasetId), LEGACY_DATASET_METADATA_FILE)
-      ))
+    return readJsonFile<DatasetMetadata>(
+      path.join(this.resolveStoreMetadataRootPath(), `${datasetId}.json`)
     );
   }
 
   private async readOriginalDataSummaries(): Promise<IntegralOriginalDataSummary[]> {
-    const originalDataRootPath = this.resolveWorkspacePath(ORIGINAL_DATA_DIRECTORY);
-    const entries = await fs.readdir(originalDataRootPath, { withFileTypes: true });
+    const metadataRootPath = this.resolveStoreMetadataRootPath();
+    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
     const summaries = await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
+        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
         .map(async (entry) => {
-          const metadata = await this.readOriginalDataMetadata(entry.name);
+          const metadata = await readJsonFile<OriginalDataMetadata>(path.join(metadataRootPath, entry.name));
 
-          return metadata ? this.toOriginalDataSummary(metadata) : null;
+          return metadata?.originalDataId ? this.toOriginalDataSummary(metadata) : null;
         })
     );
 
@@ -652,12 +682,16 @@ export class IntegralWorkspaceService {
   }
 
   private async readDatasetSummaries(): Promise<IntegralDatasetSummary[]> {
-    const datasetRootPath = this.resolveWorkspacePath(DATASETS_DIRECTORY);
-    const entries = await fs.readdir(datasetRootPath, { withFileTypes: true });
+    const metadataRootPath = this.resolveStoreMetadataRootPath();
+    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
     const summaries = await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => this.readDatasetSummary(entry.name).catch(() => null))
+        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
+        .map(async (entry) => {
+          const metadata = await readJsonFile<DatasetMetadata>(path.join(metadataRootPath, entry.name));
+
+          return metadata?.datasetId ? this.readDatasetSummary(metadata.datasetId).catch(() => null) : null;
+        })
     );
 
     return summaries
@@ -753,78 +787,112 @@ export class IntegralWorkspaceService {
 
   private async collectInspectableFiles(
     datasetRootPath: string,
-    metadata: DatasetMetadata
+    _metadata: DatasetMetadata
   ): Promise<InspectableFileEntry[]> {
-    if (metadata.kind !== "source-bundle") {
-      const relativeFilePaths = (await collectRelativeFiles(datasetRootPath)).filter(
-        (relativePath) => relativePath !== DATASET_METADATA_FILE && relativePath !== "links.json"
-      );
+    const relativeFilePaths = await collectRelativeFiles(datasetRootPath);
 
-      return relativeFilePaths.map((relativePath) => ({
+    return relativeFilePaths
+      .map((relativePath) => ({
         absolutePath: path.join(datasetRootPath, relativePath),
         relativePath
-      }));
-    }
-
-    const links = await readJsonFile<SourceDatasetLinks>(path.join(datasetRootPath, "links.json"));
-
-    if (!links) {
-      return [];
-    }
-
-    const inspectableFiles: InspectableFileEntry[] = [];
-
-    for (const member of links.members) {
-      const payloadRootPath = this.resolveSourceBundleTargetPath(datasetRootPath, member.target);
-
-      if (!(await pathExists(payloadRootPath))) {
-        continue;
-      }
-
-      const originalDataId = member.originalDataId;
-
-      if (!originalDataId) {
-        continue;
-      }
-
-      const originalDataMetadata = await this.readOriginalDataMetadata(originalDataId);
-      const memberLabel = originalDataMetadata?.originalName?.trim() || originalDataId;
-      const memberFiles = await collectRelativeFiles(payloadRootPath);
-
-      for (const relativePath of memberFiles) {
-        inspectableFiles.push({
-          absolutePath: path.join(payloadRootPath, relativePath),
-          relativePath: toInspectableSourcePath(memberLabel, relativePath)
-        });
-      }
-    }
-
-    return inspectableFiles.sort((left, right) =>
-      left.relativePath.localeCompare(right.relativePath, "ja")
-    );
-  }
-
-  private resolveSourceBundleTargetPath(datasetRootPath: string, target: string): string {
-    const absolutePath = path.resolve(datasetRootPath, target);
-    const rootPath = this.getRootPath();
-    const normalizedRelative = path.relative(rootPath, absolutePath);
-
-    if (normalizedRelative.startsWith("..") || path.isAbsolute(normalizedRelative)) {
-      throw new Error("source dataset の links.json がワークスペース外を指しています。");
-    }
-
-    return absolutePath;
+      }))
+      .sort((left, right) => left.relativePath.localeCompare(right.relativePath, "ja"));
   }
 
   private toOriginalDataSummary(metadata: OriginalDataMetadata): IntegralOriginalDataSummary {
     return {
+      aliasRelativePath: metadata.aliasRelativePath,
       dataNoteRelativePath: `${DATA_CATALOG_DIRECTORY}/${createOriginalDataNoteFileName(metadata.originalName, metadata.originalDataId)}`,
       originalDataId: metadata.originalDataId,
       createdAt: metadata.createdAt,
       originalName: metadata.originalName,
-      payloadRelativePath: `${ORIGINAL_DATA_DIRECTORY}/${metadata.originalDataId}/payload`,
+      storeRelativePath: metadata.storeRelativePath,
       sourceKind: metadata.sourceKind
     };
+  }
+
+  private resolveOriginalDataStorePath(metadata: OriginalDataMetadata): string {
+    return this.resolveWorkspacePath(metadata.storeRelativePath);
+  }
+
+  private resolveOriginalDataAliasPath(metadata: OriginalDataMetadata): string {
+    return this.resolveWorkspacePath(metadata.aliasRelativePath);
+  }
+
+  private isWorkspacePath(rootPath: string, absolutePath: string): boolean {
+    const normalizedRelative = path.relative(rootPath, absolutePath);
+    return normalizedRelative.length === 0 || (!normalizedRelative.startsWith("..") && !path.isAbsolute(normalizedRelative));
+  }
+
+  private assertRegisterableOriginalDataPath(rootPath: string, absolutePath: string): void {
+    const normalizedRelative = path.relative(rootPath, absolutePath);
+
+    if (normalizedRelative.length === 0) {
+      throw new Error("ワークスペース root 自体は元データ登録できません。");
+    }
+
+    const topLevelSegment = normalizedRelative.split(path.sep).filter(Boolean)[0] ?? "";
+
+    if (
+      [DATA_CATALOG_DIRECTORY, DATA_DIRECTORY, NOTES_DIRECTORY, PYTHON_SCRIPTS_DIRECTORY, STORE_DIRECTORY].includes(
+        topLevelSegment
+      )
+    ) {
+      throw new Error("system 管理ディレクトリ配下は元データ登録できません。");
+    }
+  }
+
+  private async resolveOriginalDataAliasRelativePath(
+    rootPath: string,
+    sourceAbsolutePath: string,
+    originalDataId: string,
+    sourceKind: "directory" | "file"
+  ): Promise<string> {
+    if (this.isWorkspacePath(rootPath, sourceAbsolutePath)) {
+      return path.relative(rootPath, sourceAbsolutePath).split(path.sep).join("/");
+    }
+
+    const dataRootPath = this.resolveWorkspacePath(DATA_DIRECTORY);
+    await fs.mkdir(dataRootPath, { recursive: true });
+
+    const preferredRelativePath = `${DATA_DIRECTORY}/${path.basename(sourceAbsolutePath)}`;
+    const preferredAbsolutePath = this.resolveWorkspacePath(preferredRelativePath);
+
+    if (!(await pathExists(preferredAbsolutePath))) {
+      return preferredRelativePath;
+    }
+
+    return `${DATA_DIRECTORY}/${createVisibleAliasEntryName(
+      path.basename(sourceAbsolutePath),
+      originalDataId,
+      sourceKind
+    )}`;
+  }
+
+  private async copyOriginalDataIntoStore(
+    sourcePath: string,
+    destinationPath: string,
+    sourceKind: "directory" | "file"
+  ): Promise<void> {
+    if (sourceKind === "directory") {
+      await fs.cp(sourcePath, destinationPath, { force: false, recursive: true });
+      return;
+    }
+
+    await fs.copyFile(sourcePath, destinationPath);
+  }
+
+  private async createVisibleAlias(
+    targetPath: string,
+    aliasPath: string,
+    sourceKind: "directory" | "file"
+  ): Promise<void> {
+    if (sourceKind === "directory") {
+      await fs.symlink(targetPath, aliasPath, "junction");
+      return;
+    }
+
+    await fs.link(targetPath, aliasPath);
   }
 
   private toScriptSummary(manifest: PythonScriptManifest): IntegralScriptAssetSummary {
@@ -949,20 +1017,6 @@ function buildGenericExternalPluginBlockType(
   };
 }
 
-function toInspectableSourcePath(memberLabel: string, relativePath: string): string {
-  const normalizedRelativePath = relativePath.split(path.sep).join("/");
-
-  if (normalizedRelativePath === memberLabel) {
-    return memberLabel;
-  }
-
-  if (normalizedRelativePath.startsWith(`${memberLabel}/`)) {
-    return normalizedRelativePath;
-  }
-
-  return `${memberLabel}/${normalizedRelativePath}`;
-}
-
 function buildDisplayBlockType(): IntegralBlockTypeDefinition {
   return {
     blockType: DISPLAY_BLOCK_TYPE,
@@ -1072,6 +1126,59 @@ function normalizeSlotNames(slotNames: string[], label: string): string[] {
 
 function createOpaqueId(prefix: "BLB" | "BLK" | "CNK" | "PYS"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+function createOriginalDataStoreRelativePath(
+  originalDataId: string,
+  originalName: string,
+  sourceKind: "directory" | "file"
+): string {
+  if (sourceKind === "directory") {
+    return `${STORE_DIRECTORY}/${originalDataId}`;
+  }
+
+  const extension = path.extname(originalName.trim());
+  return `${STORE_DIRECTORY}/${originalDataId}${extension}`;
+}
+
+function createDatasetStoreRelativePath(datasetId: string): string {
+  return `${STORE_DIRECTORY}/${datasetId}`;
+}
+
+function createUniqueSourceMemberEntryName(
+  originalName: string,
+  originalDataId: string,
+  usedEntryNames: Set<string>
+): string {
+  const trimmedName = originalName.trim();
+  const baseName = trimmedName.length > 0 ? trimmedName : originalDataId;
+
+  if (!usedEntryNames.has(baseName)) {
+    usedEntryNames.add(baseName);
+    return baseName;
+  }
+
+  const nextName = `${baseName}_${originalDataId}`;
+  usedEntryNames.add(nextName);
+  return nextName;
+}
+
+function createVisibleAliasEntryName(
+  originalName: string,
+  originalDataId: string,
+  sourceKind: "directory" | "file"
+): string {
+  const trimmedName = originalName.trim();
+
+  if (sourceKind === "directory") {
+    const baseName = trimmedName.length > 0 ? trimmedName : originalDataId;
+    return `${baseName}_${originalDataId}`;
+  }
+
+  const extension = path.extname(trimmedName);
+  const baseName = extension.length > 0 ? trimmedName.slice(0, -extension.length) : trimmedName;
+  const normalizedBaseName = baseName.length > 0 ? baseName : originalDataId;
+  return `${normalizedBaseName}_${originalDataId}${extension}`;
 }
 
 function createOriginalDataNoteFileName(originalName: string, originalDataId: string): string {

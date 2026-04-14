@@ -43,11 +43,12 @@ export interface IntegralBlockTypeDefinition {
 }
 
 export interface IntegralOriginalDataSummary {
+  aliasRelativePath: string;
   dataNoteRelativePath: string;
   originalDataId: string;
   createdAt: string;
   originalName: string;
-  payloadRelativePath: string;
+  storeRelativePath: string;
   sourceKind: "directory" | "file";
 }
 

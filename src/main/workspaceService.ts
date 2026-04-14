@@ -26,37 +26,19 @@ interface PersistedWorkspaceState {
 }
 
 interface OriginalDataNoteMetadata {
-  originalDataId?: string;
-  blobId?: string;
-  createdAt?: string;
-  originalName?: string;
-  sourceKind?: "directory" | "file";
-}
-
-interface DatasetNoteMetadata {
-  kind?: string;
-}
-
-interface SourceDatasetLinks {
-  members?: Array<{
-    blobId?: string;
-    originalDataId?: string;
-    target: string;
-  }>;
+  aliasRelativePath: string;
+  createdAt: string;
+  originalDataId: string;
+  originalName: string;
+  sourceKind: "directory" | "file";
+  storeRelativePath: string;
 }
 
 const NOTES_DIRECTORY = "Notes";
 const DATA_CATALOG_DIRECTORY = "data-catalog";
-const LEGACY_DATA_CATALOG_DIRECTORIES = ["Artifacts"];
-const ORIGINAL_DATA_DIRECTORY = ".original-data";
-const LEGACY_ORIGINAL_DATA_DIRECTORIES = [".blob", "blob"];
-const DATASETS_DIRECTORY = "dataset";
-const LEGACY_DATASET_DIRECTORIES = ["chunk", ".chunk"];
+const STORE_DIRECTORY = ".store";
+const STORE_METADATA_DIRECTORY = ".integral";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
-const ORIGINAL_DATA_METADATA_FILE = "original-data.json";
-const LEGACY_ORIGINAL_DATA_METADATA_FILE = "blob.json";
-const DATASET_METADATA_FILE = "dataset.json";
-const LEGACY_DATASET_METADATA_FILE = "chunk.json";
 const HTML_EXTENSIONS = new Set([".htm", ".html"]);
 const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
 const TEXT_EXTENSIONS = new Set([
@@ -132,20 +114,13 @@ export class WorkspaceService {
     const rootPath = this.getConfiguredRootPath();
 
     await fs.mkdir(rootPath, { recursive: true });
-    await this.migrateLegacyIntegralStorageLayout(rootPath);
-    await this.migrateLegacyIntegralMetadataFileNames(rootPath);
     await Promise.all([
       fs.mkdir(path.join(rootPath, NOTES_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, DATA_CATALOG_DIRECTORY), { recursive: true }),
-      fs.mkdir(path.join(rootPath, ORIGINAL_DATA_DIRECTORY), { recursive: true }),
-      fs.mkdir(path.join(rootPath, DATASETS_DIRECTORY), { recursive: true }),
+      fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true }),
       fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
     ]);
-    await this.migrateLegacyOriginalDataNotes(rootPath);
-    await Promise.all([
-      this.syncOriginalDataNotes(rootPath),
-      this.syncSourceDatasetLinks(rootPath)
-    ]);
+    await this.syncOriginalDataNotes(rootPath);
   }
 
   async getSnapshot(): Promise<WorkspaceSnapshot | null> {
@@ -473,163 +448,43 @@ export class WorkspaceService {
     return isDirectory || name.length > 0;
   }
 
-  private async migrateLegacyIntegralStorageLayout(rootPath: string): Promise<void> {
-    for (const legacyDirectoryName of LEGACY_DATA_CATALOG_DIRECTORIES) {
-      await this.migrateDirectory(
-        path.join(rootPath, legacyDirectoryName),
-        path.join(rootPath, DATA_CATALOG_DIRECTORY)
-      );
-    }
-
-    for (const legacyDirectoryName of LEGACY_ORIGINAL_DATA_DIRECTORIES) {
-      await this.migrateDirectory(
-        path.join(rootPath, legacyDirectoryName),
-        path.join(rootPath, ORIGINAL_DATA_DIRECTORY)
-      );
-    }
-
-    for (const legacyDirectoryName of LEGACY_DATASET_DIRECTORIES) {
-      await this.migrateDirectory(
-        path.join(rootPath, legacyDirectoryName),
-        path.join(rootPath, DATASETS_DIRECTORY)
-      );
-    }
-  }
-
-  private async migrateLegacyIntegralMetadataFileNames(rootPath: string): Promise<void> {
-    await this.migrateMetadataFiles(
-      path.join(rootPath, ORIGINAL_DATA_DIRECTORY),
-      LEGACY_ORIGINAL_DATA_METADATA_FILE,
-      ORIGINAL_DATA_METADATA_FILE
-    );
-    await this.migrateMetadataFiles(
-      path.join(rootPath, DATASETS_DIRECTORY),
-      LEGACY_DATASET_METADATA_FILE,
-      DATASET_METADATA_FILE
-    );
-  }
-
-  private async migrateDirectory(legacyPath: string, nextPath: string): Promise<void> {
-    if (!(await this.pathExists(legacyPath))) {
-      return;
-    }
-
-    if (!(await this.pathExists(nextPath))) {
-      await fs.rename(legacyPath, nextPath);
-      return;
-    }
-
-    const entries = await fs.readdir(legacyPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const sourcePath = path.join(legacyPath, entry.name);
-      const destinationPath = path.join(nextPath, entry.name);
-
-      if (await this.pathExists(destinationPath)) {
-        continue;
-      }
-
-      await fs.rename(sourcePath, destinationPath);
-    }
-
-    const remainingEntries = await fs.readdir(legacyPath);
-
-    if (remainingEntries.length === 0) {
-      await fs.rmdir(legacyPath);
-    }
-  }
-
-  private async migrateMetadataFiles(
-    rootDirectoryPath: string,
-    legacyFileName: string,
-    nextFileName: string
-  ): Promise<void> {
-    if (!(await this.pathExists(rootDirectoryPath))) {
-      return;
-    }
-
-    const entries = await fs.readdir(rootDirectoryPath, { withFileTypes: true });
-
-    await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map(async (entry) => {
-          const entryRootPath = path.join(rootDirectoryPath, entry.name);
-          const legacyPath = path.join(entryRootPath, legacyFileName);
-          const nextPath = path.join(entryRootPath, nextFileName);
-
-          if (!(await this.pathExists(legacyPath)) || (await this.pathExists(nextPath))) {
-            return;
-          }
-
-          await fs.rename(legacyPath, nextPath);
-        })
-    );
-  }
-
-  private async migrateLegacyOriginalDataNotes(rootPath: string): Promise<void> {
-    const originalDataRootPath = path.join(rootPath, ORIGINAL_DATA_DIRECTORY);
-    const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
-    const entries = await fs.readdir(originalDataRootPath, { withFileTypes: true });
-
-    await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map(async (entry) => {
-          const metadata = await this.readOriginalDataNoteMetadata(
-            path.join(originalDataRootPath, entry.name)
-          );
-          const originalDataId = metadata?.originalDataId ?? metadata?.blobId;
-
-          if (!metadata || !originalDataId) {
-            return;
-          }
-
-          const nextDataNotePath = path.join(
-            dataCatalogRootPath,
-            createOriginalDataNoteFileName(metadata.originalName ?? originalDataId, originalDataId)
-          );
-
-          if (await this.pathExists(nextDataNotePath)) {
-            return;
-          }
-
-          const legacyDataNotePath = path.join(dataCatalogRootPath, `${originalDataId}.md`);
-
-          if (!(await this.pathExists(legacyDataNotePath))) {
-            return;
-          }
-
-          await fs.rename(legacyDataNotePath, nextDataNotePath);
-        })
-    );
-  }
-
   private async syncOriginalDataNotes(rootPath: string): Promise<void> {
-    const originalDataRootPath = path.join(rootPath, ORIGINAL_DATA_DIRECTORY);
+    const metadataRootPath = path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY);
     const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
-    const entries = await fs.readdir(originalDataRootPath, { withFileTypes: true });
+    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
 
     await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
+        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
         .map(async (entry) => {
-          const metadata = await this.readOriginalDataNoteMetadata(
-            path.join(originalDataRootPath, entry.name)
+          const metadata = await this.readJsonFile<OriginalDataNoteMetadata>(
+            path.join(metadataRootPath, entry.name)
           );
-          const originalDataId = metadata?.originalDataId ?? metadata?.blobId;
 
-          if (!metadata || !originalDataId) {
+          if (
+            !metadata ||
+            typeof metadata.originalDataId !== "string" ||
+            typeof metadata.originalName !== "string" ||
+            typeof metadata.createdAt !== "string" ||
+            typeof metadata.aliasRelativePath !== "string" ||
+            typeof metadata.storeRelativePath !== "string" ||
+            (metadata.sourceKind !== "file" && metadata.sourceKind !== "directory")
+          ) {
             return;
           }
 
-          const originalName = metadata.originalName?.trim() || originalDataId;
+          const originalName = metadata.originalName.trim();
+          const originalDataId = metadata.originalDataId.trim();
           const dataNotePath = path.join(
             dataCatalogRootPath,
             createOriginalDataNoteFileName(originalName, originalDataId)
           );
-          const payloadRelativePath = path
-            .relative(path.dirname(dataNotePath), path.join(originalDataRootPath, originalDataId, "payload"))
+          const aliasRelativePath = path
+            .relative(path.dirname(dataNotePath), path.join(rootPath, ...metadata.aliasRelativePath.split("/")))
+            .split(path.sep)
+            .join("/");
+          const noteStoreRelativePath = path
+            .relative(path.dirname(dataNotePath), path.join(rootPath, ...metadata.storeRelativePath.split("/")))
             .split(path.sep)
             .join("/");
           const lines = [
@@ -637,84 +492,14 @@ export class WorkspaceService {
             "",
             `- Original Name: ${originalName}`,
             `- Original Data ID: ${originalDataId}`,
-            `- Source Kind: ${metadata.sourceKind ?? "file"}`,
-            metadata.createdAt ? `- Created At: ${metadata.createdAt}` : null,
-            `- Payload: \`${payloadRelativePath}\``
-          ].filter((line): line is string => line !== null);
+            `- Source Kind: ${metadata.sourceKind}`,
+            `- Created At: ${metadata.createdAt}`,
+            `- Alias Path: \`${aliasRelativePath}\``,
+            `- Store Path: \`${noteStoreRelativePath}\``
+          ];
 
           await fs.writeFile(dataNotePath, `${lines.join("\n")}\n`, "utf8");
         })
-    );
-  }
-
-  private async syncSourceDatasetLinks(rootPath: string): Promise<void> {
-    const datasetRootPath = path.join(rootPath, DATASETS_DIRECTORY);
-    const entries = await fs.readdir(datasetRootPath, { withFileTypes: true });
-
-    await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map(async (entry) => {
-          const datasetPath = path.join(datasetRootPath, entry.name);
-          const metadata = await this.readDatasetNoteMetadata(datasetPath);
-
-          if (metadata?.kind !== "source-bundle") {
-            return;
-          }
-
-          const links = await this.readJsonFile<SourceDatasetLinks>(path.join(datasetPath, "links.json"));
-
-          if (!links?.members || links.members.length === 0) {
-            return;
-          }
-
-          const nextLinks: SourceDatasetLinks = {
-            members: links.members.map((member) => ({
-              originalDataId: member.originalDataId ?? member.blobId,
-              target: path
-                .relative(
-                  datasetPath,
-                  path.join(rootPath, ORIGINAL_DATA_DIRECTORY, member.originalDataId ?? member.blobId ?? "", "payload")
-                )
-                .split(path.sep)
-                .join("/")
-            }))
-          };
-
-          if (JSON.stringify(nextLinks) === JSON.stringify(links)) {
-            return;
-          }
-
-          await fs.writeFile(
-            path.join(datasetPath, "links.json"),
-            JSON.stringify(nextLinks, null, 2),
-            "utf8"
-          );
-        })
-    );
-  }
-
-  private async readOriginalDataNoteMetadata(
-    originalDataRootPath: string
-  ): Promise<OriginalDataNoteMetadata | null> {
-    return (
-      (await this.readJsonFile<OriginalDataNoteMetadata>(
-        path.join(originalDataRootPath, ORIGINAL_DATA_METADATA_FILE)
-      )) ??
-      (await this.readJsonFile<OriginalDataNoteMetadata>(
-        path.join(originalDataRootPath, LEGACY_ORIGINAL_DATA_METADATA_FILE)
-      ))
-    );
-  }
-
-  private async readDatasetNoteMetadata(datasetRootPath: string): Promise<DatasetNoteMetadata | null> {
-    return (
-      (await this.readJsonFile<DatasetNoteMetadata>(
-        path.join(datasetRootPath, DATASET_METADATA_FILE)
-      )) ??
-      (await this.readJsonFile<DatasetNoteMetadata>(
-        path.join(datasetRootPath, LEGACY_DATASET_METADATA_FILE)
-      ))
     );
   }
 
@@ -724,15 +509,6 @@ export class WorkspaceService {
       return JSON.parse(content) as T;
     } catch {
       return null;
-    }
-  }
-
-  private async pathExists(targetPath: string): Promise<boolean> {
-    try {
-      await fs.access(targetPath);
-      return true;
-    } catch {
-      return false;
     }
   }
 

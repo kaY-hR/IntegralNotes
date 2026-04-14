@@ -43,6 +43,7 @@ MVP では次を正とする。
 - `inputs / outputs` の value に配列は持たない
 - `1 slot = 1 dataset` を固定する
 - UI 上の original data 複数選択は source dataset 生成で吸収する
+- source dataset の実体は `.store/{datasetId}/` に普通の file / directory 群として materialize する
 
 ## Python block 例
 

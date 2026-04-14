@@ -6,9 +6,6 @@ import type {
 import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
 
 export const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
-const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
-const DISPLAY_BLOCK_TYPE = "dataset-view";
-const LEGACY_DISPLAY_BLOCK_TYPE = "chunk-view";
 
 export interface IntegralJsonBlock extends IntegralBlockDocument {}
 
@@ -22,10 +19,6 @@ export function getIntegralBlockDefinition(
 
   if (exactMatch !== null) {
     return exactMatch;
-  }
-
-  if (pluginId === BUILTIN_DISPLAY_PLUGIN_ID && blockType === LEGACY_DISPLAY_BLOCK_TYPE) {
-    return getInstalledIntegralBlockDefinition(pluginId, DISPLAY_BLOCK_TYPE);
   }
 
   return null;

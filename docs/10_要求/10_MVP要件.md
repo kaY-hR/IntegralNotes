@@ -2,10 +2,21 @@
 
 ## 1. データ登録
 
-- ユーザーはファイルまたはフォルダを `original data` として登録できる
+- ユーザーは `cwd` 内外のファイルまたはフォルダを `original data` として登録できる
 - original data には一意 ID `BLB-...` を付与する
 - `1 original data = 1 data note` を基本とする
 - data note はユーザーがノート上で参照できる
+- canonical 実体は `.store/` に置く
+- metadata は `.store/.integral/{originalDataId}.json` に置く
+- file original data の実体は `.store/{originalDataId}{ext}` に置く
+- directory original data の実体は `.store/{originalDataId}/` に置く
+- `cwd` 外から登録する場合は canonical 実体を `.store` にコピーし、`Data/` に alias を置く
+- すでに `cwd` 内にある対象を登録する場合は、canonical 化後も元の path を alias として残す
+- metadata には visible alias 用に `aliasRelativePath` を持たせる
+- user-facing な path は
+  - file は hard link
+  - directory は junction
+ で alias を残せるようにする
 
 ## 2. 処理 block
 
@@ -31,6 +42,12 @@
 - 内部契約は `1 output slot = 1 dataset`
 - GUI 上だけ、`1 input slot = N original data items` を許容する
 - `N original data items` を選んだ場合、app は source dataset を新規作成する
+- source dataset の実体も `.store/{datasetId}/` に materialize する
+- source dataset 内では custom manifest を置かず、普通の file / directory 群として見えるようにする
+- source dataset 作成時は
+  - file original data は hard link
+  - directory original data は junction
+  を使う
 
 ## 4. Python 汎用解析
 
@@ -59,6 +76,7 @@
 - Python スクリプトは output dataset フォルダへ自由に書き込める
 - 成功/失敗判定は exit code のみで行う
 - output dataset が空でも「空の結果」として扱う
+- dataset フォルダの実体は `.store/{datasetId}/` を正とする
 
 ## 7. kind / format
 
@@ -93,9 +111,10 @@
 
 ## 11. Provenance
 
-- すべての dataset は `dataset.json` を持つ
+- すべての dataset は `.store/.integral/{datasetId}.json` を持つ
 - derived dataset には `createdByBlockId` を持たせる
 - source dataset では `createdByBlockId` は `null` でよい
+- source dataset では provenance 用に source member 情報を metadata に持たせる
 
 ## 12. GC
 
