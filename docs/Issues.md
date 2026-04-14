@@ -49,11 +49,11 @@
 * ノート部分のタブ表示でも `html / svg / image / text(json など)` を表示したい
 * 要は `chunk viewer` と同等の表示系を main app 側にも導入したい
 
-## [ ] 8. markdown 以外の text 系ファイルも編集・保存したい
+## [-] 8. markdown 以外の text 系ファイルも編集・保存したい
+- Status:closed
 - 優先重み:4
 - 記載日時:2026-04-14-09:49(UTC+9)
 
-* `json / txt / csv / log / xml / yaml / py / html / svg` など、text として読めるファイルは plain text editor として開いて編集・保存したい
-* `markdown` は従来どおり Milkdown 編集を維持したい
-* `html / svg` は preview と source editor の切り替えがあると望ましい
-* image や binary は引き続き preview / read-only 扱いでよい
+* 2026-04-14 再検討の結果、`markdown` 以外は preview-only でよいことにした
+* `markdown` は従来どおり Milkdown 編集を維持する
+* `html / svg / image / text(json など) / binary` は preview / read-only 扱いとする
