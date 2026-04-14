@@ -23,6 +23,7 @@ interface InputSlotDraft {
   originalDataIds: string[];
   id: string;
   name: string;
+  sourceDatasetName: string;
 }
 
 interface OutputSlotDraft {
@@ -38,7 +39,8 @@ function createInputSlotDraft(name = ""): InputSlotDraft {
   return {
     originalDataIds: [],
     id: crypto.randomUUID(),
-    name
+    name,
+    sourceDatasetName: ""
   };
 }
 
@@ -172,7 +174,8 @@ export function PythonScriptDialog({
         inputSlots
           .map((slot) => ({
             originalDataIds: slot.originalDataIds,
-            name: slot.name.trim()
+            name: slot.name.trim(),
+            sourceDatasetName: slot.sourceDatasetName.trim()
           }))
           .filter((slot) => slot.name.length > 0)
           .map(async (slot) => {
@@ -181,6 +184,7 @@ export function PythonScriptDialog({
             }
 
             const sourceDataset = await window.integralNotes.createSourceDataset({
+              name: slot.sourceDatasetName || slot.name,
               originalDataIds: slot.originalDataIds
             });
 
@@ -349,7 +353,7 @@ export function PythonScriptDialog({
                     type="button"
                   >
                     {slot.originalDataIds.length > 0
-                      ? `${slot.originalDataIds.length} 件の元データを選択中`
+                      ? `${slot.originalDataIds.length} 件の元データ / ${slot.sourceDatasetName || slot.name || "dataset"}`
                       : "元データを選択..."}
                   </button>
                   <button
@@ -450,6 +454,11 @@ export function PythonScriptDialog({
       {slotPickerTargetId ? (
         <OriginalDataSelectionDialog
           confirmLabel="この元データを使う"
+          defaultDatasetName={
+            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.sourceDatasetName ||
+            inputSlots.find((slot) => slot.id === slotPickerTargetId)?.name ||
+            ""
+          }
           description="選択した元データ群から、登録時に source dataset を自動作成します。"
           initialSelectedOriginalDataIds={
             inputSlots.find((slot) => slot.id === slotPickerTargetId)?.originalDataIds ?? []
@@ -459,13 +468,15 @@ export function PythonScriptDialog({
           }}
           onError={onError}
           onImportedOriginalData={onImportedOriginalData}
-          onSelect={(originalDataIds) => {
+          onSelect={({ datasetName, originalDataIds }) => {
             updateInputSlot(slotPickerTargetId, (current) => ({
               ...current,
-              originalDataIds
+              originalDataIds,
+              sourceDatasetName: datasetName
             }));
             setSlotPickerTargetId(null);
           }}
+          requireDatasetName
           title="Input 用元データを選択"
         />
       ) : null}

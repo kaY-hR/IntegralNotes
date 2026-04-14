@@ -7,6 +7,8 @@
 - `1 original data = 1 data note` を基本とする
 - data note はユーザーがノート上で参照できる
 - original data / dataset の data note metadata は frontmatter に持たせ、editor / viewer には本文だけを渡す
+- original data の data note file 名は原則 `originalName.md` とする
+- data note file 名が重複する場合は保存前に連番を付けて解消する
 - canonical 実体は `.store/` に置く
 - metadata は `.store/.integral/{originalDataId}.json` に置く
 - file original data の実体は `.store/{originalDataId}{ext}` に置く
@@ -41,10 +43,14 @@
 
 - 内部契約は `1 input slot = 1 dataset`
 - 内部契約は `1 output slot = 1 dataset`
+- dataset は `name` を持つ
+- ユーザーが明示的に作る source dataset では `name` 入力を要求する
+- system が内部的に作る dataset では `name` に ID を使ってよい
 - GUI 上だけ、`1 input slot = N original data items` を許容する
 - `N original data items` を選んだ場合、app は source dataset を新規作成する
 - source dataset の実体も `.store/{datasetId}/` に materialize する
 - source dataset 作成時は対応する data note も `data-catalog/` に自動生成する
+- source dataset の data note file 名は dataset 名を使う
 - source dataset 内では custom manifest を置かず、普通の file / directory 群として見えるようにする
 - source dataset 作成時は
   - file original data は hard link
@@ -80,6 +86,7 @@
 - output dataset が空でも「空の結果」として扱う
 - dataset フォルダの実体は `.store/{datasetId}/` を正とする
 - output dataset 作成時は対応する data note も `data-catalog/` に自動生成する
+- output dataset の data note file 名も dataset 名を使い、system 既定名は ID でよい
 
 ## 7. kind / format
 
@@ -115,6 +122,7 @@
 ## 11. Provenance
 
 - すべての dataset は `.store/.integral/{datasetId}.json` を持つ
+- dataset metadata には `name` を持たせる
 - derived dataset には `createdByBlockId` を持たせる
 - source dataset では `createdByBlockId` は `null` でよい
 - source dataset では provenance 用に source member 情報を metadata に持たせる

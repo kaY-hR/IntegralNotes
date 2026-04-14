@@ -16,14 +16,15 @@ import type {
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
+  assignDataNoteFileNames,
   buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
-  createDatasetDataNoteFileName,
-  createOriginalDataNoteFileName,
+  createDataNoteTargetKey,
   extractDataNoteBody,
   hasDataNoteFrontmatter,
   isDatasetDataNoteMetadata,
   isOriginalDataNoteMetadata,
+  parseDataNoteTargetInfo,
   replaceDataNoteBody
 } from "./dataNote";
 
@@ -67,6 +68,27 @@ const TEXT_EXTENSIONS = new Set([
   ".yaml",
   ".yml"
 ]);
+
+interface ExistingDataCatalogNote {
+  absolutePath: string;
+  content: string;
+  fileName: string;
+  targetKey: string | null;
+}
+
+interface ManagedDataNoteSyncItem {
+  createdAt: string;
+  preferredLabel: string;
+  targetKey: string;
+  writeContent: (existingContent?: string) => string;
+}
+
+interface ManagedDataNoteWritePlan {
+  assignedAbsolutePath: string;
+  assignedFileName: string;
+  nextContent: string;
+  sourceNote: ExistingDataCatalogNote | undefined;
+}
 
 export class WorkspaceService {
   private rootPath: string | undefined;
@@ -121,6 +143,10 @@ export class WorkspaceService {
       fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
     ]);
     await this.syncDataCatalogNotes(rootPath);
+  }
+
+  async syncManagedDataCatalogNotes(): Promise<void> {
+    await this.syncDataCatalogNotes(this.getConfiguredRootPath());
   }
 
   async getSnapshot(): Promise<WorkspaceSnapshot | null> {
@@ -468,52 +494,156 @@ export class WorkspaceService {
   private async syncDataCatalogNotes(rootPath: string): Promise<void> {
     const metadataRootPath = path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY);
     const dataCatalogRootPath = path.join(rootPath, DATA_CATALOG_DIRECTORY);
-    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
-
-    await Promise.all(
-      entries
-        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
-        .map(async (entry) => {
-          const metadata = await this.readJsonFile<unknown>(
-            path.join(metadataRootPath, entry.name)
-          );
-
-          if (isOriginalDataNoteMetadata(metadata)) {
-            const originalName = metadata.originalName.trim();
-            const originalDataId = metadata.originalDataId.trim();
-            const dataNotePath = path.join(
-              dataCatalogRootPath,
-              createOriginalDataNoteFileName(originalName, originalDataId)
+    const [metadataEntries, dataCatalogEntries] = await Promise.all([
+      fs.readdir(metadataRootPath, { withFileTypes: true }),
+      fs.readdir(dataCatalogRootPath, { withFileTypes: true })
+    ]);
+    const syncItems = (
+      await Promise.all(
+        metadataEntries
+          .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
+          .map(async (entry) => {
+            const metadata = await this.readJsonFile<unknown>(
+              path.join(metadataRootPath, entry.name)
             );
-            const existingContent = await readTextFileIfExists(dataNotePath);
-            const nextContent = buildOriginalDataNoteMarkdown(metadata, existingContent);
 
-            if (normalizeForComparison(existingContent) === nextContent) {
-              return;
+            if (isOriginalDataNoteMetadata(metadata)) {
+              return {
+                createdAt: metadata.createdAt,
+                preferredLabel: metadata.originalName.trim(),
+                targetKey: createDataNoteTargetKey("original-data", metadata.originalDataId),
+                writeContent: (existingContent?: string) =>
+                  buildOriginalDataNoteMarkdown(metadata, existingContent)
+              } satisfies ManagedDataNoteSyncItem;
             }
 
-            await fs.writeFile(dataNotePath, nextContent, "utf8");
-            return;
-          }
+            if (!isDatasetDataNoteMetadata(metadata)) {
+              return null;
+            }
 
-          if (!isDatasetDataNoteMetadata(metadata)) {
-            return;
-          }
+            return {
+              createdAt: metadata.createdAt,
+              preferredLabel: metadata.name?.trim() || metadata.datasetId.trim(),
+              targetKey: createDataNoteTargetKey("dataset", metadata.datasetId),
+              writeContent: (existingContent?: string) =>
+                buildDatasetDataNoteMarkdown(metadata, existingContent)
+            } satisfies ManagedDataNoteSyncItem;
+          })
+      )
+    )
+      .filter((item): item is ManagedDataNoteSyncItem => item !== null)
+      .sort((left, right) => {
+        const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
 
-          const datasetId = metadata.datasetId.trim();
-          const dataNotePath = path.join(
-            dataCatalogRootPath,
-            createDatasetDataNoteFileName(datasetId)
-          );
-          const existingContent = await readTextFileIfExists(dataNotePath);
-          const nextContent = buildDatasetDataNoteMarkdown(metadata, existingContent);
+        if (createdAtComparison !== 0) {
+          return createdAtComparison;
+        }
 
-          if (normalizeForComparison(existingContent) === nextContent) {
-            return;
-          }
+        return left.targetKey.localeCompare(right.targetKey, "ja");
+      });
 
-          await fs.writeFile(dataNotePath, nextContent, "utf8");
-        })
+    const existingDataCatalogNotes = (
+      await Promise.all(
+        dataCatalogEntries
+          .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".md")
+          .map(async (entry) => {
+            const absolutePath = path.join(dataCatalogRootPath, entry.name);
+            const content = await readTextFileIfExists(absolutePath);
+
+            if (content === undefined) {
+              return null;
+            }
+
+            const targetInfo = parseDataNoteTargetInfo(content);
+
+            return {
+              absolutePath,
+              content,
+              fileName: entry.name,
+              targetKey: targetInfo
+                ? createDataNoteTargetKey(targetInfo.dataTargetType, targetInfo.targetId)
+                : null
+            } satisfies ExistingDataCatalogNote;
+          })
+      )
+    ).filter((entry): entry is ExistingDataCatalogNote => entry !== null);
+
+    const existingNotesByTarget = new Map<string, ExistingDataCatalogNote[]>();
+
+    for (const existingNote of existingDataCatalogNotes) {
+      if (existingNote.targetKey === null) {
+        continue;
+      }
+
+      const currentNotes = existingNotesByTarget.get(existingNote.targetKey) ?? [];
+      currentNotes.push(existingNote);
+      currentNotes.sort((left, right) => left.fileName.localeCompare(right.fileName, "ja"));
+      existingNotesByTarget.set(existingNote.targetKey, currentNotes);
+    }
+
+    const assignments = assignDataNoteFileNames(
+      existingDataCatalogNotes.map((note) => ({
+        fileName: note.fileName,
+        targetKey: note.targetKey
+      })),
+      syncItems.map((item) => ({
+        preferredLabel: item.preferredLabel,
+        targetKey: item.targetKey
+      }))
+    );
+    const writePlans: ManagedDataNoteWritePlan[] = [];
+
+    for (const item of syncItems) {
+      const assignedFileName = assignments.get(item.targetKey);
+
+      if (!assignedFileName) {
+        continue;
+      }
+
+      const sourceNotes = existingNotesByTarget.get(item.targetKey) ?? [];
+      const sourceNote =
+        sourceNotes.find(
+          (candidate) => candidate.fileName.toLowerCase() === assignedFileName.toLowerCase()
+        ) ?? sourceNotes[0];
+
+      writePlans.push({
+        assignedAbsolutePath: path.join(dataCatalogRootPath, assignedFileName),
+        assignedFileName,
+        nextContent: item.writeContent(sourceNote?.content),
+        sourceNote
+      });
+    }
+    const finalAssignedFileNames = new Set(
+      writePlans.map((plan) => plan.assignedFileName.toLowerCase())
+    );
+
+    await Promise.all(
+      writePlans.map(async (plan) => {
+        const existingAssignedContent = await readTextFileIfExists(plan.assignedAbsolutePath);
+
+        if (normalizeForComparison(existingAssignedContent) === plan.nextContent) {
+          return;
+        }
+
+        await fs.writeFile(plan.assignedAbsolutePath, plan.nextContent, "utf8");
+      })
+    );
+
+    await Promise.all(
+      writePlans.map(async (plan) => {
+        if (!plan.sourceNote) {
+          return;
+        }
+
+        if (
+          plan.sourceNote.fileName.toLowerCase() === plan.assignedFileName.toLowerCase() ||
+          finalAssignedFileNames.has(plan.sourceNote.fileName.toLowerCase())
+        ) {
+          return;
+        }
+
+        await fs.rm(plan.sourceNote.absolutePath, { force: false });
+      })
     );
   }
 

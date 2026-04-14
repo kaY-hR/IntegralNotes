@@ -107,9 +107,11 @@ app は次を行う。
 
 original data 複数選択の場合:
 
-1. app が新しい source dataset を作る
-2. source dataset は `.store/{datasetId}/` に普通の file / directory 群として materialize される
-3. block の input には source dataset の `DTS-...` を書く
+1. ユーザーが source dataset 名を決める
+2. app が新しい source dataset を作る
+3. source dataset は `.store/{datasetId}/` に普通の file / directory 群として materialize される
+4. data note file 名には dataset 名を使う
+5. block の input には source dataset の `DTS-...` を書く
 
 ## 6. output 割当
 

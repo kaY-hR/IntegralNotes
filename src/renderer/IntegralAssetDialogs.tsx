@@ -78,8 +78,9 @@ export function DatasetPickerDialog({
                     type="radio"
                   />
                   <div>
-                    <strong>{dataset.datasetId}</strong>
+                    <strong>{dataset.name}</strong>
                     <div className="asset-picker__meta">
+                      <span>{dataset.datasetId}</span>
                       <span>{dataset.kind}</span>
                       <span>{dataset.renderableCount} renderable</span>
                     </div>
@@ -113,6 +114,7 @@ export function DatasetPickerDialog({
 }
 
 interface OriginalDataPickerDialogProps {
+  defaultDatasetName?: string;
   onClose: () => void;
   onError: (message: string) => void;
   onImportedOriginalData?: (
@@ -124,6 +126,7 @@ interface OriginalDataPickerDialogProps {
 
 interface OriginalDataSelectionDialogProps {
   confirmLabel: string;
+  defaultDatasetName?: string;
   description: string;
   initialSelectedOriginalDataIds?: readonly string[];
   onClose: () => void;
@@ -132,13 +135,15 @@ interface OriginalDataSelectionDialogProps {
     originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSelect: (originalDataIds: string[]) => Promise<void> | void;
+  onSelect: (selection: { datasetName: string; originalDataIds: string[] }) => Promise<void> | void;
   pendingLabel?: string;
+  requireDatasetName?: boolean;
   title: string;
 }
 
 export function OriginalDataSelectionDialog({
   confirmLabel,
+  defaultDatasetName,
   description,
   initialSelectedOriginalDataIds = [],
   onClose,
@@ -146,12 +151,14 @@ export function OriginalDataSelectionDialog({
   onImportedOriginalData,
   onSelect,
   pendingLabel,
+  requireDatasetName = false,
   title
 }: OriginalDataSelectionDialogProps): JSX.Element {
   const [originalData, setOriginalData] = useState<IntegralOriginalDataSummary[]>([]);
   const [selectedOriginalDataIds, setSelectedOriginalDataIds] = useState<Set<string>>(
     () => new Set(initialSelectedOriginalDataIds)
   );
+  const [datasetName, setDatasetName] = useState(defaultDatasetName ?? "");
   const [pending, setPending] = useState(false);
   const selectionSeed = useMemo(
     () =>
@@ -160,6 +167,7 @@ export function OriginalDataSelectionDialog({
         .join("\u0000"),
     [initialSelectedOriginalDataIds]
   );
+  const datasetNameSeed = defaultDatasetName ?? "";
 
   const reloadOriginalData = async (): Promise<void> => {
     const catalog = await window.integralNotes.getIntegralAssetCatalog();
@@ -169,6 +177,10 @@ export function OriginalDataSelectionDialog({
   useEffect(() => {
     setSelectedOriginalDataIds(new Set(initialSelectedOriginalDataIds));
   }, [selectionSeed]);
+
+  useEffect(() => {
+    setDatasetName(defaultDatasetName ?? "");
+  }, [datasetNameSeed, defaultDatasetName]);
 
   useEffect(() => {
     void reloadOriginalData().catch((error) => {
@@ -204,10 +216,20 @@ export function OriginalDataSelectionDialog({
   };
 
   const commitSelection = async (): Promise<void> => {
+    const normalizedDatasetName = datasetName.trim();
+
+    if (requireDatasetName && normalizedDatasetName.length === 0) {
+      onError("dataset 名を入力してください。");
+      return;
+    }
+
     setPending(true);
 
     try {
-      await onSelect(Array.from(selectedOriginalDataIds));
+      await onSelect({
+        datasetName: normalizedDatasetName,
+        originalDataIds: Array.from(selectedOriginalDataIds)
+      });
     } catch (error) {
       onError(toErrorMessage(error));
     } finally {
@@ -225,6 +247,21 @@ export function OriginalDataSelectionDialog({
         </div>
 
         <div className="dialog-card__body dialog-card__body--asset-picker">
+          {requireDatasetName ? (
+            <label className="dialog-field">
+              <span>Dataset Name</span>
+              <input
+                disabled={pending}
+                onChange={(event) => {
+                  setDatasetName(event.target.value);
+                }}
+                placeholder="source dataset 名を入力..."
+                type="text"
+                value={datasetName}
+              />
+            </label>
+          ) : null}
+
           <div className="asset-picker__toolbar">
             <button
               className="button button--ghost"
@@ -315,6 +352,7 @@ export function OriginalDataSelectionDialog({
 }
 
 export function OriginalDataPickerDialog({
+  defaultDatasetName,
   onClose,
   onError,
   onImportedOriginalData,
@@ -323,18 +361,21 @@ export function OriginalDataPickerDialog({
   return (
     <OriginalDataSelectionDialog
       confirmLabel="source dataset を作成"
+      defaultDatasetName={defaultDatasetName}
       description="複数の元データを選ぶと app が `source-bundle` kind の dataset を、普通の file / directory 群として生成します。"
       onClose={onClose}
       onError={onError}
       onImportedOriginalData={onImportedOriginalData}
-      onSelect={async (originalDataIds) => {
+      onSelect={async ({ datasetName, originalDataIds }) => {
         const result = await window.integralNotes.createSourceDataset({
+          name: datasetName,
           originalDataIds
         });
 
         onSelectDataset(result.dataset.datasetId);
       }}
       pendingLabel="作成中..."
+      requireDatasetName
       title="元データから source dataset を作成"
     />
   );

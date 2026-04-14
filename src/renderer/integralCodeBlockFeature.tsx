@@ -544,6 +544,7 @@ function IntegralBlockPanel({
 
         {slotDialogState?.kind === "original-data" ? (
           <OriginalDataPickerDialog
+            defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
@@ -619,6 +620,7 @@ function IntegralBlockPanel({
 
       {slotDialogState?.kind === "original-data" ? (
         <OriginalDataPickerDialog
+          defaultDatasetName={slotDialogState.slotName}
           onClose={() => {
             setSlotDialogState(null);
           }}

@@ -3,6 +3,8 @@ interface FrontmatterBlock {
   frontmatter: string | null;
 }
 
+type DataNoteTargetType = "original-data" | "dataset";
+
 interface DataNoteSourceMember {
   entryName: string;
   originalDataId: string;
@@ -22,8 +24,24 @@ interface DatasetDataNoteMetadata {
   createdByBlockId: string | null;
   datasetId: string;
   kind: string;
+  name?: string;
   sourceMembers?: DataNoteSourceMember[];
   storeRelativePath: string;
+}
+
+interface DataNoteTargetInfo {
+  dataTargetType: DataNoteTargetType;
+  targetId: string;
+}
+
+interface ExistingDataNoteFileAssignment {
+  fileName: string;
+  targetKey: string | null;
+}
+
+interface DesiredDataNoteFileAssignment {
+  preferredLabel: string;
+  targetKey: string;
 }
 
 const DATA_NOTE_TYPE = "data-note";
@@ -45,23 +63,145 @@ const ORIGINAL_DATA_MANAGED_FRONTMATTER_KEYS = [
 const DATASET_MANAGED_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
   "datasetId",
+  "name",
   "kind",
   "createdByBlockId",
   "sourceMembers"
 ] as const;
 
-export type { DataNoteSourceMember, DatasetDataNoteMetadata, OriginalDataNoteMetadata };
+export type {
+  DataNoteSourceMember,
+  DataNoteTargetInfo,
+  DataNoteTargetType,
+  DatasetDataNoteMetadata,
+  DesiredDataNoteFileAssignment,
+  ExistingDataNoteFileAssignment,
+  OriginalDataNoteMetadata
+};
 
 export function createOriginalDataNoteFileName(
   originalName: string,
-  originalDataId: string
+  sequence = 1
 ): string {
-  const normalizedOriginalName = sanitizeFileNameSegment(originalName);
-  return `${normalizedOriginalName}_${originalDataId}.md`;
+  return createManagedDataNoteFileName(originalName, sequence);
 }
 
-export function createDatasetDataNoteFileName(datasetId: string): string {
-  return `${sanitizeFileNameSegment(datasetId)}.md`;
+export function createDatasetDataNoteFileName(
+  datasetName: string,
+  sequence = 1
+): string {
+  return createManagedDataNoteFileName(datasetName, sequence);
+}
+
+export function createDataNoteTargetKey(
+  dataTargetType: DataNoteTargetType,
+  targetId: string
+): string {
+  return `${dataTargetType}:${targetId.trim()}`;
+}
+
+export function resolveDatasetDataNoteName(
+  metadata: Pick<DatasetDataNoteMetadata, "datasetId" | "name">
+): string {
+  const normalizedName = metadata.name?.trim();
+
+  if (normalizedName && normalizedName.length > 0) {
+    return normalizedName;
+  }
+
+  const fallbackId = metadata.datasetId.trim();
+  return fallbackId.length > 0 ? fallbackId : "dataset";
+}
+
+export function parseDataNoteTargetInfo(markdown: string): DataNoteTargetInfo | null {
+  const normalizedMarkdown = normalizeNewlines(markdown);
+  const { frontmatter } = splitFrontmatterBlock(normalizedMarkdown);
+
+  if (!isDataNoteFrontmatter(frontmatter) || frontmatter === null) {
+    return null;
+  }
+
+  const dataTargetType = parseFrontmatterValue(frontmatter, "dataTargetType");
+
+  if (dataTargetType === "original-data") {
+    const originalDataId = parseFrontmatterValue(frontmatter, "originalDataId");
+    return typeof originalDataId === "string" && originalDataId.trim().length > 0
+      ? {
+          dataTargetType,
+          targetId: originalDataId.trim()
+        }
+      : null;
+  }
+
+  if (dataTargetType === "dataset") {
+    const datasetId = parseFrontmatterValue(frontmatter, "datasetId");
+    return typeof datasetId === "string" && datasetId.trim().length > 0
+      ? {
+          dataTargetType,
+          targetId: datasetId.trim()
+        }
+      : null;
+  }
+
+  return null;
+}
+
+export function assignDataNoteFileNames(
+  existingFiles: readonly ExistingDataNoteFileAssignment[],
+  desiredFiles: readonly DesiredDataNoteFileAssignment[]
+): Map<string, string> {
+  const desiredTargetKeys = new Set<string>();
+  const orderedDesiredFiles: DesiredDataNoteFileAssignment[] = [];
+
+  for (const desiredFile of desiredFiles) {
+    if (desiredTargetKeys.has(desiredFile.targetKey)) {
+      continue;
+    }
+
+    desiredTargetKeys.add(desiredFile.targetKey);
+    orderedDesiredFiles.push(desiredFile);
+  }
+
+  const existingManagedFiles = new Map<string, string[]>();
+  const reservedFileNames = new Set<string>();
+
+  for (const existingFile of [...existingFiles].sort((left, right) =>
+    left.fileName.localeCompare(right.fileName, "ja")
+  )) {
+    if (existingFile.targetKey === null || !desiredTargetKeys.has(existingFile.targetKey)) {
+      reservedFileNames.add(existingFile.fileName.toLowerCase());
+      continue;
+    }
+
+    const currentFiles = existingManagedFiles.get(existingFile.targetKey) ?? [];
+    currentFiles.push(existingFile.fileName);
+    existingManagedFiles.set(existingFile.targetKey, currentFiles);
+  }
+
+  for (const managedFiles of existingManagedFiles.values()) {
+    managedFiles.sort((left, right) => left.localeCompare(right, "ja"));
+
+    for (const duplicateFileName of managedFiles.slice(1)) {
+      reservedFileNames.add(duplicateFileName.toLowerCase());
+    }
+  }
+
+  const assignments = new Map<string, string>();
+
+  for (const desiredFile of orderedDesiredFiles) {
+    let sequence = 1;
+    let candidateFileName = createManagedDataNoteFileName(desiredFile.preferredLabel, sequence);
+
+    while (reservedFileNames.has(candidateFileName.toLowerCase())) {
+      sequence += 1;
+      candidateFileName = createManagedDataNoteFileName(desiredFile.preferredLabel, sequence);
+    }
+
+    assignments.set(desiredFile.targetKey, candidateFileName);
+    reservedFileNames.add(candidateFileName.toLowerCase());
+  }
+
+  return assignments;
 }
 
 export function buildOriginalDataNoteMarkdown(
@@ -81,6 +221,10 @@ export function buildOriginalDataNoteMarkdown(
       `aliasRelativePath: ${serializeYamlValue(metadata.aliasRelativePath)}`,
       `storeRelativePath: ${serializeYamlValue(metadata.storeRelativePath)}`
     ],
+    generatedBodyCandidates: [
+      buildLegacyOriginalDataNoteBody(metadata),
+      buildDefaultOriginalDataNoteBody(metadata)
+    ],
     legacyBodyExtractor: (normalizedExistingContent) =>
       extractLegacyOriginalDataNoteBody(normalizedExistingContent, metadata),
     managedKeys: ORIGINAL_DATA_MANAGED_FRONTMATTER_KEYS
@@ -91,10 +235,12 @@ export function buildDatasetDataNoteMarkdown(
   metadata: DatasetDataNoteMetadata,
   existingContent?: string
 ): string {
+  const datasetName = resolveDatasetDataNoteName(metadata);
   const frontmatterLines = [
     `integralNoteType: ${serializeYamlValue(DATA_NOTE_TYPE)}`,
     `dataTargetType: ${serializeYamlValue("dataset")}`,
     `datasetId: ${serializeYamlValue(metadata.datasetId)}`,
+    `name: ${serializeYamlValue(datasetName)}`,
     `kind: ${serializeYamlValue(metadata.kind)}`,
     `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
     `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`,
@@ -109,6 +255,10 @@ export function buildDatasetDataNoteMarkdown(
     defaultBody: buildDefaultDatasetNoteBody(metadata),
     existingContent,
     frontmatterLines,
+    generatedBodyCandidates: [
+      buildLegacyDatasetDataNoteBody(metadata),
+      buildDefaultDatasetNoteBody(metadata)
+    ],
     managedKeys: DATASET_MANAGED_FRONTMATTER_KEYS
   });
 }
@@ -167,6 +317,7 @@ export function isDatasetDataNoteMetadata(value: unknown): value is DatasetDataN
     typeof value.kind === "string" &&
     typeof value.createdAt === "string" &&
     typeof value.storeRelativePath === "string" &&
+    (value.name === undefined || typeof value.name === "string") &&
     (value.createdByBlockId === null || typeof value.createdByBlockId === "string") &&
     (sourceMembers === undefined ||
       (Array.isArray(sourceMembers) &&
@@ -183,6 +334,7 @@ interface BuildDataNoteMarkdownOptions {
   defaultBody: string;
   existingContent?: string;
   frontmatterLines: string[];
+  generatedBodyCandidates?: string[];
   legacyBodyExtractor?: (normalizedExistingContent: string) => string | null;
   managedKeys: readonly string[];
 }
@@ -191,6 +343,7 @@ function buildDataNoteMarkdown({
   defaultBody,
   existingContent,
   frontmatterLines,
+  generatedBodyCandidates = [],
   legacyBodyExtractor,
   managedKeys
 }: BuildDataNoteMarkdownOptions): string {
@@ -199,7 +352,13 @@ function buildDataNoteMarkdown({
   const parsed = normalizedExistingContent
     ? splitFrontmatterBlock(normalizedExistingContent)
     : { body: "", frontmatter: null };
-  const body = resolveDataNoteBody(defaultBody, normalizedExistingContent, parsed, legacyBodyExtractor);
+  const body = resolveDataNoteBody(
+    defaultBody,
+    normalizedExistingContent,
+    parsed,
+    generatedBodyCandidates,
+    legacyBodyExtractor
+  );
   const frontmatter = buildMergedFrontmatter(frontmatterLines, parsed.frontmatter, managedKeys);
 
   return serializeFrontmatterDocument(frontmatter, body);
@@ -209,6 +368,7 @@ function resolveDataNoteBody(
   defaultBody: string,
   existingContent: string | undefined,
   parsed: FrontmatterBlock,
+  generatedBodyCandidates: readonly string[],
   legacyBodyExtractor?: (normalizedExistingContent: string) => string | null
 ): string {
   if (existingContent === undefined) {
@@ -216,7 +376,14 @@ function resolveDataNoteBody(
   }
 
   if (parsed.frontmatter !== null) {
-    return normalizeBody(parsed.body);
+    const normalizedBody = normalizeBody(parsed.body);
+    const normalizedGeneratedBodies = generatedBodyCandidates.map((candidate) => normalizeBody(candidate));
+
+    if (normalizedGeneratedBodies.includes(normalizedBody)) {
+      return normalizeBody(defaultBody);
+    }
+
+    return normalizedBody;
   }
 
   const legacyBody = legacyBodyExtractor?.(existingContent) ?? null;
@@ -280,6 +447,22 @@ function removeManagedFrontmatterLines(frontmatter: string | null, managedKeys: 
     .trim();
 }
 
+function parseFrontmatterValue(frontmatter: string, key: string): unknown {
+  const match = new RegExp(`^\\s*${escapeRegExp(key)}:\\s*(.+)$`, "mu").exec(frontmatter);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const serializedValue = match[1].trim();
+
+  try {
+    return JSON.parse(serializedValue);
+  } catch {
+    return serializedValue;
+  }
+}
+
 function extractLegacyOriginalDataNoteBody(
   markdown: string,
   metadata: OriginalDataNoteMetadata
@@ -328,11 +511,29 @@ function extractLegacyOriginalDataNoteBody(
 }
 
 function buildDefaultOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
+  return `# ${metadata.originalName}\n`;
+}
+
+function buildLegacyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
   return `# ${metadata.originalName}_${metadata.originalDataId}\n`;
 }
 
 function buildDefaultDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
+  return `# ${resolveDatasetDataNoteName(metadata)}\n`;
+}
+
+function buildLegacyDatasetDataNoteBody(metadata: DatasetDataNoteMetadata): string {
   return `# ${metadata.kind}_${metadata.datasetId}\n`;
+}
+
+function createManagedDataNoteFileName(label: string, sequence: number): string {
+  const sanitizedLabel = sanitizeFileNameSegment(label);
+
+  if (sequence <= 1) {
+    return `${sanitizedLabel}.md`;
+  }
+
+  return `${sanitizedLabel}_${sequence}.md`;
 }
 
 function normalizeBody(body: string): string {
@@ -364,6 +565,10 @@ function sanitizeFileNameSegment(value: string): string {
     .replace(/[. ]+$/gu, "");
 
   return sanitized.length > 0 ? sanitized : "data-note";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {

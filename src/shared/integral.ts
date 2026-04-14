@@ -59,6 +59,7 @@ export interface IntegralDatasetSummary {
   createdByBlockId: string | null;
   hasRenderableFiles: boolean;
   kind: string;
+  name: string;
   renderableCount: number;
 }
 
@@ -117,6 +118,7 @@ export interface ImportOriginalDataResult {
 
 export interface CreateSourceDatasetRequest {
   originalDataIds: string[];
+  name?: string;
 }
 
 export interface CreateSourceDatasetResult {
