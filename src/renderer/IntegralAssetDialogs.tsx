@@ -301,36 +301,38 @@ export function OriginalDataSelectionDialog({
             </label>
           ) : null}
 
-          <div className="asset-picker__toolbar">
-            <button
-              className="button button--ghost"
-              disabled={pending}
-              onClick={() => {
-                void importOriginalData("files");
-              }}
-              type="button"
-            >
-              ファイルを追加
-            </button>
-            <button
-              className="button button--ghost"
-              disabled={pending}
-              onClick={() => {
-                void importOriginalData("directories");
-              }}
-              type="button"
-            >
-              フォルダを追加
-            </button>
-          </div>
+          <div className="asset-picker__list-section">
+            <div className="asset-picker__list-header">
+              <span className="asset-picker__hint">
+                {selectedOriginalDataIds.size > 0
+                  ? `${selectedOriginalDataIds.size} 件選択中`
+                  : "データファイルを選択"}
+              </span>
+              <span className="asset-picker__toolbar">
+                <button
+                  className="button button--ghost button--xs"
+                  disabled={pending}
+                  onClick={() => {
+                    void importOriginalData("files");
+                  }}
+                  type="button"
+                >
+                  + ファイル
+                </button>
+                <button
+                  className="button button--ghost button--xs"
+                  disabled={pending}
+                  onClick={() => {
+                    void importOriginalData("directories");
+                  }}
+                  type="button"
+                >
+                  + フォルダ
+                </button>
+              </span>
+            </div>
 
-          <p className="asset-picker__hint">
-            {selectedOriginalDataIds.size > 0
-              ? `${selectedOriginalDataIds.size} 件選択中`
-              : "dataset に含めるデータファイルを選択してください。"}
-          </p>
-
-          <div className="asset-picker__list">
+            <div className="asset-picker__list">
             {originalData.length > 0 ? (
               originalData.map((entry) => {
                 const checked = selectedOriginalDataIds.has(entry.originalDataId);
@@ -366,6 +368,7 @@ export function OriginalDataSelectionDialog({
             ) : (
               <div className="asset-picker__empty">データファイルがありません。先にデータを取り込んでください。</div>
             )}
+            </div>
           </div>
 
           <div className="dialog-actions">
