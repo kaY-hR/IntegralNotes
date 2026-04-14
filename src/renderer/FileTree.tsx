@@ -27,6 +27,7 @@ interface FileTreeProps {
   onActivateEntry: (entry: WorkspaceEntry, event: MouseEvent<HTMLButtonElement>) => void;
   onCancelEditing: () => void;
   onContextMenuEntry: (entry: WorkspaceEntry, x: number, y: number) => void;
+  onDoubleActivateEntry: (entry: WorkspaceEntry, event: MouseEvent<HTMLButtonElement>) => void;
   onDragEnd: () => void;
   onDragOverEntry: (entry: WorkspaceEntry, event: DragEvent<HTMLDivElement>) => void;
   onDragStartEntry: (entry: WorkspaceEntry, event: DragEvent<HTMLButtonElement>) => void;
@@ -160,6 +161,7 @@ export function FileTree({
   onActivateEntry,
   onCancelEditing,
   onContextMenuEntry,
+  onDoubleActivateEntry,
   onDragEnd,
   onDragOverEntry,
   onDragStartEntry,
@@ -193,6 +195,7 @@ export function FileTree({
           onActivateEntry={onActivateEntry}
           onCancelEditing={onCancelEditing}
           onContextMenuEntry={onContextMenuEntry}
+          onDoubleActivateEntry={onDoubleActivateEntry}
           onDragEnd={onDragEnd}
           onDragOverEntry={onDragOverEntry}
           onDragStartEntry={onDragStartEntry}
@@ -219,6 +222,7 @@ function FileTreeNode({
   onActivateEntry,
   onCancelEditing,
   onContextMenuEntry,
+  onDoubleActivateEntry,
   onDragEnd,
   onDragOverEntry,
   onDragStartEntry,
@@ -278,6 +282,9 @@ function FileTreeNode({
             draggable
             onClick={(event) => {
               onActivateEntry(entry, event);
+            }}
+            onDoubleClick={(event) => {
+              onDoubleActivateEntry(entry, event);
             }}
             onDragEnd={onDragEnd}
             onDragStart={(event) => {

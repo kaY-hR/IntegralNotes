@@ -1590,6 +1590,37 @@ export function App(): JSX.Element {
     void openNote(entry.relativePath);
   };
 
+  const handleDoubleActivateEntry = async (
+    entry: WorkspaceEntry,
+    event: ReactMouseEvent<HTMLButtonElement>
+  ): Promise<void> => {
+    if (entry.kind !== "file") {
+      return;
+    }
+
+    event.preventDefault();
+    const existingTab = openTabsRef.current[entry.relativePath];
+
+    if (existingTab?.kind === "unsupported" || existingTab?.content === null) {
+      await openPathInExternalApp(entry.relativePath);
+      return;
+    }
+
+    if (existingTab) {
+      return;
+    }
+
+    try {
+      const document = await window.integralNotes.readWorkspaceFile(entry.relativePath);
+
+      if (document.kind === "unsupported" || document.content === null) {
+        await openPathInExternalApp(entry.relativePath);
+      }
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
   const handleDragStartEntry = (
     entry: WorkspaceEntry,
     event: ReactDragEvent<HTMLButtonElement>

@@ -201,7 +201,7 @@
 * 逆に primary / secondary の関係がある操作は、見た目だけ並列にせず、1st action と補助導線の差が明確に分かる構成へ寄せたい
 * Issue 11, 12 の簡素化・導線改善を、用語整理と情報設計まで含めて再定義する Issue として扱いたい
 
-## [ ] 18. エクスプローラーの tree 操作を VS Code 寄りに強化したい
+## [x] 18. エクスプローラーの tree 操作を VS Code 寄りに強化したい
 - Status:completed
 - 優先重み:7
 - 記載日時:2026-04-14-16:10(UTC+9)
@@ -214,11 +214,65 @@
 * `コピー / 貼り付け / 削除 / 名前を変更` は既存機能がある前提で、コンテキストメニューからも同じ操作を呼べるようにしたい
 * `DataSetに追加` は複数ファイル選択を許容し、必要に応じて original data 登録を経由して source dataset 作成へ繋げたい
 
-## [ ] 19. 表示不可ファイルのタブから外部アプリで開けるようにしたい
+## [x] 19. 表示不可ファイルのタブから外部アプリで開けるようにしたい
 - Status:completed
 - 優先重み:4
 - 記載日時:2026-04-14-16:10(UTC+9)
 
 * main app 上で表示できないファイルを開いている場合、タブ内に `[外部アプリで開く]` button を出したい
 * クリック時はその拡張子に紐づいた既定アプリで file を開きたい
+* エクスプローラーで表示非対応ファイルをダブルクリックした場合も、タブで開く代わりに OS 既定プログラムで直接開きたい
 * 実装は main process 経由で `Process.Start` 相当の OS 既定動作に寄せたい
+
+## [ ] 20. frontmatter 分離を `data-catalog` 限定ではなく cwd 全体の標準動作にしたい
+- 優先重み:5
+- 記載日時:2026-04-14-17:04(UTC+9)
+
+* 現状の frontmatter 分離は、少なくとも `workspaceService.ts` 上は `data-catalog` 配下の note だけに限定されていそう
+* `gray-matter` もしくは同等の安定した frontmatter parser を使い、`cwd` 配下の Markdown 全体で frontmatter と本文を標準的に分離したい
+* 読み込み時は frontmatter を保持したまま、editor / viewer には本文だけを渡したい
+* 保存時は本文だけを更新し、既存 frontmatter は壊さず保持したい
+* `data-catalog` 専用実装ではなく、通常 note でも frontmatter を自然に使えることを目標にしたい
+* `data-note` 専用 metadata の扱いと、一般 Markdown の任意 frontmatter の扱いをどう両立するか整理したい
+
+## [ ] 21. dataset の data-note 本文に canonical data へのリンクを入れたい
+- 優先重み:4
+- 記載日時:2026-04-14-17:07(UTC+9)
+
+* dataset の data-note を自動生成するとき、本文に dataset 実体へのリンクを入れたい
+* human-friendly な label と canonical path を両方持てるリンク表現にしたい
+* 少なくとも source dataset / derived dataset の両方で一貫した本文テンプレートにしたい
+* frontmatter だけでなく本文からも実体へ辿れるようにして、catalog note を起点に dataset を開きやすくしたい
+* 候補は `標準 Markdown link`, `wiki link`, `app 専用 action` なので、どれを canonical にするかを整理したい
+* 通常 note 向け wiki link と、data-note から `.store` 実体へ飛ぶリンクを同じ記法に載せるべきかは、Issue 22 と合わせて判断したい
+
+## [ ] 22. Milkdown で Obsidian 風 wiki link `[[aaa.md]]` を表示・編集したい
+- 優先重み:4
+- 記載日時:2026-04-14-17:12(UTC+9)
+
+* note 本文で `[[aaa.md]]`, `[[aaa|別名]]`, `[[aaa#heading]]` のような Obsidian 風 wiki link を表示・編集できるようにしたい
+* 現状の `src/renderer/MilkdownEditor.tsx` は `Crepe` をほぼ素のまま生成しており、repo 内には wiki link 用の parser / serializer / schema 拡張がまだ入っていない
+* `@milkdown/crepe` は `commonmark` + `gfm` を標準で使う構成なので、少なくとも現状のままでは `[[...]]` は専用リンク記法として自然には扱えなさそう
+* 実装するなら、Milkdown の custom syntax 拡張として `remark` plugin と `parseMarkdown` / `toMarkdown` / ProseMirror schema を追加する方向が第一候補
+* クリック時に workspace 内の `.md` を app 内タブで開くのか、単に text として見せるのか、IntegralNotes 側の link 解決規則も合わせて決めたい
+* 将来の raw markdown mode 追加時も `[[...]]` 記法が壊れず往復できるようにしたい
+* Issue 21 の data-note canonical link 記法と統一するか、通常 note 向け wiki link と data-note 向け実体リンクを分けるか整理したい
+* 比較メモは `docs/30_設計/60_ノートリンク記法.md` を参照
+* 先に決めるべき論点は以下
+  - `通常 note 同士の内部リンク` と `data-note から canonical data へのリンク` を同じ問題として扱うか分けるか
+  - `[[target]]` の `target` を `basename / relative path / file ID` のどれで解決するか
+  - `クリックで app 内 tab を開く / OS 既定アプリで開く / 単に text として見せる` のどれを基本挙動にするか
+  - MVP で `表示だけ / クリック可能 / autocomplete・rename 追従まで` のどこまで入れるか
+* 選択肢は大きく以下の 3 つ
+  - A. `標準 Markdown link` を正とし、wiki link は入れない
+  - B. `通常 note 同士` だけ `[[...]]` を使い、`data-note -> canonical data` は標準 Markdown link か app 専用導線に分ける
+  - C. `通常 note` と `data-note` の両方を wiki link 記法へ寄せる
+* 判断材料は以下
+  - Obsidian 互換をどこまで重視するか
+  - プレーンな Markdown viewer / GitHub / VS Code での可搬性をどこまで重視するか
+  - Milkdown 拡張量と保守コストをどこまで許容するか
+  - raw markdown mode 追加時の往復安定性をどこまで優先するか
+  - rename / duplicate file name / path collision を app 側でどこまで面倒を見るか
+* 現時点の暫定推奨は B
+  - `wiki note link` と `filesystem / canonical data link` は意味が違うため、同じ記法へ無理に載せない方が設計が素直
+  - まずは通常 note 向けの `[[...]]` を独立 Issue として切る方が、Issue 21 と 20 とも衝突しにくい
