@@ -5,6 +5,10 @@ import {
   serializeFrontmatterDocument,
   splitFrontmatterBlock
 } from "./frontmatter";
+import {
+  resolveWorkspaceMarkdownTarget,
+  toCanonicalWorkspaceTarget
+} from "../shared/workspaceLinks";
 
 type DataNoteTargetType = "original-data" | "dataset";
 
@@ -235,7 +239,8 @@ export function buildOriginalDataNoteMarkdown(
 
 export function buildDatasetDataNoteMarkdown(
   metadata: DatasetDataNoteMetadata,
-  existingContent?: string
+  existingContent?: string,
+  canonicalFileRelativePaths: readonly string[] = []
 ): string {
   const datasetName = resolveDatasetDataNoteName(metadata);
   const frontmatterLines = [
@@ -254,13 +259,16 @@ export function buildDatasetDataNoteMarkdown(
   }
 
   return buildDataNoteMarkdown({
-    defaultBody: buildDefaultDatasetNoteBody(metadata),
+    defaultBody: buildDefaultDatasetNoteBody(metadata, canonicalFileRelativePaths),
     existingContent,
     frontmatterLines,
     generatedBodyCandidates: [
       buildLegacyDatasetDataNoteBody(metadata),
-      buildDefaultDatasetNoteBody(metadata)
+      buildTitleOnlyDatasetNoteBody(metadata),
+      buildSingleLinkDatasetNoteBody(metadata),
+      buildDefaultDatasetNoteBody(metadata, canonicalFileRelativePaths)
     ],
+    isGeneratedBody: (body) => isGeneratedDatasetNoteBody(body, metadata),
     managedKeys: DATASET_MANAGED_FRONTMATTER_KEYS
   });
 }
@@ -337,6 +345,7 @@ interface BuildDataNoteMarkdownOptions {
   existingContent?: string;
   frontmatterLines: string[];
   generatedBodyCandidates?: string[];
+  isGeneratedBody?: (normalizedBody: string) => boolean;
   legacyBodyExtractor?: (normalizedExistingContent: string) => string | null;
   managedKeys: readonly string[];
 }
@@ -346,6 +355,7 @@ function buildDataNoteMarkdown({
   existingContent,
   frontmatterLines,
   generatedBodyCandidates = [],
+  isGeneratedBody,
   legacyBodyExtractor,
   managedKeys
 }: BuildDataNoteMarkdownOptions): string {
@@ -359,6 +369,7 @@ function buildDataNoteMarkdown({
     normalizedExistingContent,
     parsed,
     generatedBodyCandidates,
+    isGeneratedBody,
     legacyBodyExtractor
   );
   const frontmatter = buildMergedFrontmatter(frontmatterLines, parsed.frontmatter, managedKeys);
@@ -371,6 +382,7 @@ function resolveDataNoteBody(
   existingContent: string | undefined,
   parsed: FrontmatterBlock,
   generatedBodyCandidates: readonly string[],
+  isGeneratedBody?: (normalizedBody: string) => boolean,
   legacyBodyExtractor?: (normalizedExistingContent: string) => string | null
 ): string {
   if (existingContent === undefined) {
@@ -381,7 +393,10 @@ function resolveDataNoteBody(
     const normalizedBody = normalizeBody(parsed.body);
     const normalizedGeneratedBodies = generatedBodyCandidates.map((candidate) => normalizeBody(candidate));
 
-    if (normalizedGeneratedBodies.includes(normalizedBody)) {
+    if (
+      normalizedGeneratedBodies.includes(normalizedBody) ||
+      isGeneratedBody?.(normalizedBody) === true
+    ) {
       return normalizeBody(defaultBody);
     }
 
@@ -499,12 +514,79 @@ function buildLegacyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): st
   return `# ${metadata.originalName}_${metadata.originalDataId}\n`;
 }
 
-function buildDefaultDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
+function buildTitleOnlyDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
   return `# ${resolveDatasetDataNoteName(metadata)}\n`;
 }
 
 function buildLegacyDatasetDataNoteBody(metadata: DatasetDataNoteMetadata): string {
   return `# ${metadata.kind}_${metadata.datasetId}\n`;
+}
+
+function buildSingleLinkDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
+  const datasetName = resolveDatasetDataNoteName(metadata);
+  const canonicalTarget = toCanonicalWorkspaceTarget(metadata.storeRelativePath);
+
+  return `# ${datasetName}\n\n- [${datasetName}](${canonicalTarget}) を開く\n`;
+}
+
+function buildDefaultDatasetNoteBody(
+  metadata: DatasetDataNoteMetadata,
+  canonicalFileRelativePaths: readonly string[]
+): string {
+  const datasetName = resolveDatasetDataNoteName(metadata);
+  const normalizedFilePaths = canonicalFileRelativePaths
+    .map((relativePath) => relativePath.trim())
+    .filter((relativePath) => relativePath.length > 0);
+
+  if (normalizedFilePaths.length === 0) {
+    return buildTitleOnlyDatasetNoteBody(metadata);
+  }
+
+  const fileLines = normalizedFilePaths.map(
+    (relativePath) => `- [${relativePath.slice(metadata.storeRelativePath.length + 1)}](${toCanonicalWorkspaceTarget(relativePath)})`
+  );
+
+  return `# ${datasetName}\n\n${fileLines.join("\n")}\n`;
+}
+
+function isGeneratedDatasetNoteBody(
+  body: string,
+  metadata: DatasetDataNoteMetadata
+): boolean {
+  const normalizedBody = normalizeBody(body);
+
+  if (
+    normalizedBody === normalizeBody(buildLegacyDatasetDataNoteBody(metadata)) ||
+    normalizedBody === normalizeBody(buildTitleOnlyDatasetNoteBody(metadata)) ||
+    normalizedBody === normalizeBody(buildSingleLinkDatasetNoteBody(metadata))
+  ) {
+    return true;
+  }
+
+  const lines = normalizedBody.split("\n");
+
+  if ((lines[0] ?? "") !== `# ${resolveDatasetDataNoteName(metadata)}`) {
+    return false;
+  }
+
+  const remainingLines = trimLeadingBlankLines(lines.slice(1).join("\n"));
+
+  if (remainingLines.length === 0) {
+    return true;
+  }
+
+  const expectedPrefix = `${metadata.storeRelativePath.replace(/\\/gu, "/").replace(/\/+$/u, "")}/`;
+
+  return remainingLines.split("\n").every((line) => {
+    const match = /^- \[[^\]\n]+\]\(([^)\n]+)\)$/u.exec(line);
+
+    if (!match) {
+      return false;
+    }
+
+    const targetPath = resolveWorkspaceMarkdownTarget(match[1] ?? "");
+    return targetPath !== null && targetPath.startsWith(expectedPrefix);
+  });
 }
 
 function createManagedDataNoteFileName(label: string, sequence: number): string {

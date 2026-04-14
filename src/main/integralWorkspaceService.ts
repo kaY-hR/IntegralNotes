@@ -582,6 +582,7 @@ export class IntegralWorkspaceService {
       stderr = executionError.stderr ?? "";
 
       await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
+      await this.workspaceService.syncManagedDataCatalogNotes();
 
       throw new Error(
         [
@@ -594,11 +595,17 @@ export class IntegralWorkspaceService {
     }
 
     await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
+    await this.workspaceService.syncManagedDataCatalogNotes();
 
     const finishedAt = new Date().toISOString();
-    const createdDatasets = definition.outputSlots
-      .map((slot) => outputDatasetMap.get(slot.name))
-      .filter((dataset): dataset is IntegralDatasetSummary => dataset !== undefined);
+    const createdDatasets = (
+      await Promise.all(
+        definition.outputSlots.map(async (slot) => {
+          const datasetId = outputDatasetMap.get(slot.name)?.datasetId;
+          return datasetId ? this.readDatasetSummary(datasetId).catch(() => null) : null;
+        })
+      )
+    ).filter((dataset): dataset is IntegralDatasetSummary => dataset !== null);
     const nextOutputs = { ...block.outputs };
 
     for (const outputSlot of definition.outputSlots) {

@@ -11,6 +11,7 @@
 - Markdown 保存時は本文だけを更新し、既存 frontmatter は壊さず保持する
 - original data の data note file 名は原則 `originalName.md` とする
 - data note file 名が重複する場合は保存前に連番を付けて解消する
+- dataset の data note 本文には canonical dataset 配下の各 file への標準 Markdown link を箇条書きで自動生成する
 - canonical 実体は `.store/` に置く
 - metadata は `.store/.integral/{originalDataId}.json` に置く
 - file original data の実体は `.store/{originalDataId}{ext}` に置く
@@ -143,6 +144,7 @@
 - app が補完で自動挿入する canonical form は `[label](/path/from/cwd)` とする
 - app は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決する
 - link target は `cwd` 配下の file とし、directory は MVP 対象外とする
+- dataset の data note 本文が自動生成する canonical link も同じ file link form を使い、target は `/.store/{datasetId}/{relativePath}` とする
 - Milkdown では `[` を打った時点で `cwd` 配下 file 候補を表示できる
 - 候補一覧は file 名を主表示、path を補足表示とする
 - 候補選択時の label は
@@ -154,7 +156,7 @@
   - renderable / text は app 内 viewer
   - unsupported は外部アプリ
 - IntegralNotes 内の rename / move では、`cwd` 配下の `.md` を走査して link target を自動更新する
-- heading link 補完、`data-note -> canonical data` link、外部変更追従は MVP 対象外とする
+- heading link 補完と外部変更追従は MVP 対象外とする
 - 詳細は `docs/30_設計/60_ノートリンク記法.md` を参照
 
 ## 14. ノート画像添付

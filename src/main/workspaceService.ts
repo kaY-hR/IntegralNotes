@@ -737,12 +737,24 @@ export class WorkspaceService {
               return null;
             }
 
+            const normalizedStoreRelativePath = metadata.storeRelativePath
+              .split(/[\\/]+/u)
+              .filter(Boolean)
+              .join("/");
+            const canonicalFileRelativePaths = (
+              await collectRelativeFilesIfExists(path.join(rootPath, normalizedStoreRelativePath))
+            ).map((relativePath) => `${normalizedStoreRelativePath}/${relativePath}`);
+
             return {
               createdAt: metadata.createdAt,
               preferredLabel: metadata.name?.trim() || metadata.datasetId.trim(),
               targetKey: createDataNoteTargetKey("dataset", metadata.datasetId),
               writeContent: (existingContent?: string) =>
-                buildDatasetDataNoteMarkdown(metadata, existingContent)
+                buildDatasetDataNoteMarkdown(
+                  metadata,
+                  existingContent,
+                  canonicalFileRelativePaths
+                )
             } satisfies ManagedDataNoteSyncItem;
           })
       )
@@ -1118,6 +1130,31 @@ async function readTextFileIfExists(filePath: string): Promise<string | undefine
     return await fs.readFile(filePath, "utf8");
   } catch {
     return undefined;
+  }
+}
+
+async function collectRelativeFilesIfExists(
+  rootPath: string,
+  basePath = rootPath
+): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(rootPath, { withFileTypes: true });
+    const files: string[] = [];
+
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "ja"))) {
+      const absolutePath = path.join(rootPath, entry.name);
+
+      if (entry.isDirectory()) {
+        files.push(...(await collectRelativeFilesIfExists(absolutePath, basePath)));
+        continue;
+      }
+
+      files.push(path.relative(basePath, absolutePath).split(path.sep).join("/"));
+    }
+
+    return files;
+  } catch {
+    return [];
   }
 }
 

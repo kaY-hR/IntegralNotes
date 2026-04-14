@@ -22,10 +22,12 @@
 * 実装方針としては、`OpenMarkdownTab` に `editorMode: "wysiwyg" | "raw"` を持たせ、`editorFactory` で `MilkdownEditor` と軽量な plain text editor を切り替える構成が最もクリーン
 * 注意点として、`src/renderer/MilkdownEditor.tsx` は mount 時の `initialValue` で初期化する非制御 component なので、`raw -> WYSIWYG` 切替時は mode を `key` に含めて再生成する設計にする必要がある
 * Integral 独自 block は `itg-notes` fenced code block として markdown に保存されており、raw mode で直接編集しても保存経路自体は壊れない。内容が不正でも WYSIWYG 側では custom block view 内で parse error として扱えるため、設計上は許容しやすい
-* 一方で `data-catalog/` 配下の data-note は、Issue 10 の方針により frontmatter を app 上で隠し、本文だけを editor / viewer に渡す設計になっている。そのため「生のマークダウン」を full file と解釈すると current 方針と衝突する
-* そのため clean に進めるなら、まずは `通常ノートは raw markdown 切替を許可する / data-note は本文 raw のみ、または raw 切替対象外にする` のどちらかに限定するのがよい
-* 先に full-file raw 編集まで求めると、Issue 10 の frontmatter 隠蔽方針、保存時の managed metadata merge、user-facing UX をまとめて再設計する必要があり、Issue 3 単体としては重くなる
-* 結論として、`通常 markdown note 向けの source editing mode` として切るなら技術的にも設計的にもかなりクリーンに実装できる。反対に `data-note frontmatter も含めた完全な生ファイル編集` を要求するなら、別 Issue として分離した方がよい
+* 2026-04-14 再整理: Issue 20 により、frontmatter 隠蔽は `data-catalog/` 配下の data-note 限定ではなく、`cwd` 配下の Markdown 全体の標準動作になった
+* そのため current 方針では、「生のマークダウン」を full file と解釈すると、data-note だけでなく任意 frontmatter を持つ通常 note とも衝突する
+* clean に進めるなら、Issue 3 の `raw markdown` は `frontmatter を除いた本文 raw` と定義するのが最も自然
+* この定義なら、`WYSIWYG` と `raw text` が同じ本文 string state を共有でき、frontmatter 保持・保存導線・tab 管理をそのまま再利用しやすい
+* 一方で full-file raw 編集まで求めると、frontmatter 表示 UX、保存契約、rename / move 時の本文-only rewrite、managed data-note metadata 保護をまとめて再設計する必要があり、Issue 3 単体としては重い
+* 結論として、current Issue 3 は `Markdown tab 向けの body-only source editing mode` として切るのが妥当で、frontmatter を含む完全な生ファイル編集は別 Issue に分離した方がよい
 
 ## [x] 5. blob/chunk/block ベースの解析基盤を設計・実装したい
 - 優先重み:9
@@ -242,7 +244,8 @@
   - rename / move 時の Markdown link / image target rewrite は本文だけへ適用し、frontmatter 内の任意 metadata は保持するようにした
   - `src/main/dataNote.ts` も同じ utility を使うように整理し、`data-note` managed metadata と一般 Markdown frontmatter が同じ基盤上で共存する構成にした
 
-## [ ] 21. dataset の data-note 本文に canonical data へのリンクを入れたい
+## [x] 21. dataset の data-note 本文に canonical data へのリンクを入れたい
+- Status:completed
 - 優先重み:4
 - 記載日時:2026-04-14-17:07(UTC+9)
 
@@ -252,6 +255,11 @@
 * frontmatter だけでなく本文からも実体へ辿れるようにして、catalog note を起点に dataset を開きやすくしたい
 * 候補は `標準 Markdown link`, `wiki link`, `app 専用 action` なので、どれを canonical にするかを整理したい
 * `通常 note -> workspace file` の link 仕様は `docs/30_設計/60_ノートリンク記法.md` で分離したため、本 Issue では `data-note -> canonical data` に限定して考える
+* 2026-04-14 実装:
+  - dataset data-note 本文の既定テンプレートを title-only から、canonical dataset 配下の各 file への箇条書き link 付きへ更新した
+  - 既存の自動生成 data-note も、本文が未編集なら現在の file 一覧に合わせて再生成されるようにした
+  - source dataset だけでなく、Python 実行で生成される derived dataset も実行後に再 sync して file link 一覧が更新されるようにした
+  - `docs/10_要求/10_MVP要件.md`, `docs/20_アーキテクチャ/10_データモデル.md`, `docs/30_設計/20_ワークスペースレイアウト.md`, `docs/30_設計/60_ノートリンク記法.md` を現在仕様に更新した
 
 ## [x] 22. Milkdown で workspace file への Markdown link 補完と open を実装したい
 - Status:completed
