@@ -92,9 +92,23 @@ interface ManagedDataNoteWritePlan {
   nextContent: string;
 }
 
+export type WorkspaceMutationKind = "create" | "delete" | "modify" | "move";
+
+export interface WorkspaceMutation {
+  kind: WorkspaceMutationKind;
+  nextPath?: string;
+  path: string;
+  targetKind: WorkspaceEntryKind;
+}
+
+export type WorkspaceMutationListener = (
+  mutations: readonly WorkspaceMutation[]
+) => Promise<void> | void;
+
 export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
+  private readonly mutationListeners = new Set<WorkspaceMutationListener>();
   private readonly stateFilePath: string;
 
   constructor(options: WorkspaceServiceOptions) {
@@ -151,6 +165,14 @@ export class WorkspaceService {
 
   async syncManagedDataNotes(): Promise<void> {
     await this.syncManagedDataNotesInternal(this.getConfiguredRootPath());
+  }
+
+  addMutationListener(listener: WorkspaceMutationListener): () => void {
+    this.mutationListeners.add(listener);
+
+    return () => {
+      this.mutationListeners.delete(listener);
+    };
   }
 
   async getSnapshot(): Promise<WorkspaceSnapshot | null> {
@@ -217,6 +239,13 @@ export class WorkspaceService {
 
     if (existingContent !== nextContent) {
       await fs.writeFile(absolutePath, nextContent, "utf8");
+      await this.emitWorkspaceMutations([
+        {
+          kind: "modify",
+          path: relativePath,
+          targetKind: "file"
+        }
+      ]);
     }
 
     return this.readNote(relativePath);
@@ -233,7 +262,10 @@ export class WorkspaceService {
       throw new Error("作成先はフォルダである必要があります。");
     }
 
-    const nextName = this.normalizeEntryName(request.name, request.kind);
+    const nextName = this.normalizeEntryName(request.name, request.kind, {
+      defaultMarkdownExtension: request.kind === "file",
+      requireMarkdownExtension: request.kind === "file"
+    });
     const absolutePath = path.join(parentPath, nextName);
 
     if (request.kind === "directory") {
@@ -241,6 +273,14 @@ export class WorkspaceService {
     } else {
       await fs.writeFile(absolutePath, `# ${path.basename(nextName, ".md")}\n`, "utf8");
     }
+
+    await this.emitWorkspaceMutations([
+      {
+        kind: "create",
+        path: this.toRelativePath(absolutePath),
+        targetKind: request.kind
+      }
+    ]);
 
     const snapshot = await this.getRequiredSnapshot();
 
@@ -278,6 +318,14 @@ export class WorkspaceService {
         previousPath: request.targetPath
       }
     ]);
+    await this.emitWorkspaceMutations([
+      {
+        kind: "move",
+        nextPath: nextRelativePath,
+        path: request.targetPath,
+        targetKind: kind
+      }
+    ]);
 
     const snapshot = await this.getRequiredSnapshot();
 
@@ -294,15 +342,23 @@ export class WorkspaceService {
 
     const absolutePath = this.resolveWorkspacePath(request.targetPath);
     const stats = await fs.stat(absolutePath);
+    const kind: WorkspaceEntryKind = stats.isDirectory() ? "directory" : "file";
 
     await fs.rm(absolutePath, { recursive: true, force: false });
+    await this.emitWorkspaceMutations([
+      {
+        kind: "delete",
+        path: request.targetPath,
+        targetKind: kind
+      }
+    ]);
 
     const snapshot = await this.getRequiredSnapshot();
 
     return {
       snapshot,
       deletedRelativePath: request.targetPath,
-      deletedKind: stats.isDirectory() ? "directory" : "file"
+      deletedKind: kind
     };
   }
 
@@ -316,9 +372,23 @@ export class WorkspaceService {
       throw new Error("削除対象を選択してください。");
     }
 
+    const deletionMutations = await Promise.all(
+      targetPaths.map(async (targetPath) => {
+        const stats = await fs.stat(this.resolveWorkspacePath(targetPath));
+        const targetKind: WorkspaceEntryKind = stats.isDirectory() ? "directory" : "file";
+
+        return {
+          kind: "delete" as const,
+          path: targetPath,
+          targetKind
+        };
+      })
+    );
+
     for (const targetPath of targetPaths) {
       await fs.rm(this.resolveWorkspacePath(targetPath), { recursive: true, force: false });
     }
+    await this.emitWorkspaceMutations(deletionMutations);
 
     return {
       snapshot: await this.getRequiredSnapshot(),
@@ -344,6 +414,14 @@ export class WorkspaceService {
         await this.copyEntryIntoWorkspace(this.resolveWorkspacePath(sourcePath), destinationDirectoryPath)
       );
     }
+
+    await this.emitWorkspaceMutations(
+      createdEntries.map((entry) => ({
+        kind: "create" as const,
+        path: entry.relativePath,
+        targetKind: entry.kind
+      }))
+    );
 
     return {
       createdEntries,
@@ -382,6 +460,14 @@ export class WorkspaceService {
         previousPath
       }))
     );
+    await this.emitWorkspaceMutations(
+      movedEntries.map((entry, index) => ({
+        kind: "move" as const,
+        nextPath: entry.relativePath,
+        path: previousRelativePaths[index] ?? entry.relativePath,
+        targetKind: entry.kind
+      }))
+    );
 
     return {
       movedEntries,
@@ -407,6 +493,14 @@ export class WorkspaceService {
       createdEntries.push(await this.copyEntryIntoWorkspace(sourceAbsolutePath, destinationDirectoryPath));
     }
 
+    await this.emitWorkspaceMutations(
+      createdEntries.map((entry) => ({
+        kind: "create" as const,
+        path: entry.relativePath,
+        targetKind: entry.kind
+      }))
+    );
+
     return {
       createdEntries,
       snapshot: await this.getRequiredSnapshot()
@@ -422,6 +516,13 @@ export class WorkspaceService {
 
     const destinationDirectoryPath = await this.ensureDirectoryPath(request.targetDirectoryPath);
     const entry = await this.writeBinaryFile(destinationDirectoryPath, "image.png", content);
+    await this.emitWorkspaceMutations([
+      {
+        kind: "create",
+        path: entry.relativePath,
+        targetKind: entry.kind
+      }
+    ]);
 
     return {
       entry,
@@ -451,6 +552,13 @@ export class WorkspaceService {
     await fs.writeFile(destinationPath, content);
 
     const entry = await this.getEntryByPath(this.toRelativePath(destinationPath));
+    await this.emitWorkspaceMutations([
+      {
+        kind: "create",
+        path: entry.relativePath,
+        targetKind: entry.kind
+      }
+    ]);
 
     return {
       entry,
@@ -671,7 +779,30 @@ export class WorkspaceService {
     };
   }
 
-  private normalizeEntryName(name: string, kind: WorkspaceEntryKind): string {
+  private async emitWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
+    if (mutations.length === 0 || this.mutationListeners.size === 0) {
+      return;
+    }
+
+    const normalizedMutations = mutations.map((mutation) => ({
+      ...mutation,
+      nextPath: mutation.nextPath ? normalizeRelativePath(mutation.nextPath) : undefined,
+      path: normalizeRelativePath(mutation.path)
+    }));
+
+    for (const listener of this.mutationListeners) {
+      await listener(normalizedMutations);
+    }
+  }
+
+  private normalizeEntryName(
+    name: string,
+    kind: WorkspaceEntryKind,
+    options: {
+      defaultMarkdownExtension?: boolean;
+      requireMarkdownExtension?: boolean;
+    } = {}
+  ): string {
     const trimmedName = name.trim();
 
     if (trimmedName.length === 0) {
@@ -688,11 +819,11 @@ export class WorkspaceService {
 
     const extension = path.extname(trimmedName).toLowerCase();
 
-    if (extension.length === 0) {
+    if (options.defaultMarkdownExtension && extension.length === 0) {
       return `${trimmedName}.md`;
     }
 
-    if (extension !== ".md") {
+    if (options.requireMarkdownExtension && extension !== ".md") {
       throw new Error("ノートは .md 拡張子のみ対応しています。");
     }
 
@@ -915,11 +1046,18 @@ function isProbablyTextFile(buffer: Buffer): boolean {
   return !buffer.includes(0);
 }
 
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath
+    .split(/[\\/]+/u)
+    .filter(Boolean)
+    .join("/");
+}
+
 function collapseNestedRelativePaths(relativePaths: string[]): string[] {
   const normalized = Array.from(
     new Set(
       relativePaths
-        .map((value) => value.trim())
+        .map((value) => normalizeRelativePath(value.trim()))
         .filter((value) => value.length > 0)
     )
   ).sort((left, right) => left.length - right.length || left.localeCompare(right, "ja"));

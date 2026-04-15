@@ -29,7 +29,7 @@ import type {
 } from "../shared/integral";
 import type { InstalledPluginDefinition } from "../shared/plugins";
 import { PluginRegistry } from "./pluginRegistry";
-import { WorkspaceService } from "./workspaceService";
+import { WorkspaceService, type WorkspaceMutation } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
 
@@ -84,6 +84,8 @@ interface DatasetMetadata extends ManagedMetadataBase {
   name: string;
   representation: DatasetRepresentation;
 }
+
+type ManagedDataMetadata = OriginalDataMetadata | DatasetMetadata;
 
 interface InspectableFileEntry {
   absolutePath: string;
@@ -174,6 +176,28 @@ export class IntegralWorkspaceService {
       ...issue,
       candidatePaths: [...issue.candidatePaths]
     }));
+  }
+
+  async handleWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
+    if (mutations.length === 0) {
+      return;
+    }
+
+    await this.workspaceService.ensureWorkspaceReady();
+
+    const metadataList = await this.readManagedDataMetadataList();
+
+    if (metadataList.length === 0) {
+      return;
+    }
+
+    if (!this.shouldReconcileManagedDataMetadata(mutations, metadataList)) {
+      return;
+    }
+
+    if (await this.reconcileManagedDataMetadata()) {
+      await this.workspaceService.syncManagedDataNotes();
+    }
   }
 
   async resolveManagedDataTrackingIssue(
@@ -854,6 +878,40 @@ export class IntegralWorkspaceService {
     );
 
     return normalizeOriginalDataMetadata(rawMetadata);
+  }
+
+  private async readManagedDataMetadataList(): Promise<ManagedDataMetadata[]> {
+    const metadataRootPath = this.resolveStoreMetadataRootPath();
+    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
+    const metadataList = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
+        .map(async (entry) => {
+          const rawMetadata = await readJsonFile<unknown>(path.join(metadataRootPath, entry.name));
+          return normalizeOriginalDataMetadata(rawMetadata) ?? normalizeDatasetMetadata(rawMetadata);
+        })
+    );
+
+    return metadataList.filter((metadata): metadata is ManagedDataMetadata => metadata !== null);
+  }
+
+  private shouldReconcileManagedDataMetadata(
+    mutations: readonly WorkspaceMutation[],
+    metadataList: readonly ManagedDataMetadata[]
+  ): boolean {
+    if (
+      mutations.some((mutation) =>
+        metadataList.some((metadata) => doesWorkspaceMutationAffectManagedData(mutation, metadata))
+      )
+    ) {
+      return true;
+    }
+
+    if (this.pendingTrackingIssues.length === 0) {
+      return false;
+    }
+
+    return mutations.some((mutation) => mutation.kind !== "modify");
   }
 
   private async findOriginalDataMetadataByPath(relativePath: string): Promise<OriginalDataMetadata | null> {
@@ -2087,6 +2145,26 @@ function areDatasetMetadataEqual(left: DatasetMetadata, right: DatasetMetadata):
 
 function inferVisibilityFromPath(relativePath: string): ManagedDataVisibility {
   return normalizeRelativePath(relativePath).startsWith(".store/") ? "hidden" : "visible";
+}
+
+function doesWorkspaceMutationAffectManagedData(
+  mutation: WorkspaceMutation,
+  metadata: ManagedDataMetadata
+): boolean {
+  if (doWorkspacePathsOverlap(metadata.path, mutation.path)) {
+    return true;
+  }
+
+  return typeof mutation.nextPath === "string" && doWorkspacePathsOverlap(metadata.path, mutation.nextPath);
+}
+
+function doWorkspacePathsOverlap(left: string, right: string): boolean {
+  const normalizedLeft = normalizeRelativePath(left);
+  const normalizedRight = normalizeRelativePath(right);
+
+  return normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(`${normalizedRight}/`) ||
+    normalizedRight.startsWith(`${normalizedLeft}/`);
 }
 
 function findUniqueMatchingPathByHash(

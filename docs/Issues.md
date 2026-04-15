@@ -416,3 +416,10 @@
   - new metadata では `objectPath` を書かず、旧 metadata の hidden canonical 参照は reconciliation / update 時に段階的に消える形へ寄せた
   - `docs/10_要求/10_MVP要件.md` と `docs/20_アーキテクチャ/10_データモデル.md` を更新し、original data の canonical 実体を `.store/objects` に置かない方針へ合わせた
   - `npm run build` が通ることを確認した
+* 2026-04-15 実装第6段:
+  - `src/main/workspaceService.ts` に workspace mutation listener を追加し、create / delete / modify / move を root 側で一元的に通知できるようにした
+  - `src/main/main.ts` で `IntegralWorkspaceService` をその listener に接続し、explorer 上の rename / move / delete / save 後に managed-data metadata の reconcile を即時走らせるようにした
+  - `src/main/integralWorkspaceService.ts` に `handleWorkspaceMutations()` を追加し、変更 path が tracked `id / path / hash` metadata に関係する場合のみ reconcile するようにした
+  - これにより、ソフト内 rename / move で `json` が追随しない問題を、個別操作パスの継ぎ足しではなく `WorkspaceService` の変異イベント起点で吸収する構成へ寄せた
+  - 併せて `src/main/workspaceService.ts` の bulk delete mutation 収集を修正し、途中で壊れていた `deleteEntries()` を正常化した
+  - `workspace:renameEntry` で非 `.md` file rename が落ちない修正もこの流れで維持し、`npm run build` が通ることを確認した
