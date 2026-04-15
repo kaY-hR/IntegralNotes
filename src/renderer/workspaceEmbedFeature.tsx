@@ -1,0 +1,778 @@
+import type { Node as ProseNode } from "@milkdown/kit/prose/model";
+import type {
+  EditorView,
+  NodeView,
+  NodeViewConstructor,
+  ViewMutationRecord
+} from "@milkdown/kit/prose/view";
+
+import { Crepe } from "@milkdown/crepe";
+
+import { imageBlockSchema } from "@milkdown/kit/component/image-block";
+import { imageSchema } from "@milkdown/kit/preset/commonmark";
+import { replaceAll, $view } from "@milkdown/kit/utils";
+import { useEffect, useRef, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
+
+import type { IntegralAssetCatalog } from "../shared/integral";
+import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
+import {
+  requestOpenManagedDataNote,
+  requestOpenWorkspaceFile
+} from "./workspaceOpenEvents";
+
+type WorkspaceEmbedMode = "block" | "inline";
+
+interface WorkspaceEmbedFeatureOptions {
+  uploadImage: (file: File) => Promise<string>;
+}
+
+type WorkspaceEmbedOpenTarget =
+  | {
+      kind: "managed-data-note";
+      targetId: string;
+    }
+  | {
+      kind: "workspace-file";
+      relativePath: string;
+    };
+
+interface WorkspaceEmbedResolutionBase {
+  openTarget: WorkspaceEmbedOpenTarget | null;
+}
+
+type WorkspaceEmbedResolution =
+  | (WorkspaceEmbedResolutionBase & {
+      kind: "error";
+      message: string;
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      kind: "frame";
+      sandbox?: string;
+      src?: string;
+      srcDoc?: string;
+      title: string;
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      alt: string;
+      kind: "image";
+      src: string;
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      kind: "loading";
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      kind: "markdown";
+      markdown: string;
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      kind: "unsupported";
+      message: string;
+    });
+
+export function installWorkspaceEmbedFeature(
+  editor: Crepe,
+  options: WorkspaceEmbedFeatureOptions
+): void {
+  editor.editor.use(createWorkspaceInlineEmbedView(options));
+  editor.editor.use(createWorkspaceBlockEmbedView(options));
+}
+
+function createWorkspaceInlineEmbedView(options: WorkspaceEmbedFeatureOptions) {
+  return $view(
+    imageSchema.node,
+    (): NodeViewConstructor => (node, view, getPos) =>
+      new WorkspaceEmbedNodeView("inline", node, view, getPos, options)
+  );
+}
+
+function createWorkspaceBlockEmbedView(options: WorkspaceEmbedFeatureOptions) {
+  return $view(
+    imageBlockSchema.node,
+    (): NodeViewConstructor => (node, view, getPos) =>
+      new WorkspaceEmbedNodeView("block", node, view, getPos, options)
+  );
+}
+
+class WorkspaceEmbedNodeView implements NodeView {
+  readonly dom: HTMLElement;
+
+  private destroyed = false;
+  private readonly mode: WorkspaceEmbedMode;
+  private readonly options: WorkspaceEmbedFeatureOptions;
+  private readonly root: Root;
+  private selected = false;
+
+  constructor(
+    mode: WorkspaceEmbedMode,
+    public node: ProseNode,
+    public view: EditorView,
+    public getPos: () => number | undefined,
+    options: WorkspaceEmbedFeatureOptions
+  ) {
+    this.mode = mode;
+    this.options = options;
+    this.dom = document.createElement(mode === "inline" ? "span" : "div");
+    this.dom.dataset.workspaceEmbed = mode;
+    this.root = createRoot(this.dom);
+    this.render();
+  }
+
+  update(node: ProseNode): boolean {
+    if (node.type !== this.node.type) {
+      return false;
+    }
+
+    this.node = node;
+    this.render();
+    return true;
+  }
+
+  selectNode(): void {
+    this.selected = true;
+    this.render();
+  }
+
+  deselectNode(): void {
+    this.selected = false;
+    this.render();
+  }
+
+  stopEvent(event: Event): boolean {
+    const target = event.target;
+
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    return Boolean(
+      target.closest(
+        "button, input, textarea, label, iframe, .editor-workspace-embed__empty"
+      )
+    );
+  }
+
+  ignoreMutation(_mutation: ViewMutationRecord): boolean {
+    return true;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.root.unmount();
+  }
+
+  private render(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.root.render(
+      <WorkspaceEmbedPanel
+        mode={this.mode}
+        onChangeSource={(nextSource) => {
+          this.updateSource(nextSource);
+        }}
+        selected={this.selected}
+        source={readWorkspaceEmbedSource(this.node)}
+        uploadImage={this.options.uploadImage}
+      />
+    );
+  }
+
+  private updateSource(nextSource: string): void {
+    const position = this.getPos();
+
+    if (position === undefined) {
+      return;
+    }
+
+    this.view.dispatch(this.view.state.tr.setNodeAttribute(position, "src", nextSource));
+  }
+}
+
+function WorkspaceEmbedPanel({
+  mode,
+  onChangeSource,
+  selected,
+  source,
+  uploadImage
+}: {
+  mode: WorkspaceEmbedMode;
+  onChangeSource: (nextSource: string) => void;
+  selected: boolean;
+  source: string;
+  uploadImage: (file: File) => Promise<string>;
+}): JSX.Element {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [draftSource, setDraftSource] = useState(source);
+  const [resolution, setResolution] = useState<WorkspaceEmbedResolution>(createLoadingResolution());
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftSource(source);
+    setUploadError(null);
+  }, [source]);
+
+  useEffect(() => {
+    if (source.trim().length === 0) {
+      setResolution(createLoadingResolution());
+      return;
+    }
+
+    let cancelled = false;
+    const openTarget = getWorkspaceFileOpenTarget(source);
+
+    setResolution(createLoadingResolution(openTarget));
+
+    void resolveWorkspaceEmbed(source).then((nextResolution) => {
+      if (!cancelled) {
+        setResolution(nextResolution);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  const rootClassName = [
+    "editor-workspace-embed",
+    mode === "inline" ? "editor-workspace-embed--inline" : "editor-workspace-embed--block",
+    resolution.openTarget ? "editor-workspace-embed--openable" : "",
+    selected ? "editor-workspace-embed--selected" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const handleOpenTarget = (): void => {
+    if (!resolution.openTarget) {
+      return;
+    }
+
+    openWorkspaceEmbedTarget(resolution.openTarget);
+  };
+
+  if (source.trim().length === 0) {
+    return (
+      <div className={rootClassName}>
+        <div className="editor-workspace-embed__empty">
+          <div className="editor-workspace-embed__empty-title">画像または workspace path を指定</div>
+          <div className="editor-workspace-embed__empty-row">
+            <input
+              className="editor-workspace-embed__input"
+              onChange={(event) => {
+                setDraftSource(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") {
+                  return;
+                }
+
+                event.preventDefault();
+                onChangeSource(draftSource.trim());
+              }}
+              placeholder="/Data/example.png または /notes/preview.html"
+              type="text"
+              value={draftSource}
+            />
+            <button
+              className="button button--ghost button--xs"
+              onClick={() => {
+                onChangeSource(draftSource.trim());
+              }}
+              type="button"
+            >
+              反映
+            </button>
+          </div>
+          <div className="editor-workspace-embed__empty-actions">
+            <input
+              accept="image/*"
+              className="editor-workspace-embed__file-input"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+
+                if (!file) {
+                  return;
+                }
+
+                setUploadError(null);
+                void uploadImage(file)
+                  .then((uploadedTarget) => {
+                    onChangeSource(uploadedTarget);
+                  })
+                  .catch((error) => {
+                    setUploadError(toErrorMessage(error));
+                  })
+                  .finally(() => {
+                    if (event.target instanceof HTMLInputElement) {
+                      event.target.value = "";
+                    }
+                  });
+              }}
+              ref={fileInputRef}
+              type="file"
+            />
+            <button
+              className="button button--ghost button--xs"
+              onClick={() => {
+                fileInputRef.current?.click();
+              }}
+              type="button"
+            >
+              画像を選択
+            </button>
+          </div>
+          {uploadError ? (
+            <div className="editor-workspace-embed__status editor-workspace-embed__status--error">
+              {uploadError}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={rootClassName}>
+      <div className="editor-workspace-embed__surface">
+        {resolution.kind === "loading" ? (
+          <div className="editor-workspace-embed__status">読み込み中...</div>
+        ) : null}
+
+        {resolution.kind === "image" ? (
+          <img alt={resolution.alt} className="editor-workspace-embed__image" src={resolution.src} />
+        ) : null}
+
+        {resolution.kind === "frame" ? (
+          <iframe
+            className="editor-workspace-embed__frame"
+            sandbox={resolution.sandbox}
+            src={resolution.src}
+            srcDoc={resolution.srcDoc}
+            title={resolution.title}
+          />
+        ) : null}
+
+        {resolution.kind === "markdown" ? (
+          <MarkdownEmbedPreview content={resolution.markdown} />
+        ) : null}
+
+        {resolution.kind === "unsupported" ? (
+          <div className="editor-workspace-embed__status">{resolution.message}</div>
+        ) : null}
+
+        {resolution.kind === "error" ? (
+          <div className="editor-workspace-embed__status editor-workspace-embed__status--error">
+            {resolution.message}
+          </div>
+        ) : null}
+
+        {resolution.openTarget ? (
+          <button
+            aria-label="別タブで開く"
+            className="editor-workspace-embed__open-hitbox"
+            onClick={handleOpenTarget}
+            title="別タブで開く"
+            type="button"
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function MarkdownEmbedPreview({
+  content
+}: {
+  content: string;
+}): JSX.Element {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<Crepe | null>(null);
+  const lastSyncedMarkdownRef = useRef(content);
+
+  useEffect(() => {
+    const rootElement = rootRef.current;
+
+    if (!rootElement) {
+      return;
+    }
+
+    let shouldDestroyAfterCreate = false;
+    let preview: Crepe | null = null;
+
+    void (async () => {
+      preview = new Crepe({
+        featureConfigs: {
+          [Crepe.Feature.ImageBlock]: {
+            proxyDomURL: proxyWorkspaceEmbedImageUrl
+          }
+        },
+        root: rootElement,
+        defaultValue: content
+      });
+      preview.setReadonly(true);
+      await preview.create();
+
+      if (shouldDestroyAfterCreate) {
+        void preview.destroy();
+        return;
+      }
+
+      editorRef.current = preview;
+      lastSyncedMarkdownRef.current = content;
+    })();
+
+    return () => {
+      shouldDestroyAfterCreate = true;
+
+      if (preview) {
+        if (editorRef.current === preview) {
+          editorRef.current = null;
+        }
+
+        void preview.destroy();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const preview = editorRef.current;
+
+    if (!preview || content === lastSyncedMarkdownRef.current) {
+      return;
+    }
+
+    preview.editor.action((ctx) => {
+      replaceAll(content)(ctx);
+    });
+    lastSyncedMarkdownRef.current = content;
+  }, [content]);
+
+  return <div className="editor-workspace-embed__markdown" ref={rootRef} />;
+}
+
+async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedResolution> {
+  const trimmedSource = source.trim();
+  const relativePath = resolveWorkspaceMarkdownTarget(trimmedSource);
+  const workspaceFileOpenTarget = relativePath
+    ? {
+        kind: "workspace-file",
+        relativePath
+      }
+    : null;
+
+  if (!relativePath) {
+    return {
+      alt: trimmedSource || "External image",
+      kind: "image",
+      openTarget: null,
+      src: trimmedSource,
+    };
+  }
+
+  try {
+    const file = await window.integralNotes.readWorkspaceFile(relativePath);
+    const extension = getLowercaseExtension(relativePath);
+
+    if (extension === ".svg") {
+      return {
+        kind: "frame",
+        openTarget: workspaceFileOpenTarget,
+        src: file.content ?? "",
+        title: file.name
+      };
+    }
+
+    if (file.kind === "html") {
+      return {
+        kind: "frame",
+        openTarget: workspaceFileOpenTarget,
+        sandbox: "allow-same-origin allow-scripts",
+        srcDoc: file.content ?? "",
+        title: file.name
+      };
+    }
+
+    if (file.kind === "image") {
+      return {
+        alt: file.name,
+        kind: "image",
+        openTarget: workspaceFileOpenTarget,
+        src: file.content ?? "",
+      };
+    }
+
+    if (file.kind === "text") {
+      return {
+        kind: "frame",
+        openTarget: workspaceFileOpenTarget,
+        srcDoc: createTextFrameDocument(file.content ?? "", file.name),
+        title: file.name
+      };
+    }
+
+    if (file.kind === "markdown") {
+      return {
+        kind: "markdown",
+        markdown: file.content ?? "",
+        openTarget: workspaceFileOpenTarget
+      };
+    }
+
+    const managedDataNote = await resolveManagedDataNoteFallback(relativePath);
+
+    if (managedDataNote) {
+      return managedDataNote;
+    }
+
+    return {
+      kind: "unsupported",
+      message: "この file は埋め込み表示に未対応です。",
+      openTarget: workspaceFileOpenTarget
+    };
+  } catch (error) {
+    return {
+      kind: "error",
+      message: toErrorMessage(error),
+      openTarget: workspaceFileOpenTarget
+    };
+  }
+}
+
+async function resolveManagedDataNoteFallback(
+  relativePath: string
+): Promise<WorkspaceEmbedResolution | null> {
+  const catalog = await window.integralNotes.getIntegralAssetCatalog();
+  const target = findManagedDataTargetForPath(catalog, relativePath);
+
+  if (!target) {
+    return null;
+  }
+
+  try {
+    const notePath = createManagedDataNoteRelativePath(target.targetId);
+    const note = await window.integralNotes.readWorkspaceFile(notePath);
+
+    return {
+      kind: "markdown",
+      markdown: note.content ?? "",
+      openTarget: {
+        kind: "managed-data-note",
+        targetId: target.targetId
+      }
+    };
+  } catch (error) {
+    return {
+      kind: "error",
+      message: toErrorMessage(error),
+      openTarget: {
+        kind: "managed-data-note",
+        targetId: target.targetId
+      }
+    };
+  }
+}
+
+function createLoadingResolution(
+  openTarget: WorkspaceEmbedOpenTarget | null = null
+): WorkspaceEmbedResolution {
+  return {
+    kind: "loading",
+    openTarget
+  };
+}
+
+function getWorkspaceFileOpenTarget(source: string): WorkspaceEmbedOpenTarget | null {
+  const relativePath = resolveWorkspaceMarkdownTarget(source.trim());
+
+  if (!relativePath) {
+    return null;
+  }
+
+  return {
+    kind: "workspace-file",
+    relativePath
+  };
+}
+
+function openWorkspaceEmbedTarget(openTarget: WorkspaceEmbedOpenTarget): void {
+  if (openTarget.kind === "managed-data-note") {
+    requestOpenManagedDataNote(openTarget.targetId);
+    return;
+  }
+
+  requestOpenWorkspaceFile(openTarget.relativePath);
+}
+
+function readWorkspaceEmbedSource(node: ProseNode): string {
+  return `${node.attrs.src ?? ""}`;
+}
+
+function getLowercaseExtension(relativePath: string): string {
+  const normalized = relativePath.trim().toLowerCase();
+  const slashIndex = normalized.lastIndexOf("/");
+  const baseName = slashIndex >= 0 ? normalized.slice(slashIndex + 1) : normalized;
+  const dotIndex = baseName.lastIndexOf(".");
+
+  return dotIndex >= 0 ? baseName.slice(dotIndex) : "";
+}
+
+function createTextFrameDocument(content: string, title: string): string {
+  return `<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <title>${escapeHtml(title)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        margin: 0;
+        background: #fbfcfd;
+        color: #1f2733;
+        font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+      }
+
+      pre {
+        box-sizing: border-box;
+        margin: 0;
+        min-height: 100vh;
+        padding: 12px 14px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.5;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <pre>${escapeHtml(content)}</pre>
+  </body>
+</html>`;
+}
+
+async function proxyWorkspaceEmbedImageUrl(url: string): Promise<string> {
+  const relativePath = resolveWorkspaceMarkdownTarget(url);
+
+  if (!relativePath) {
+    return url;
+  }
+
+  try {
+    return await window.integralNotes.resolveWorkspaceFileUrl(relativePath);
+  } catch {
+    return url;
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+interface ManagedDataTarget {
+  displayName: string;
+  targetId: string;
+}
+
+function createManagedDataNoteRelativePath(targetId: string): string {
+  return `.store/.integral/data-notes/${targetId.trim()}.md`;
+}
+
+function findManagedDataTargetForPath(
+  catalog: IntegralAssetCatalog,
+  relativePath: string
+): ManagedDataTarget | null {
+  const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+  if (normalizedRelativePath.length === 0) {
+    return null;
+  }
+
+  const matches: Array<
+    ManagedDataTarget & {
+      isExactMatch: boolean;
+      matchedPath: string;
+    }
+  > = [];
+
+  const collectMatch = (
+    displayName: string,
+    targetId: string,
+    managedPath: string,
+    representation: "dataset-json" | "directory" | "file"
+  ): void => {
+    const normalizedManagedPath = normalizeRelativePath(managedPath);
+
+    if (normalizedManagedPath.length === 0) {
+      return;
+    }
+
+    const isExactMatch = normalizedRelativePath === normalizedManagedPath;
+    const isDirectoryMatch =
+      representation === "directory" &&
+      normalizedRelativePath.startsWith(`${normalizedManagedPath}/`);
+
+    if (!isExactMatch && !isDirectoryMatch) {
+      return;
+    }
+
+    matches.push({
+      displayName,
+      isExactMatch,
+      matchedPath: normalizedManagedPath,
+      targetId
+    });
+  };
+
+  for (const entry of catalog.originalData) {
+    collectMatch(entry.displayName, entry.originalDataId, entry.path, entry.representation);
+  }
+
+  for (const entry of catalog.datasets) {
+    collectMatch(entry.name, entry.datasetId, entry.path, entry.representation);
+  }
+
+  matches.sort((left, right) => {
+    if (left.isExactMatch !== right.isExactMatch) {
+      return left.isExactMatch ? -1 : 1;
+    }
+
+    if (left.matchedPath.length !== right.matchedPath.length) {
+      return right.matchedPath.length - left.matchedPath.length;
+    }
+
+    return left.displayName.localeCompare(right.displayName, "ja");
+  });
+
+  const [bestMatch] = matches;
+
+  return bestMatch
+    ? {
+        displayName: bestMatch.displayName,
+        targetId: bestMatch.targetId
+      }
+    : null;
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath
+    .split(/[\\/]+/u)
+    .filter(Boolean)
+    .join("/");
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "不明なエラーが発生しました。";
+}

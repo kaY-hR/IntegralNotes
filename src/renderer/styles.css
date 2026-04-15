@@ -818,6 +818,171 @@ textarea:focus-visible {
   padding: 12px;
 }
 
+.editor-surface .milkdown .editor-workspace-embed {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 6px 0;
+  padding: 6px;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.editor-surface .milkdown .editor-workspace-embed--inline {
+  display: inline-grid;
+  vertical-align: top;
+  width: min(360px, 100%);
+  margin: 0 4px;
+}
+
+.editor-surface .milkdown .editor-workspace-embed--openable {
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+
+.editor-surface .milkdown .editor-workspace-embed--openable:hover {
+  border-color: #bfd0e0;
+  background: #fbfdff;
+}
+
+.editor-surface .milkdown .editor-workspace-embed--selected {
+  box-shadow: 0 0 0 2px rgba(15, 108, 189, 0.18);
+  border-color: rgba(15, 108, 189, 0.34);
+}
+
+.editor-surface .milkdown .editor-workspace-embed__surface {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__frame,
+.editor-surface .milkdown .editor-workspace-embed__markdown {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid #d6e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.editor-surface .milkdown .editor-workspace-embed--inline .editor-workspace-embed__frame,
+.editor-surface .milkdown .editor-workspace-embed--inline .editor-workspace-embed__markdown {
+  min-height: 160px;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__image {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  border: 1px solid #d6e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid #d6e0ea;
+  border-radius: 6px;
+  background: #f7f9fb;
+  color: #5d7082;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__status--error {
+  background: #fff2f2;
+  border-color: #efc7c7;
+  color: #9d2f2f;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__open-hitbox {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__open-hitbox:hover {
+  background: rgba(15, 108, 189, 0.03);
+}
+
+.editor-surface .milkdown .editor-workspace-embed__open-hitbox:focus-visible {
+  outline: 1px solid #c7e0f4;
+  outline-offset: -2px;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__markdown .milkdown {
+  min-height: 100%;
+  padding: 0;
+  background: #ffffff;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__markdown .milkdown .editor {
+  max-width: none;
+  min-height: 100%;
+  margin: 0;
+  padding: 16px 18px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__markdown .milkdown .milkdown-block-handle,
+.editor-surface .milkdown .editor-workspace-embed__markdown .milkdown .milkdown-toolbar,
+.editor-surface .milkdown .editor-workspace-embed__markdown .milkdown .milkdown-slash-menu {
+  display: none !important;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__empty {
+  display: grid;
+  gap: 8px;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__empty-title {
+  color: #233649;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__empty-row,
+.editor-surface .milkdown .editor-workspace-embed__empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d6e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #233649;
+  font:
+    inherit;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__file-input {
+  display: none;
+}
+
 .editor-surface .milkdown .integral-code-block__toolbar,
 .editor-surface .milkdown .integral-code-block__meta,
 .editor-surface .milkdown .integral-code-block__actions,

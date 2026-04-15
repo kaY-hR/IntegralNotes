@@ -1,6 +1,6 @@
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx } from "@milkdown/kit/core";
-import { linkSchema } from "@milkdown/kit/preset/commonmark";
+import { imageSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
 import type { Selection } from "@milkdown/kit/prose/state";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
@@ -18,6 +18,7 @@ import {
   createIntegralSnippetFeatureConfigs,
   INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT
 } from "./integralSnippetMenu";
+import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
   initialValue: string;
@@ -36,6 +37,7 @@ interface WorkspaceFileSuggestion {
 }
 
 interface LinkCompletionState {
+  kind: "embed" | "link";
   maxHeight: number;
   query: string;
   replaceFrom: number;
@@ -187,6 +189,9 @@ export function MilkdownEditor({
       });
 
       installIntegralCodeBlockFeature(editor);
+      installWorkspaceEmbedFeature(editor, {
+        uploadImage: handleImageUpload
+      });
 
       await editor.create();
 
@@ -309,7 +314,11 @@ export function MilkdownEditor({
           matches[Math.min(completionState.selectedIndex, matches.length - 1)];
 
         if (selectedCandidate) {
-          insertWorkspaceLink(selectedCandidate);
+          if (completionState.kind === "embed") {
+            insertWorkspaceEmbed(selectedCandidate);
+          } else {
+            insertWorkspaceLink(selectedCandidate);
+          }
         }
       }
     };
@@ -436,6 +445,42 @@ export function MilkdownEditor({
     setLinkCompletion(null);
   };
 
+  const insertWorkspaceEmbed = (suggestion: WorkspaceFileSuggestion): void => {
+    const editor = editorRef.current;
+    const completionState = linkCompletionRef.current;
+
+    if (!editor || !completionState) {
+      return;
+    }
+
+    const href = toCanonicalWorkspaceTarget(suggestion.relativePath);
+
+    editor.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const imageNode = imageSchema.type(ctx).create({
+        alt: "",
+        src: href,
+        title: ""
+      });
+
+      const transaction = view.state.tr.replaceWith(
+        completionState.replaceFrom,
+        completionState.replaceTo,
+        imageNode
+      );
+      const cursorPosition = Math.min(
+        completionState.replaceFrom + imageNode.nodeSize,
+        transaction.doc.content.size
+      );
+
+      transaction.setSelection(TextSelection.create(transaction.doc, cursorPosition));
+      view.dispatch(transaction.scrollIntoView());
+      view.focus();
+    });
+
+    setLinkCompletion(null);
+  };
+
   return (
     <div className="editor-shell">
       {toolbar ? <div className="editor-toolbar">{toolbar}</div> : null}
@@ -462,7 +507,11 @@ export function MilkdownEditor({
                 key={suggestion.relativePath}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  insertWorkspaceLink(suggestion);
+                  if (linkCompletion.kind === "embed") {
+                    insertWorkspaceEmbed(suggestion);
+                  } else {
+                    insertWorkspaceLink(suggestion);
+                  }
                 }}
                 type="button"
               >
@@ -514,25 +563,77 @@ function computeLinkCompletionState(
 
   const { $from, from } = selection;
   const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
-  const match = /\[([^\[\]]*)$/u.exec(textBefore);
 
-  if (!match) {
+  const embedMatch = /!\[([^\[\]]*)$/u.exec(textBefore);
+
+  if (embedMatch) {
+    const query = embedMatch[1] ?? "";
+    const replaceFrom = from - query.length - 2;
+
+    try {
+      const coords = view.coordsAtPos(from);
+      const popupLayout = computePopupLayout(coords);
+      return {
+        kind: "embed",
+        maxHeight: popupLayout.maxHeight,
+        query,
+        replaceFrom,
+        replaceTo: from,
+        selectedIndex: 0,
+        x: clampPopupCoordinate(coords.left, 360, window.innerWidth),
+        y: popupLayout.y
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const bangMatch = /(?:^|[\s>([{])!([^\s!]*)$/u.exec(textBefore);
+
+  if (bangMatch) {
+    const query = bangMatch[1] ?? "";
+    const prefix = bangMatch[0] ?? "";
+    const bangOffset = prefix.lastIndexOf("!");
+    const replaceFrom = from - (prefix.length - bangOffset);
+
+    try {
+      const coords = view.coordsAtPos(from);
+      const popupLayout = computePopupLayout(coords);
+      return {
+        kind: "embed",
+        maxHeight: popupLayout.maxHeight,
+        query,
+        replaceFrom,
+        replaceTo: from,
+        selectedIndex: 0,
+        x: clampPopupCoordinate(coords.left, 360, window.innerWidth),
+        y: popupLayout.y
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const linkMatch = /\[([^\[\]]*)$/u.exec(textBefore);
+
+  if (!linkMatch) {
     return null;
   }
 
-  const bracketIndex = match.index;
+  const bracketIndex = linkMatch.index;
 
   if (bracketIndex > 0 && textBefore.charAt(bracketIndex - 1) === "!") {
     return null;
   }
 
-  const query = match[1] ?? "";
+  const query = linkMatch[1] ?? "";
   const replaceFrom = from - query.length - 1;
 
   try {
     const coords = view.coordsAtPos(from);
     const popupLayout = computePopupLayout(coords);
     return {
+      kind: "link",
       maxHeight: popupLayout.maxHeight,
       query,
       replaceFrom,

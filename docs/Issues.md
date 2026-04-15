@@ -452,3 +452,42 @@
   - `src/renderer/App.tsx` の markdown toolbar にも同じ action を出し、managed data が Markdown file の場合でも note を別タブで開けるようにした
   - `OPEN_MANAGED_DATA_NOTE_EVENT` 経由の open では tab 名を `<displayName> のノート` へ寄せ、既存 tab があればその tab を再利用する挙動を維持した
   - `npm run build` が通ることを確認した
+
+## [x] 26. Milkdown で `![` から workspace file の埋め込み挿入と preview をしたい
+- Status:completed
+- 優先重み:6
+- 記載日時:2026-04-15-23:12(UTC+9)
+
+* 現状は `[` で workspace file への Markdown link 補完はできるが、`![` で埋め込みリンクを選んで貼る導線はまだない
+* 画像だけでなく、workspace 内 file を note 本文へ「参照リンク」ではなく「埋め込み preview」として貼りたい
+* 補完 trigger は `![` とし、候補一覧・path 解決規則は通常 link と同じく `cwd` 配下 file を対象にしたい
+* 挿入時の canonical form は Markdown image 記法ベースの `![](/path/from/cwd)` としたい
+* 埋め込み preview の表示方針は少なくとも以下を満たしたい
+  - `png / jpg / jpeg / gif / webp / bmp` は画像として表示
+  - `html` は iframe 的に表示
+  - `svg` は image 扱いではなく iframe 的に表示
+  - `md / txt / json / csv` など text 系は iframe 的な read-only preview で表示
+  - app 内表示非対応 file は、対応する managed data が引けるなら `data-note` を iframe 的に表示する
+* unsupported file が managed data に対応しない場合は、少なくとも無言で壊れず「未対応」であることを示したい
+* 既存の note 画像 upload / paste / drop (`Issue 23`) や rename / move rewrite は、そのまま再利用できる構成に寄せたい
+* 2026-04-15 実装:
+  - `src/renderer/MilkdownEditor.tsx` を更新し、補完 state を `link / embed` の 2 種に拡張した
+  - `![` 入力時も `[` と同じ workspace file 候補 popup を出し、選択時は `![](/path/from/cwd)` を Markdown image 記法として挿入するようにした
+  - `src/renderer/workspaceEmbedFeature.tsx` を追加し、Milkdown の `image` / `image-block` node view を workspace embed 向けに差し替えた
+  - 埋め込み preview は `html / svg / text / markdown / image` を editor 内で read-only preview できるようにし、`html / svg / text / markdown` は iframe 系表示へ寄せた
+  - app 内 preview 非対応 file は managed data に対応づく場合、`.store/.integral/data-notes/{id}.md` を読んで `DATA-NOTE` preview として表示するようにした
+  - embed node の空状態でも、workspace path 手入力と既存 image upload hook 経由の画像選択を続けられるようにした
+  - `src/renderer/styles.css` に embed card / iframe / empty state の style を追加した
+  - `npm run build` が通ることを確認した
+* 2026-04-16 修正:
+  - 補完候補を mouse で選んだとき、誤って link 挿入経路へ流れていた不具合を修正した
+  - embed 挿入は Markdown 文字列の流し込みではなく、Milkdown の `image` node を直接挿入するように変更した
+  - これにより source は通常の `![](/path)` になり、preview 側も inline image node view から workspace embed renderer へ確実に流れるようにした
+  - `![` に加えて `!` 単体でも補完 popup を開けるようにした
+  - `npm run build` が通ることを確認した
+* 2026-04-16 仕上げ:
+  - embed card から file 名 / 拡張子 badge 表示を外し、padding と border radius を少し詰めて preview 優先の見た目に寄せた
+  - `.md` の embed preview は plain text iframe ではなく readonly の Milkdown / Crepe で描画し、list・heading などを rich に見られるようにした
+  - app 内 preview 非対応 file の managed `data-note` fallback も同じ markdown preview に寄せた
+  - embed block 全体の click で、workspace file は通常 tab、managed `data-note` fallback は note tab を開けるようにした
+  - `npm run build` が通ることを確認した
