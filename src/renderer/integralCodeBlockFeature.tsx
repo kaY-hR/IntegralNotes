@@ -20,6 +20,7 @@ import {
   DatasetRenderableView
 } from "./IntegralAssetDialogs";
 import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
+import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
   getIntegralBlockDefinition,
@@ -389,6 +390,29 @@ function IntegralBlockPanel({
     }).catch(() => {});
   }, [datasetIdKey]);
 
+  const formatDatasetLabel = (datasetId: string | null): string => {
+    if (!datasetId) {
+      return "未設定";
+    }
+
+    const dataset = datasetMap.get(datasetId);
+    return dataset ? dataset.name : datasetId;
+  };
+
+  const openDatasetNote = (datasetId: string | null): void => {
+    if (!datasetId) {
+      return;
+    }
+
+    const dataset = datasetMap.get(datasetId);
+
+    if (!dataset) {
+      return;
+    }
+
+    requestOpenManagedDataNote(dataset.datasetId);
+  };
+
   if (!parsed.block) {
     return (
       <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
@@ -428,21 +452,37 @@ function IntegralBlockPanel({
   }
 
   if (isDisplayBlock) {
+    const sourceDatasetId = parsed.block.inputs.source ?? null;
+    const hasSourceNote = sourceDatasetId !== null && datasetMap.has(sourceDatasetId);
+
     return (
       <div className={`integral-code-block integral-code-block--display${selected ? " integral-code-block--selected" : ""}`}>
         <div className="integral-display-block">
-          <button
-            className="integral-code-block__button integral-code-block__button--ghost integral-display-block__picker"
-            onClick={() => {
-              setInlineError(null);
-              setSlotDialogState({ slotName: "source" });
-            }}
-            type="button"
-          >
-            {parsed.block.inputs.source ?? "dataset を選択"}
-          </button>
+          <div className="integral-display-block__toolbar">
+            <button
+              className="integral-code-block__button integral-code-block__button--ghost integral-display-block__picker"
+              onClick={() => {
+                setInlineError(null);
+                setSlotDialogState({ slotName: "source" });
+              }}
+              type="button"
+            >
+              {formatDatasetLabel(sourceDatasetId)}
+            </button>
+            {hasSourceNote ? (
+              <button
+                className="integral-slot-row__link"
+                onClick={() => {
+                  openDatasetNote(sourceDatasetId);
+                }}
+                type="button"
+              >
+                ノート
+              </button>
+            ) : null}
+          </div>
 
-          <DatasetRenderableView datasetId={parsed.block.inputs.source ?? null} />
+          <DatasetRenderableView datasetId={sourceDatasetId} />
         </div>
 
         {inlineError ? (
@@ -469,14 +509,6 @@ function IntegralBlockPanel({
     );
   }
 
-  const formatDatasetLabel = (datasetId: string | null): string => {
-    if (!datasetId) {
-      return "未設定";
-    }
-    const ds = datasetMap.get(datasetId);
-    return ds ? `${ds.name}` : datasetId;
-  };
-
   const slotAssignments =
     blockDefinition.inputSlots.length > 0 || blockDefinition.outputSlots.length > 0 ? (
       <div className="integral-slot-list">
@@ -494,6 +526,17 @@ function IntegralBlockPanel({
               </div>
               {blockDefinition.executionMode === "manual" ? (
                 <div className="integral-slot-row__actions">
+                  {isAssigned && assignedId !== null && datasetMap.has(assignedId) ? (
+                    <button
+                      className="integral-slot-row__link"
+                      onClick={() => {
+                        openDatasetNote(assignedId);
+                      }}
+                      type="button"
+                    >
+                      ノート
+                    </button>
+                  ) : null}
                   <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
                     setInlineError(null);
                     setSlotDialogState({ slotName: slot.name });
@@ -515,6 +558,19 @@ function IntegralBlockPanel({
                 <strong>{slot.name}</strong>
                 <span>{formatDatasetLabel(outputId)}</span>
               </div>
+              {outputId && datasetMap.has(outputId) ? (
+                <div className="integral-slot-row__actions">
+                  <button
+                    className="integral-slot-row__link"
+                    onClick={() => {
+                      openDatasetNote(outputId);
+                    }}
+                    type="button"
+                  >
+                    ノート
+                  </button>
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -785,5 +841,3 @@ function formatErrorMessage(error: unknown): string {
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
-

@@ -34,6 +34,7 @@ const api: IntegralNotesApi = {
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),
   getIntegralAssetCatalog: () => ipcRenderer.invoke("integral:getAssetCatalog"),
+  listManagedDataTrackingIssues: () => ipcRenderer.invoke("integral:listManagedDataTrackingIssues"),
   importOriginalDataDirectories: () => ipcRenderer.invoke("integral:importOriginalDataDirectories"),
   importOriginalDataFiles: () => ipcRenderer.invoke("integral:importOriginalDataFiles"),
   inspectDataset: (datasetId) => ipcRenderer.invoke("integral:inspectDataset", datasetId),
@@ -42,6 +43,8 @@ const api: IntegralNotesApi = {
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
   registerPythonScript: (request) => ipcRenderer.invoke("integral:registerPythonScript", request),
+  resolveManagedDataTrackingIssue: (request) =>
+    ipcRenderer.invoke("integral:resolveManagedDataTrackingIssue", request),
   readWorkspaceFile: (relativePath) => ipcRenderer.invoke("workspace:readFile", relativePath),
   readNote: (relativePath) => ipcRenderer.invoke("workspace:readNote", relativePath),
   saveNote: (relativePath, content) =>

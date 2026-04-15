@@ -34,8 +34,8 @@ import {
 import {
   buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
-  isDatasetDataNoteMetadata,
-  isOriginalDataNoteMetadata
+  normalizeDatasetDataNoteMetadata,
+  normalizeOriginalDataNoteMetadata
 } from "./dataNote";
 import {
   extractFrontmatterBody,
@@ -746,26 +746,33 @@ export class WorkspaceService {
               path.join(metadataRootPath, entry.name)
             );
 
-            if (isOriginalDataNoteMetadata(metadata)) {
-              const absolutePath = path.join(dataNoteRootPath, `${metadata.originalDataId.trim()}.md`);
+            const originalDataMetadata = normalizeOriginalDataNoteMetadata(metadata);
+
+            if (originalDataMetadata) {
+              const absolutePath = path.join(
+                dataNoteRootPath,
+                `${originalDataMetadata.originalDataId.trim()}.md`
+              );
               const existingContent = await readTextFileIfExists(absolutePath);
 
               return {
                 absolutePath,
-                nextContent: buildOriginalDataNoteMarkdown(metadata, existingContent)
+                nextContent: buildOriginalDataNoteMarkdown(originalDataMetadata, existingContent)
               } satisfies ManagedDataNoteWritePlan;
             }
 
-            if (!isDatasetDataNoteMetadata(metadata)) {
+            const datasetMetadata = normalizeDatasetDataNoteMetadata(metadata);
+
+            if (!datasetMetadata) {
               return null;
             }
 
-            const absolutePath = path.join(dataNoteRootPath, `${metadata.datasetId.trim()}.md`);
+            const absolutePath = path.join(dataNoteRootPath, `${datasetMetadata.datasetId.trim()}.md`);
             const existingContent = await readTextFileIfExists(absolutePath);
 
             return {
               absolutePath,
-              nextContent: buildDatasetDataNoteMarkdown(metadata, existingContent)
+              nextContent: buildDatasetDataNoteMarkdown(datasetMetadata, existingContent)
             } satisfies ManagedDataNoteWritePlan;
           })
       )

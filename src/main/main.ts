@@ -5,6 +5,7 @@ import type {
   CreateSourceDatasetRequest,
   CreateSourceDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
+  ResolveIntegralManagedDataTrackingIssueRequest,
   RegisterPythonScriptRequest
 } from "../shared/integral";
 import type {
@@ -144,6 +145,9 @@ function registerIpcHandlers(): void {
     return snapshot;
   });
   ipcMain.handle("integral:getAssetCatalog", async () => getIntegralWorkspaceService().listAssetCatalog());
+  ipcMain.handle("integral:listManagedDataTrackingIssues", async () =>
+    getIntegralWorkspaceService().listManagedDataTrackingIssues()
+  );
   ipcMain.handle("integral:importOriginalDataFiles", async () => {
     if (!mainWindow) {
       throw new Error("main window is not available.");
@@ -236,6 +240,11 @@ function registerIpcHandlers(): void {
     "integral:registerPythonScript",
     async (_event, request: RegisterPythonScriptRequest) =>
       getIntegralWorkspaceService().registerPythonScript(request)
+  );
+  ipcMain.handle(
+    "integral:resolveManagedDataTrackingIssue",
+    async (_event, request: ResolveIntegralManagedDataTrackingIssueRequest) =>
+      getIntegralWorkspaceService().resolveManagedDataTrackingIssue(request)
   );
   ipcMain.handle("integral:executeBlock", async (_event, request: ExecuteIntegralBlockRequest) =>
     getIntegralWorkspaceService().executeBlock(request)

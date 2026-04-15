@@ -745,6 +745,13 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+.editor-surface .milkdown .integral-display-block__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .editor-surface .milkdown .integral-display-block__picker {
   justify-self: start;
   min-width: 220px;
@@ -1262,6 +1269,11 @@ textarea:focus-visible {
   max-height: min(760px, calc(100vh - 40px));
 }
 
+.dialog-card--tracking {
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+}
+
 .dialog-card--python-script,
 .dialog-card--asset-picker,
 .dialog-card--data-registration {
@@ -1340,6 +1352,13 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 .dialog-card__body--data-registration {
   display: grid;
   gap: 10px;
+  max-height: min(620px, calc(100vh - 180px));
+  overflow: auto;
+}
+
+.dialog-card__body--tracking {
+  display: grid;
+  gap: 14px;
   max-height: min(620px, calc(100vh - 180px));
   overflow: auto;
 }
@@ -1442,6 +1461,75 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 .dialog-card--asset-picker .dialog-actions .button--primary:hover {
   border-color: var(--accent-strong);
   background: var(--accent-strong);
+}
+
+.tracking-dialog__summary {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.tracking-dialog__summary div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #d0d8e0;
+  border-radius: 4px;
+  background: #f6f8fb;
+}
+
+.tracking-dialog__summary dt {
+  margin: 0;
+  color: #4d6274;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.tracking-dialog__summary dd {
+  margin: 0;
+  color: var(--text-0);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.tracking-dialog__candidates {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid #d0d8e0;
+  border-radius: 4px;
+}
+
+.tracking-dialog__candidates legend {
+  padding: 0 6px;
+  color: #35506b;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.tracking-dialog__candidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #d8e0e8;
+  border-radius: 4px;
+  background: #fbfcfd;
+  color: var(--text-0);
+  cursor: pointer;
+}
+
+.tracking-dialog__candidate input {
+  margin-top: 2px;
+}
+
+.tracking-dialog__candidate span {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .data-registration-card {
@@ -1799,20 +1887,28 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 }
 
 .asset-picker__row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   gap: 8px;
   align-items: center;
   padding: 6px 10px;
   border: 1px solid #d4dde6;
   border-radius: 3px;
   background: #ffffff;
-  cursor: pointer;
   transition: border-color 100ms;
 }
 
 .asset-picker__row:hover {
   border-color: var(--accent);
+}
+
+.asset-picker__row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  cursor: pointer;
 }
 
 .asset-picker__meta {
@@ -1821,6 +1917,23 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   gap: 6px;
   color: #7a8a9a;
   font-size: 0.7rem;
+}
+
+.asset-picker__row-link {
+  border: 0;
+  background: transparent;
+  color: #7a8a9a;
+  font-size: 0.7rem;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color 100ms;
+  flex-shrink: 0;
+}
+
+.asset-picker__row-link:hover {
+  color: #0f6cbd;
+  text-decoration: underline;
 }
 
 .asset-picker__create-link {
@@ -2079,6 +2192,7 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
     max-height: calc(100vh - 24px);
   }
 
+  .dialog-card--tracking,
   .dialog-card--python-script,
   .dialog-card--asset-picker,
   .dialog-card--data-registration {

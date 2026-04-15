@@ -2,6 +2,7 @@ import * as FlexLayout from "flexlayout-react";
 import { type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 
 import type {
+  IntegralManagedDataTrackingIssue,
   IntegralOriginalDataSummary,
   RegisterPythonScriptResult
 } from "../shared/integral";
@@ -28,12 +29,17 @@ import {
 import { DataRegistrationDialog } from "./DataRegistrationDialog";
 import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
+import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { PluginManagerDialog } from "./PluginManagerDialog";
 import { PythonScriptDialog } from "./PythonScriptDialog";
 import { RawMarkdownEditor } from "./RawMarkdownEditor";
 import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
+import {
+  OPEN_MANAGED_DATA_NOTE_EVENT,
+  OPEN_WORKSPACE_FILE_EVENT
+} from "./workspaceOpenEvents";
 import {
   INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT,
   OPEN_PYTHON_SCRIPT_DIALOG_EVENT
@@ -172,6 +178,15 @@ function normalizeRelativePath(relativePath: string): string {
     .split(/[\\/]+/u)
     .filter(Boolean)
     .join("/");
+}
+
+function isHiddenWorkspacePath(relativePath: string): boolean {
+  return normalizeRelativePath(relativePath).startsWith(".");
+}
+
+function createManagedDataNoteRelativePath(targetId: string): string {
+  const normalizedId = targetId.trim();
+  return `.store/.integral/data-notes/${normalizedId}.md`;
 }
 
 function createPathChange(previousPath: string, nextPath: string): WorkspacePathChange | null {
@@ -443,6 +458,9 @@ export function App(): JSX.Element {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [statusMessage, setStatusMessage] = useState("ワークスペースを読み込み中...");
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
+  const [trackingIssues, setTrackingIssues] = useState<IntegralManagedDataTrackingIssue[]>([]);
+  const [trackingDialogDismissed, setTrackingDialogDismissed] = useState(false);
+  const [trackingResolutionPending, setTrackingResolutionPending] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
   const [deleteDialogPending, setDeleteDialogPending] = useState(false);
   const [inlineEditor, setInlineEditor] = useState<FileTreeInlineEditorState | null>(null);
@@ -468,7 +486,9 @@ export function App(): JSX.Element {
   const selectedEntries = workspace ? findEntriesByPaths(workspace.entries, selectedEntryPaths) : [];
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
   const activeTab = selectedTabPath ? openTabs[selectedTabPath] : undefined;
+  const activeTrackingIssue = trackingDialogDismissed ? null : (trackingIssues[0] ?? null);
   const hasBlockingDialog =
+    activeTrackingIssue !== null ||
     deleteDialog !== null ||
     datasetCreationDialog !== null ||
     dataRegistrationDialogOpen ||
@@ -521,6 +541,8 @@ export function App(): JSX.Element {
     setContextMenu(null);
     setDropTargetPath(null);
     setDeleteDialog(null);
+    setTrackingIssues([]);
+    setTrackingDialogDismissed(false);
     resetOpenTabs();
     setWorkspace(null);
     setSelectedEntryPath("");
@@ -547,7 +569,9 @@ export function App(): JSX.Element {
       setSelectedEntryPaths(new Set());
       setExpandedPaths(defaultExpandedPaths(snapshot.entries));
     } else {
-      closeTabsMatching((relativePath) => !hasEntry(snapshot.entries, relativePath));
+      closeTabsMatching(
+        (relativePath) => !hasEntry(snapshot.entries, relativePath) && !isHiddenWorkspacePath(relativePath)
+      );
       setExpandedPaths((current) => reconcileExpandedPaths(current, snapshot.entries));
 
       if (!hasEntry(snapshot.entries, selectedEntryPath)) {
@@ -572,6 +596,16 @@ export function App(): JSX.Element {
     }
   };
 
+  const refreshManagedDataTrackingIssues = async (): Promise<void> => {
+    try {
+      const issues = await window.integralNotes.listManagedDataTrackingIssues();
+      setTrackingIssues(issues);
+      setTrackingDialogDismissed(false);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
   const refreshWorkspace = async (nextStatus?: string): Promise<void> => {
     setLoadingWorkspace(true);
 
@@ -587,6 +621,7 @@ export function App(): JSX.Element {
         resetTabs: workspace === null,
         statusMessage: nextStatus
       });
+      await refreshManagedDataTrackingIssues();
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
@@ -609,10 +644,34 @@ export function App(): JSX.Element {
         resetTabs: true,
         statusMessage: `${snapshot.rootName} を開きました`
       });
+      await refreshManagedDataTrackingIssues();
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
       setLoadingWorkspace(false);
+    }
+  };
+
+  const resolveTrackingIssue = async (selectedPath: string): Promise<void> => {
+    if (!activeTrackingIssue) {
+      return;
+    }
+
+    setTrackingResolutionPending(true);
+
+    try {
+      await window.integralNotes.resolveManagedDataTrackingIssue({
+        entityType: activeTrackingIssue.entityType,
+        selectedPath,
+        targetId: activeTrackingIssue.targetId
+      });
+      resetIntegralPluginRuntime();
+      setPluginCatalogRevision((current) => current + 1);
+      await refreshWorkspace(`${activeTrackingIssue.displayName} の tracked path を更新しました。`);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setTrackingResolutionPending(false);
     }
   };
 
@@ -825,6 +884,49 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    const handleOpenWorkspaceFileEvent = (event: Event): void => {
+      const customEvent = event as CustomEvent<string>;
+      const relativePath = `${customEvent.detail ?? ""}`.trim();
+
+      if (relativePath.length === 0) {
+        return;
+      }
+
+      void openWorkspaceFile(relativePath);
+    };
+    const handleOpenManagedDataNoteEvent = (event: Event): void => {
+      const customEvent = event as CustomEvent<string>;
+      const targetId = `${customEvent.detail ?? ""}`.trim();
+
+      if (targetId.length === 0) {
+        return;
+      }
+
+      void openWorkspaceFile(createManagedDataNoteRelativePath(targetId));
+    };
+
+    window.addEventListener(
+      OPEN_WORKSPACE_FILE_EVENT,
+      handleOpenWorkspaceFileEvent as EventListener
+    );
+    window.addEventListener(
+      OPEN_MANAGED_DATA_NOTE_EVENT,
+      handleOpenManagedDataNoteEvent as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        OPEN_WORKSPACE_FILE_EVENT,
+        handleOpenWorkspaceFileEvent as EventListener
+      );
+      window.removeEventListener(
+        OPEN_MANAGED_DATA_NOTE_EVENT,
+        handleOpenManagedDataNoteEvent as EventListener
+      );
+    };
+  }, [workspace, openTabs]);
+
+  useEffect(() => {
     if (
       !workspace ||
       !shouldAutoOpenInitialFileRef.current ||
@@ -986,6 +1088,14 @@ export function App(): JSX.Element {
     await openWorkspaceFile(relativePath);
   };
 
+  const syncTreeSelectionForPath = (relativePath: string): void => {
+    if (!workspace || !hasEntry(workspace.entries, relativePath)) {
+      return;
+    }
+
+    selectSingleEntry(relativePath);
+  };
+
   const openWorkspaceFile = async (
     relativePath: string,
     options?: { openUnsupportedExternally?: boolean }
@@ -994,7 +1104,7 @@ export function App(): JSX.Element {
     const tabId = toTabId(relativePath);
     const openUnsupportedExternally = options?.openUnsupportedExternally ?? false;
 
-    selectSingleEntry(relativePath);
+    syncTreeSelectionForPath(relativePath);
 
     if (existingTab) {
       if (
@@ -1916,7 +2026,7 @@ export function App(): JSX.Element {
       setSelectedTabId(nextTabId);
 
       if (relativePath) {
-        selectSingleEntry(relativePath);
+        syncTreeSelectionForPath(relativePath);
       }
 
       return;
@@ -2412,6 +2522,21 @@ export function App(): JSX.Element {
         </div>
       ) : null}
 
+      {activeTrackingIssue ? (
+        <ManagedDataTrackingDialog
+          issue={activeTrackingIssue}
+          onClose={() => {
+            if (!trackingResolutionPending) {
+              setTrackingDialogDismissed(true);
+            }
+          }}
+          onConfirm={(selectedPath) => {
+            void resolveTrackingIssue(selectedPath);
+          }}
+          pending={trackingResolutionPending}
+        />
+      ) : null}
+
       {deleteDialog ? (
         <WorkspaceDialog
           confirmLabel={deleteDialog.confirmLabel}
@@ -2434,7 +2559,7 @@ export function App(): JSX.Element {
       {datasetCreationDialog ? (
         <WorkspaceDialog
           confirmLabel="作成"
-          description="選択中の項目を元に source dataset を作成します。"
+          description="選択中の項目を元に新しい dataset を作成します。"
           initialValue={datasetCreationDialog.defaultName}
           inputLabel="Dataset 名"
           onClose={() => {
@@ -2462,7 +2587,7 @@ export function App(): JSX.Element {
           onImportedOriginalData={handleImportedOriginalData}
           onSourceDatasetCreated={(datasetId) => {
             setDataRegistrationDialogOpen(false);
-            setStatusMessage(`${datasetId} を source dataset として作成しました。`);
+            setStatusMessage(`${datasetId} の dataset を作成しました。`);
           }}
         />
       ) : null}

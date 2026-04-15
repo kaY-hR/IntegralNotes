@@ -6,6 +6,7 @@ import type {
   IntegralDatasetSummary,
   IntegralOriginalDataSummary
 } from "../shared/integral";
+import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "不明なエラーが発生しました。";
@@ -99,23 +100,37 @@ export function DatasetPickerDialog({
           <div className="asset-picker__list">
             {sortedDatasets.length > 0 ? (
               sortedDatasets.map((dataset) => (
-                <label className="asset-picker__row" key={dataset.datasetId}>
-                  <input
-                    checked={selectedDatasetId === dataset.datasetId}
-                    name="dataset-picker"
-                    onChange={() => {
-                      setSelectedDatasetId(dataset.datasetId);
-                    }}
-                    type="radio"
-                  />
-                  <div>
-                    <strong>{dataset.name}</strong>
-                    <div className="asset-picker__meta">
-                      <span>{dataset.kind}</span>
-                      <span>{dataset.renderableCount} renderable</span>
+                <div className="asset-picker__row" key={dataset.datasetId}>
+                  <label className="asset-picker__row-main">
+                    <input
+                      checked={selectedDatasetId === dataset.datasetId}
+                      name="dataset-picker"
+                      onChange={() => {
+                        setSelectedDatasetId(dataset.datasetId);
+                      }}
+                      type="radio"
+                    />
+                    <div>
+                      <strong>{dataset.name}</strong>
+                      <div className="asset-picker__meta">
+                        <span>{dataset.kind}</span>
+                        <span>{dataset.representation}</span>
+                        <span>{dataset.renderableCount} renderable</span>
+                      </div>
                     </div>
-                  </div>
-                </label>
+                  </label>
+                  <button
+                    className="asset-picker__row-link"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      requestOpenManagedDataNote(dataset.datasetId);
+                    }}
+                    type="button"
+                  >
+                    ノート
+                  </button>
+                </div>
               ))
             ) : (
               <div className="asset-picker__empty">割り当て可能な dataset がありません。</div>
@@ -338,31 +353,45 @@ export function OriginalDataSelectionDialog({
                 const checked = selectedOriginalDataIds.has(entry.originalDataId);
 
                 return (
-                  <label className="asset-picker__row" key={entry.originalDataId}>
-                    <input
-                      checked={checked}
-                      onChange={() => {
-                        setSelectedOriginalDataIds((current) => {
-                          const next = new Set(current);
+                  <div className="asset-picker__row" key={entry.originalDataId}>
+                    <label className="asset-picker__row-main">
+                      <input
+                        checked={checked}
+                        onChange={() => {
+                          setSelectedOriginalDataIds((current) => {
+                            const next = new Set(current);
 
-                          if (checked) {
-                            next.delete(entry.originalDataId);
-                          } else {
-                            next.add(entry.originalDataId);
-                          }
+                            if (checked) {
+                              next.delete(entry.originalDataId);
+                            } else {
+                              next.add(entry.originalDataId);
+                            }
 
-                          return next;
-                        });
-                      }}
-                      type="checkbox"
-                    />
-                    <div>
-                      <strong>{entry.originalName}</strong>
-                      <div className="asset-picker__meta">
-                        <span>{entry.sourceKind}</span>
+                            return next;
+                          });
+                        }}
+                        type="checkbox"
+                      />
+                      <div>
+                        <strong>{entry.displayName}</strong>
+                        <div className="asset-picker__meta">
+                          <span>{entry.representation}</span>
+                          <span>{entry.visibility}</span>
+                        </div>
                       </div>
-                    </div>
-                  </label>
+                    </label>
+                    <button
+                      className="asset-picker__row-link"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        requestOpenManagedDataNote(entry.originalDataId);
+                      }}
+                      type="button"
+                    >
+                      ノート
+                    </button>
+                  </div>
                 );
               })
             ) : (

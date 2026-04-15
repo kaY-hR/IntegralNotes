@@ -382,3 +382,30 @@
   - `src/main/integralWorkspaceService.ts` を更新し、data-note path を file 名解決ではなく ID 固定 path で返すようにした
   - `src/main/dataNote.ts` を更新し、data-note 既定本文から canonical file link 一覧前提を外し、説明 note 寄りにした
   - `npm run build` が通ることを確認した
+* 2026-04-15 実装第2段:
+  - `src/shared/integral.ts` を更新し、original data / dataset summary に `path`, `hash`, `representation`, `visibility`, `provenance` を追加した
+  - `src/main/integralWorkspaceService.ts` を更新し、metadata schema を `id / path / hash` ベースへ拡張した
+  - original data は visible current path と hidden object path を分けて保持しつつ、summary / tracking 上は `path` を主として扱うようにした
+  - source dataset の既定表現を visible `dataset-json` manifest (`datasets/*.idts`) に変更し、`memberIds` を保持するようにした
+  - `datasetId -> readable directory path` の resolve 層を導入し、`dataset-json` は staging directory へ materialize して inspect / execute / display できるようにした
+  - 起動時・利用時に metadata を再読込し、`path same + hash changed` と `path changed + hash same` を中心に再同期する reconciliation を追加した
+  - `src/main/dataNote.ts` と `src/main/workspaceService.ts` を更新し、新 metadata schema と旧 metadata の両方から hidden data-note を再生成できるようにした
+  - `src/renderer/IntegralAssetDialogs.tsx` などを更新し、picker 上の表示を `displayName / representation / visibility` ベースに寄せた
+  - `npm run build` が通ることを確認した
+* 2026-04-15 実装第3段:
+  - `src/renderer/workspaceOpenEvents.ts` を追加し、renderer 内の任意 UI から `workspace file open` を要求できる event を共通化した
+  - `src/renderer/App.tsx` を更新し、hidden data-note tab を workspace snapshot 更新で自動 close しないようにした
+  - 併せて、hidden data-note を開いたときは explorer selection を無理に同期しないようにし、tree に存在しない system-managed note を自然に扱えるようにした
+  - `src/renderer/IntegralAssetDialogs.tsx` を更新し、dataset / original data picker から各 managed data の `data-note` を直接開けるようにした
+  - `src/renderer/integralCodeBlockFeature.tsx` を更新し、display block と input / output slot 行から、割り当て済み dataset の `data-note` を開けるようにした
+  - `src/renderer/styles.css` を更新し、上記 note 導線に合わせて picker row と block toolbar の layout を調整した
+  - `npm run build` が通ることを確認した
+* 2026-04-15 実装第4段:
+  - 別スレッド由来で混ざっていた renderer 実装を点検し、data-note open 導線が hidden file path 直指定になっていた箇所を修正した
+  - `src/renderer/IntegralAssetDialogs.tsx` と `src/renderer/integralCodeBlockFeature.tsx` は、hidden note path を直接持たず `targetId` から open 要求する形へ揃えた
+  - `src/renderer/App.tsx` で `targetId -> .store/.integral/data-notes/{id}.md` の解決を一元化し、system-managed note の hidden path 知識を UI component から外した
+  - `src/shared/integral.ts` と `src/main/integralWorkspaceService.ts` から `dataNoteRelativePath` を外し、shared / renderer 契約を ID 基点へ寄せた
+  - `src/main/preload.ts`, `src/main/main.ts`, `src/shared/workspace.ts`, `src/main/integralWorkspaceService.ts`, `src/renderer/App.tsx` を更新し、`path changed + hash changed` で候補が複数ある場合の confirm 導線を追加した
+  - confirm は current 実装では `basename` ベースの candidate 検出を使い、候補が一意なら自動追従し、複数なら dialog で選ばせる
+  - `src/renderer/ManagedDataTrackingDialog.tsx` を追加し、recorded path / hash と候補 path 一覧を見ながら tracked path を更新できるようにした
+  - `npm run build` が通ることを確認した

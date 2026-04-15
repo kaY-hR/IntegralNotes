@@ -8,7 +8,9 @@ import type {
   ImportOriginalDataResult,
   IntegralAssetCatalog,
   IntegralDatasetInspection,
+  IntegralManagedDataTrackingIssue,
   PythonEntrySelection,
+  ResolveIntegralManagedDataTrackingIssueRequest,
   RegisterPythonScriptRequest,
   RegisterPythonScriptResult
 } from "./integral";
@@ -178,6 +180,7 @@ export interface IntegralNotesApi {
   zoomOut: () => void;
   resetZoom: () => void;
   getIntegralAssetCatalog: () => Promise<IntegralAssetCatalog>;
+  listManagedDataTrackingIssues: () => Promise<IntegralManagedDataTrackingIssue[]>;
   importOriginalDataDirectories: () => Promise<ImportOriginalDataResult | null>;
   importOriginalDataFiles: () => Promise<ImportOriginalDataResult | null>;
   inspectDataset: (datasetId: string) => Promise<IntegralDatasetInspection>;
@@ -188,6 +191,9 @@ export interface IntegralNotesApi {
   registerPythonScript: (
     request: RegisterPythonScriptRequest
   ) => Promise<RegisterPythonScriptResult>;
+  resolveManagedDataTrackingIssue: (
+    request: ResolveIntegralManagedDataTrackingIssueRequest
+  ) => Promise<IntegralManagedDataTrackingIssue[]>;
   readWorkspaceFile: (relativePath: string) => Promise<WorkspaceFileDocument>;
   readNote: (relativePath: string) => Promise<NoteDocument>;
   saveNote: (relativePath: string, content: string) => Promise<NoteDocument>;

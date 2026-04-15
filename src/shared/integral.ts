@@ -42,25 +42,37 @@ export interface IntegralBlockTypeDefinition {
   title: string;
 }
 
+export type IntegralManagedDataVisibility = "visible" | "hidden";
+export type IntegralManagedDataProvenance = "source" | "derived";
+export type IntegralManagedDataEntityType = "original-data" | "dataset";
+export type IntegralOriginalDataRepresentation = "directory" | "file";
+export type IntegralDatasetRepresentation = "dataset-json" | "directory";
+
 export interface IntegralOriginalDataSummary {
-  aliasRelativePath: string;
-  dataNoteRelativePath: string;
-  originalDataId: string;
   createdAt: string;
-  originalName: string;
-  storeRelativePath: string;
-  sourceKind: "directory" | "file";
+  displayName: string;
+  hash: string;
+  originalDataId: string;
+  path: string;
+  provenance: IntegralManagedDataProvenance;
+  representation: IntegralOriginalDataRepresentation;
+  visibility: IntegralManagedDataVisibility;
 }
 
 export interface IntegralDatasetSummary {
-  dataNoteRelativePath: string;
-  datasetId: string;
   createdAt: string;
   createdByBlockId: string | null;
+  datasetId: string;
+  hash: string;
   hasRenderableFiles: boolean;
   kind: string;
+  memberIds?: string[];
   name: string;
+  path: string;
+  provenance: IntegralManagedDataProvenance;
+  representation: IntegralDatasetRepresentation;
   renderableCount: number;
+  visibility: IntegralManagedDataVisibility;
 }
 
 export interface IntegralRenderableFile {
@@ -90,6 +102,22 @@ export interface IntegralAssetCatalog {
   blockTypes: IntegralBlockTypeDefinition[];
   originalData: IntegralOriginalDataSummary[];
   scripts: IntegralScriptAssetSummary[];
+}
+
+export interface IntegralManagedDataTrackingIssue {
+  candidatePaths: string[];
+  displayName: string;
+  entityType: IntegralManagedDataEntityType;
+  recordedHash: string;
+  recordedPath: string;
+  representation: IntegralOriginalDataRepresentation | IntegralDatasetRepresentation;
+  targetId: string;
+}
+
+export interface ResolveIntegralManagedDataTrackingIssueRequest {
+  entityType: IntegralManagedDataEntityType;
+  selectedPath: string;
+  targetId: string;
 }
 
 export interface PythonEntrySelection {

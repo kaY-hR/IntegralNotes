@@ -5,50 +5,41 @@ import {
   serializeFrontmatterDocument,
   splitFrontmatterBlock
 } from "./frontmatter";
-import {
-  resolveWorkspaceMarkdownTarget,
-  toCanonicalWorkspaceTarget
-} from "../shared/workspaceLinks";
 
-type DataNoteTargetType = "original-data" | "dataset";
+type DataNoteTargetType = "dataset" | "original-data";
+type ManagedDataVisibility = "hidden" | "visible";
+type ManagedDataProvenance = "derived" | "source";
+type OriginalDataRepresentation = "directory" | "file";
+type DatasetRepresentation = "dataset-json" | "directory";
 
-interface DataNoteSourceMember {
-  entryName: string;
-  originalDataId: string;
+interface ManagedDataNoteMetadataBase {
+  createdAt: string;
+  displayName: string;
+  hash: string;
+  id: string;
+  path: string;
+  provenance: ManagedDataProvenance;
+  visibility: ManagedDataVisibility;
 }
 
-interface OriginalDataNoteMetadata {
-  aliasRelativePath: string;
-  createdAt: string;
+export interface OriginalDataNoteMetadata extends ManagedDataNoteMetadataBase {
+  entityType: "original-data";
   originalDataId: string;
-  originalName: string;
-  sourceKind: "directory" | "file";
-  storeRelativePath: string;
+  representation: OriginalDataRepresentation;
 }
 
-interface DatasetDataNoteMetadata {
-  createdAt: string;
+export interface DatasetDataNoteMetadata extends ManagedDataNoteMetadataBase {
   createdByBlockId: string | null;
   datasetId: string;
+  entityType: "dataset";
   kind: string;
-  name?: string;
-  sourceMembers?: DataNoteSourceMember[];
-  storeRelativePath: string;
+  memberIds?: string[];
+  representation: DatasetRepresentation;
 }
 
-interface DataNoteTargetInfo {
+export interface DataNoteTargetInfo {
   dataTargetType: DataNoteTargetType;
   targetId: string;
-}
-
-interface ExistingDataNoteFileAssignment {
-  fileName: string;
-  targetKey: string | null;
-}
-
-interface DesiredDataNoteFileAssignment {
-  preferredLabel: string;
-  targetKey: string;
 }
 
 const DATA_NOTE_TYPE = "data-note";
@@ -56,223 +47,247 @@ const DATA_NOTE_TYPE_PATTERN = /^\s*integralNoteType:\s*(?:"data-note"|'data-not
 const COMMON_MANAGED_FRONTMATTER_KEYS = [
   "integralNoteType",
   "dataTargetType",
-  "createdAt",
-  "storeRelativePath"
+  "managedDataId",
+  "entityType",
+  "displayName",
+  "representation",
+  "path",
+  "hash",
+  "visibility",
+  "provenance",
+  "createdAt"
 ] as const;
 const ORIGINAL_DATA_MANAGED_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
-  "originalName",
-  "originalDataId",
-  "sourceKind",
-  "aliasRelativePath"
+  "originalDataId"
 ] as const;
 const DATASET_MANAGED_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
   "datasetId",
-  "name",
   "kind",
   "createdByBlockId",
-  "sourceMembers"
+  "memberIds"
 ] as const;
 
-export type {
-  DataNoteSourceMember,
-  DataNoteTargetInfo,
-  DataNoteTargetType,
-  DatasetDataNoteMetadata,
-  DesiredDataNoteFileAssignment,
-  ExistingDataNoteFileAssignment,
-  OriginalDataNoteMetadata
-};
-
-export function createOriginalDataNoteFileName(
-  originalName: string,
-  sequence = 1
-): string {
-  return createManagedDataNoteFileName(originalName, sequence);
-}
-
-export function createDatasetDataNoteFileName(
-  datasetName: string,
-  sequence = 1
-): string {
-  return createManagedDataNoteFileName(datasetName, sequence);
-}
-
-export function createDataNoteTargetKey(
-  dataTargetType: DataNoteTargetType,
-  targetId: string
-): string {
-  return `${dataTargetType}:${targetId.trim()}`;
-}
-
-export function resolveDatasetDataNoteName(
-  metadata: Pick<DatasetDataNoteMetadata, "datasetId" | "name">
-): string {
-  const normalizedName = metadata.name?.trim();
-
-  if (normalizedName && normalizedName.length > 0) {
-    return normalizedName;
-  }
-
-  const fallbackId = metadata.datasetId.trim();
-  return fallbackId.length > 0 ? fallbackId : "dataset";
-}
-
-export function parseDataNoteTargetInfo(markdown: string): DataNoteTargetInfo | null {
-  const normalizedMarkdown = normalizeNewlines(markdown);
-  const { frontmatter } = splitFrontmatterBlock(normalizedMarkdown);
-
-  if (!isDataNoteFrontmatter(frontmatter) || frontmatter === null) {
+export function normalizeOriginalDataNoteMetadata(value: unknown): OriginalDataNoteMetadata | null {
+  if (!isJsonRecord(value)) {
     return null;
   }
 
-  const dataTargetType = parseFrontmatterValue(frontmatter, "dataTargetType");
-
-  if (dataTargetType === "original-data") {
-    const originalDataId = parseFrontmatterValue(frontmatter, "originalDataId");
-    return typeof originalDataId === "string" && originalDataId.trim().length > 0
-      ? {
-          dataTargetType,
-          targetId: originalDataId.trim()
-        }
-      : null;
+  if (
+    value.entityType === "original-data" &&
+    typeof value.id === "string" &&
+    typeof value.displayName === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.path === "string" &&
+    typeof value.hash === "string" &&
+    (value.representation === "file" || value.representation === "directory") &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    (value.provenance === "source" || value.provenance === "derived")
+  ) {
+    return {
+      createdAt: value.createdAt,
+      displayName: value.displayName,
+      entityType: "original-data",
+      hash: value.hash,
+      id: value.id.trim(),
+      originalDataId: value.id.trim(),
+      path: normalizeWorkspaceRelativePath(value.path),
+      provenance: value.provenance,
+      representation: value.representation,
+      visibility: value.visibility
+    };
   }
 
-  if (dataTargetType === "dataset") {
-    const datasetId = parseFrontmatterValue(frontmatter, "datasetId");
-    return typeof datasetId === "string" && datasetId.trim().length > 0
-      ? {
-          dataTargetType,
-          targetId: datasetId.trim()
-        }
-      : null;
+  if (
+    typeof value.originalDataId === "string" &&
+    typeof value.originalName === "string" &&
+    typeof value.createdAt === "string" &&
+    (value.sourceKind === "file" || value.sourceKind === "directory")
+  ) {
+    const preferredPath =
+      typeof value.aliasRelativePath === "string"
+        ? value.aliasRelativePath
+        : typeof value.storeRelativePath === "string"
+          ? value.storeRelativePath
+          : null;
+
+    if (!preferredPath) {
+      return null;
+    }
+
+    const originalDataId = value.originalDataId.trim();
+    const normalizedPath = normalizeWorkspaceRelativePath(preferredPath);
+
+    return {
+      createdAt: value.createdAt,
+      displayName: value.originalName,
+      entityType: "original-data",
+      hash: typeof value.hash === "string" ? value.hash : "",
+      id: originalDataId,
+      originalDataId,
+      path: normalizedPath,
+      provenance: "source",
+      representation: value.sourceKind,
+      visibility: inferVisibilityFromPath(normalizedPath)
+    };
   }
 
   return null;
 }
 
-export function assignDataNoteFileNames(
-  existingFiles: readonly ExistingDataNoteFileAssignment[],
-  desiredFiles: readonly DesiredDataNoteFileAssignment[]
-): Map<string, string> {
-  const desiredTargetKeys = new Set<string>();
-  const orderedDesiredFiles: DesiredDataNoteFileAssignment[] = [];
-
-  for (const desiredFile of desiredFiles) {
-    if (desiredTargetKeys.has(desiredFile.targetKey)) {
-      continue;
-    }
-
-    desiredTargetKeys.add(desiredFile.targetKey);
-    orderedDesiredFiles.push(desiredFile);
+export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNoteMetadata | null {
+  if (!isJsonRecord(value)) {
+    return null;
   }
 
-  const existingManagedFiles = new Map<string, string[]>();
-  const reservedFileNames = new Set<string>();
-
-  for (const existingFile of [...existingFiles].sort((left, right) =>
-    left.fileName.localeCompare(right.fileName, "ja")
-  )) {
-    if (existingFile.targetKey === null || !desiredTargetKeys.has(existingFile.targetKey)) {
-      reservedFileNames.add(existingFile.fileName.toLowerCase());
-      continue;
-    }
-
-    const currentFiles = existingManagedFiles.get(existingFile.targetKey) ?? [];
-    currentFiles.push(existingFile.fileName);
-    existingManagedFiles.set(existingFile.targetKey, currentFiles);
+  if (
+    value.entityType === "dataset" &&
+    typeof value.id === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.path === "string" &&
+    typeof value.hash === "string" &&
+    typeof value.kind === "string" &&
+    (value.displayName === undefined || typeof value.displayName === "string") &&
+    (value.representation === "directory" || value.representation === "dataset-json") &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    (value.provenance === "source" || value.provenance === "derived") &&
+    (value.createdByBlockId === null ||
+      value.createdByBlockId === undefined ||
+      typeof value.createdByBlockId === "string") &&
+    (value.memberIds === undefined ||
+      (Array.isArray(value.memberIds) && value.memberIds.every((item) => typeof item === "string")))
+  ) {
+    const datasetId = value.id.trim();
+    return {
+      createdAt: value.createdAt,
+      createdByBlockId: value.createdByBlockId ?? null,
+      datasetId,
+      displayName: normalizeDatasetName(value.displayName, datasetId),
+      entityType: "dataset",
+      hash: value.hash,
+      id: datasetId,
+      kind: value.kind,
+      memberIds: value.memberIds,
+      path: normalizeWorkspaceRelativePath(value.path),
+      provenance: value.provenance,
+      representation: value.representation,
+      visibility: value.visibility
+    };
   }
 
-  for (const managedFiles of existingManagedFiles.values()) {
-    managedFiles.sort((left, right) => left.localeCompare(right, "ja"));
+  if (
+    typeof value.datasetId === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.storeRelativePath === "string" &&
+    (value.createdByBlockId === null ||
+      value.createdByBlockId === undefined ||
+      typeof value.createdByBlockId === "string")
+  ) {
+    const datasetId = value.datasetId.trim();
+    const normalizedPath = normalizeWorkspaceRelativePath(value.storeRelativePath);
+    const sourceMembers = Array.isArray(value.sourceMembers)
+      ? value.sourceMembers
+          .filter(
+            (member) =>
+              isJsonRecord(member) && typeof member.originalDataId === "string"
+          )
+          .map((member) => member.originalDataId)
+      : undefined;
 
-    for (const duplicateFileName of managedFiles.slice(1)) {
-      reservedFileNames.add(duplicateFileName.toLowerCase());
-    }
+    return {
+      createdAt: value.createdAt,
+      createdByBlockId: value.createdByBlockId ?? null,
+      datasetId,
+      displayName: normalizeDatasetName(value.name, datasetId),
+      entityType: "dataset",
+      hash: typeof value.hash === "string" ? value.hash : "",
+      id: datasetId,
+      kind: value.kind,
+      memberIds: sourceMembers,
+      path: normalizedPath,
+      provenance: value.createdByBlockId ? "derived" : "source",
+      representation: "directory",
+      visibility: inferVisibilityFromPath(normalizedPath)
+    };
   }
 
-  const assignments = new Map<string, string>();
+  return null;
+}
 
-  for (const desiredFile of orderedDesiredFiles) {
-    let sequence = 1;
-    let candidateFileName = createManagedDataNoteFileName(desiredFile.preferredLabel, sequence);
+export function isOriginalDataNoteMetadata(value: unknown): value is OriginalDataNoteMetadata {
+  return normalizeOriginalDataNoteMetadata(value) !== null;
+}
 
-    while (reservedFileNames.has(candidateFileName.toLowerCase())) {
-      sequence += 1;
-      candidateFileName = createManagedDataNoteFileName(desiredFile.preferredLabel, sequence);
-    }
-
-    assignments.set(desiredFile.targetKey, candidateFileName);
-    reservedFileNames.add(candidateFileName.toLowerCase());
-  }
-
-  return assignments;
+export function isDatasetDataNoteMetadata(value: unknown): value is DatasetDataNoteMetadata {
+  return normalizeDatasetDataNoteMetadata(value) !== null;
 }
 
 export function buildOriginalDataNoteMarkdown(
   metadata: OriginalDataNoteMetadata,
-  existingContent?: string,
-  canonicalFileRelativePaths: readonly string[] = []
+  existingContent?: string
 ): string {
-  return buildDataNoteMarkdown({
-    defaultBody: buildDefaultOriginalDataNoteBody(metadata, canonicalFileRelativePaths),
+  return buildManagedDataNoteMarkdown({
+    defaultBody: buildTitleOnlyNoteBody(metadata.displayName),
     existingContent,
     frontmatterLines: [
       `integralNoteType: ${serializeYamlValue(DATA_NOTE_TYPE)}`,
       `dataTargetType: ${serializeYamlValue("original-data")}`,
-      `originalName: ${serializeYamlValue(metadata.originalName)}`,
+      `managedDataId: ${serializeYamlValue(metadata.id)}`,
       `originalDataId: ${serializeYamlValue(metadata.originalDataId)}`,
-      `sourceKind: ${serializeYamlValue(metadata.sourceKind)}`,
-      `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
-      `aliasRelativePath: ${serializeYamlValue(metadata.aliasRelativePath)}`,
-      `storeRelativePath: ${serializeYamlValue(metadata.storeRelativePath)}`
+      `entityType: ${serializeYamlValue(metadata.entityType)}`,
+      `displayName: ${serializeYamlValue(metadata.displayName)}`,
+      `representation: ${serializeYamlValue(metadata.representation)}`,
+      `path: ${serializeYamlValue(metadata.path)}`,
+      `hash: ${serializeYamlValue(metadata.hash)}`,
+      `visibility: ${serializeYamlValue(metadata.visibility)}`,
+      `provenance: ${serializeYamlValue(metadata.provenance)}`,
+      `createdAt: ${serializeYamlValue(metadata.createdAt)}`
     ],
     generatedBodyCandidates: [
       buildLegacyOriginalDataNoteBody(metadata),
-      buildTitleOnlyOriginalDataNoteBody(metadata),
-      buildSingleLinkOriginalDataNoteBody(metadata),
-      buildDefaultOriginalDataNoteBody(metadata, canonicalFileRelativePaths)
+      buildTitleOnlyNoteBody(metadata.displayName)
     ],
-    isGeneratedBody: (body) => isGeneratedOriginalDataNoteBody(body, metadata),
-    legacyBodyExtractor: (normalizedExistingContent) =>
-      extractLegacyOriginalDataNoteBody(normalizedExistingContent, metadata),
+    isGeneratedBody: (body) => isGeneratedDataNoteBody(body, metadata.displayName),
     managedKeys: ORIGINAL_DATA_MANAGED_FRONTMATTER_KEYS
   });
 }
 
 export function buildDatasetDataNoteMarkdown(
   metadata: DatasetDataNoteMetadata,
-  existingContent?: string,
-  canonicalFileRelativePaths: readonly string[] = []
+  existingContent?: string
 ): string {
-  const datasetName = resolveDatasetDataNoteName(metadata);
   const frontmatterLines = [
     `integralNoteType: ${serializeYamlValue(DATA_NOTE_TYPE)}`,
     `dataTargetType: ${serializeYamlValue("dataset")}`,
+    `managedDataId: ${serializeYamlValue(metadata.id)}`,
     `datasetId: ${serializeYamlValue(metadata.datasetId)}`,
-    `name: ${serializeYamlValue(datasetName)}`,
-    `kind: ${serializeYamlValue(metadata.kind)}`,
+    `entityType: ${serializeYamlValue(metadata.entityType)}`,
+    `displayName: ${serializeYamlValue(metadata.displayName)}`,
+    `representation: ${serializeYamlValue(metadata.representation)}`,
+    `path: ${serializeYamlValue(metadata.path)}`,
+    `hash: ${serializeYamlValue(metadata.hash)}`,
+    `visibility: ${serializeYamlValue(metadata.visibility)}`,
+    `provenance: ${serializeYamlValue(metadata.provenance)}`,
     `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
-    `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`,
-    `storeRelativePath: ${serializeYamlValue(metadata.storeRelativePath)}`
+    `kind: ${serializeYamlValue(metadata.kind)}`,
+    `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`
   ];
 
-  if (metadata.sourceMembers && metadata.sourceMembers.length > 0) {
-    frontmatterLines.push(`sourceMembers: ${serializeYamlValue(metadata.sourceMembers)}`);
+  if (metadata.memberIds && metadata.memberIds.length > 0) {
+    frontmatterLines.push(`memberIds: ${serializeYamlValue(metadata.memberIds)}`);
   }
 
-  return buildDataNoteMarkdown({
-    defaultBody: buildDefaultDatasetNoteBody(metadata, canonicalFileRelativePaths),
+  return buildManagedDataNoteMarkdown({
+    defaultBody: buildTitleOnlyNoteBody(metadata.displayName),
     existingContent,
     frontmatterLines,
     generatedBodyCandidates: [
-      buildLegacyDatasetDataNoteBody(metadata),
-      buildTitleOnlyDatasetNoteBody(metadata),
-      buildSingleLinkDatasetNoteBody(metadata),
-      buildDefaultDatasetNoteBody(metadata, canonicalFileRelativePaths)
+      buildLegacyDatasetNoteBody(metadata),
+      buildTitleOnlyNoteBody(metadata.displayName)
     ],
-    isGeneratedBody: (body) => isGeneratedDatasetNoteBody(body, metadata),
+    isGeneratedBody: (body) => isGeneratedDataNoteBody(body, metadata.displayName),
     managedKeys: DATASET_MANAGED_FRONTMATTER_KEYS
   });
 }
@@ -295,53 +310,51 @@ export function hasDataNoteFrontmatter(markdown: string): boolean {
 export function replaceDataNoteBody(markdown: string, body: string): string {
   const normalizedMarkdown = normalizeNewlines(markdown);
   const parsed = splitFrontmatterBlock(normalizedMarkdown);
-  const frontmatter = parsed.frontmatter;
+
+  if (!isDataNoteFrontmatter(parsed.frontmatter) || parsed.frontmatter === null) {
+    return normalizeBody(body);
+  }
+
+  return serializeFrontmatterDocument(parsed.frontmatter, normalizeBody(body));
+}
+
+export function parseDataNoteTargetInfo(markdown: string): DataNoteTargetInfo | null {
+  const normalizedMarkdown = normalizeNewlines(markdown);
+  const { frontmatter } = splitFrontmatterBlock(normalizedMarkdown);
 
   if (!isDataNoteFrontmatter(frontmatter) || frontmatter === null) {
-    return body;
+    return null;
   }
 
-  return serializeFrontmatterDocument(frontmatter, normalizeBody(body));
-}
+  const dataTargetType = parseFrontmatterValue(frontmatter, "dataTargetType");
 
-export function isOriginalDataNoteMetadata(value: unknown): value is OriginalDataNoteMetadata {
-  if (!isJsonRecord(value)) {
-    return false;
+  if (dataTargetType === "original-data") {
+    const originalDataId =
+      parseFrontmatterValue(frontmatter, "originalDataId") ??
+      parseFrontmatterValue(frontmatter, "managedDataId");
+
+    return typeof originalDataId === "string" && originalDataId.trim().length > 0
+      ? {
+          dataTargetType,
+          targetId: originalDataId.trim()
+        }
+      : null;
   }
 
-  return (
-    typeof value.originalDataId === "string" &&
-    typeof value.originalName === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.aliasRelativePath === "string" &&
-    typeof value.storeRelativePath === "string" &&
-    (value.sourceKind === "file" || value.sourceKind === "directory")
-  );
-}
+  if (dataTargetType === "dataset") {
+    const datasetId =
+      parseFrontmatterValue(frontmatter, "datasetId") ??
+      parseFrontmatterValue(frontmatter, "managedDataId");
 
-export function isDatasetDataNoteMetadata(value: unknown): value is DatasetDataNoteMetadata {
-  if (!isJsonRecord(value)) {
-    return false;
+    return typeof datasetId === "string" && datasetId.trim().length > 0
+      ? {
+          dataTargetType,
+          targetId: datasetId.trim()
+        }
+      : null;
   }
 
-  const sourceMembers = value.sourceMembers;
-
-  return (
-    typeof value.datasetId === "string" &&
-    typeof value.kind === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.storeRelativePath === "string" &&
-    (value.name === undefined || typeof value.name === "string") &&
-    (value.createdByBlockId === null || typeof value.createdByBlockId === "string") &&
-    (sourceMembers === undefined ||
-      (Array.isArray(sourceMembers) &&
-        sourceMembers.every(
-          (member) =>
-            isJsonRecord(member) &&
-            typeof member.entryName === "string" &&
-            typeof member.originalDataId === "string"
-        )))
-  );
+  return null;
 }
 
 interface BuildDataNoteMarkdownOptions {
@@ -350,17 +363,15 @@ interface BuildDataNoteMarkdownOptions {
   frontmatterLines: string[];
   generatedBodyCandidates?: string[];
   isGeneratedBody?: (normalizedBody: string) => boolean;
-  legacyBodyExtractor?: (normalizedExistingContent: string) => string | null;
   managedKeys: readonly string[];
 }
 
-function buildDataNoteMarkdown({
+function buildManagedDataNoteMarkdown({
   defaultBody,
   existingContent,
   frontmatterLines,
   generatedBodyCandidates = [],
   isGeneratedBody,
-  legacyBodyExtractor,
   managedKeys
 }: BuildDataNoteMarkdownOptions): string {
   const normalizedExistingContent =
@@ -373,8 +384,7 @@ function buildDataNoteMarkdown({
     normalizedExistingContent,
     parsed,
     generatedBodyCandidates,
-    isGeneratedBody,
-    legacyBodyExtractor
+    isGeneratedBody
   );
   const frontmatter = buildMergedFrontmatter(frontmatterLines, parsed.frontmatter, managedKeys);
 
@@ -386,8 +396,7 @@ function resolveDataNoteBody(
   existingContent: string | undefined,
   parsed: FrontmatterBlock,
   generatedBodyCandidates: readonly string[],
-  isGeneratedBody?: (normalizedBody: string) => boolean,
-  legacyBodyExtractor?: (normalizedExistingContent: string) => string | null
+  isGeneratedBody?: (normalizedBody: string) => boolean
 ): string {
   if (existingContent === undefined) {
     return normalizeBody(defaultBody);
@@ -407,12 +416,6 @@ function resolveDataNoteBody(
     return normalizedBody;
   }
 
-  const legacyBody = legacyBodyExtractor?.(existingContent) ?? null;
-
-  if (legacyBody !== null) {
-    return legacyBody;
-  }
-
   return normalizeBody(existingContent);
 }
 
@@ -429,6 +432,50 @@ function buildMergedFrontmatter(
   }
 
   return `${managedFrontmatter}\n${preservedFrontmatter}`;
+}
+
+function buildTitleOnlyNoteBody(displayName: string): string {
+  return `# ${resolveManagedDataNoteName(displayName)}\n`;
+}
+
+function buildLegacyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
+  return `# ${metadata.displayName}_${metadata.originalDataId}\n`;
+}
+
+function buildLegacyDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
+  return `# ${metadata.kind}_${metadata.datasetId}\n`;
+}
+
+function isGeneratedDataNoteBody(body: string, displayName: string): boolean {
+  const normalizedBody = normalizeBody(body);
+  const lines = normalizedBody.split("\n");
+  const expectedTitle = `# ${resolveManagedDataNoteName(displayName)}`;
+
+  if ((lines[0] ?? "") !== expectedTitle) {
+    return false;
+  }
+
+  const remainingBody = trimLeadingBlankLines(lines.slice(1).join("\n"));
+
+  if (remainingBody.length === 0) {
+    return true;
+  }
+
+  return remainingBody.split("\n").every((line) => /^- \[[^\]\n]+\]\([^)]+\)(?: .*)?$/u.test(line));
+}
+
+function resolveManagedDataNoteName(displayName: string): string {
+  const normalized = displayName.trim();
+  return normalized.length > 0 ? normalized : "managed-data";
+}
+
+function normalizeDatasetName(displayName: unknown, datasetId: string): string {
+  if (typeof displayName === "string" && displayName.trim().length > 0) {
+    return displayName;
+  }
+
+  const normalizedDatasetId = datasetId.trim();
+  return normalizedDatasetId.length > 0 ? normalizedDatasetId : "dataset";
 }
 
 function isDataNoteFrontmatter(frontmatter: string | null): boolean {
@@ -463,196 +510,8 @@ function parseFrontmatterValue(frontmatter: string, key: string): unknown {
   }
 }
 
-function extractLegacyOriginalDataNoteBody(
-  markdown: string,
-  metadata: OriginalDataNoteMetadata
-): string | null {
-  const lines = normalizeNewlines(markdown).split("\n");
-  const expectedTitle = `# ${metadata.originalName}_${metadata.originalDataId}`;
-  const expectedPrefixes = [
-    expectedTitle,
-    "",
-    "- Original Name:",
-    "- Original Data ID:",
-    "- Source Kind:",
-    "- Created At:",
-    "- Alias Path:",
-    "- Store Path:"
-  ];
-
-  if (lines.length < expectedPrefixes.length) {
-    return null;
-  }
-
-  for (let index = 0; index < expectedPrefixes.length; index += 1) {
-    const expected = expectedPrefixes[index];
-    const current = lines[index] ?? "";
-
-    if (index <= 1) {
-      if (current !== expected) {
-        return null;
-      }
-
-      continue;
-    }
-
-    if (!current.startsWith(expected)) {
-      return null;
-    }
-  }
-
-  const remainingBody = trimLeadingBlankLines(lines.slice(expectedPrefixes.length).join("\n"));
-
-  if (remainingBody.length === 0) {
-    return buildDefaultOriginalDataNoteBody(metadata);
-  }
-
-  return normalizeBody(remainingBody);
-}
-
-function buildDefaultOriginalDataNoteBody(
-  metadata: OriginalDataNoteMetadata,
-  canonicalFileRelativePaths: readonly string[] = []
-): string {
-  void canonicalFileRelativePaths;
-  return buildTitleOnlyOriginalDataNoteBody(metadata);
-}
-
-function buildLegacyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
-  return `# ${metadata.originalName}_${metadata.originalDataId}\n`;
-}
-
-function buildTitleOnlyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
-  return `# ${resolveOriginalDataNoteName(metadata)}\n`;
-}
-
-function buildSingleLinkOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
-  const originalDataName = resolveOriginalDataNoteName(metadata);
-  const canonicalTarget = toCanonicalWorkspaceTarget(
-    normalizeWorkspaceRelativePath(metadata.storeRelativePath)
-  );
-
-  return `# ${originalDataName}\n\n- [${originalDataName}](${canonicalTarget})\n`;
-}
-
-function buildTitleOnlyDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
-  return `# ${resolveDatasetDataNoteName(metadata)}\n`;
-}
-
-function buildLegacyDatasetDataNoteBody(metadata: DatasetDataNoteMetadata): string {
-  return `# ${metadata.kind}_${metadata.datasetId}\n`;
-}
-
-function buildSingleLinkDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
-  const datasetName = resolveDatasetDataNoteName(metadata);
-  const canonicalTarget = toCanonicalWorkspaceTarget(metadata.storeRelativePath);
-
-  return `# ${datasetName}\n\n- [${datasetName}](${canonicalTarget}) を開く\n`;
-}
-
-function buildDefaultDatasetNoteBody(
-  metadata: DatasetDataNoteMetadata,
-  canonicalFileRelativePaths: readonly string[]
-): string {
-  void canonicalFileRelativePaths;
-  return buildTitleOnlyDatasetNoteBody(metadata);
-}
-
-function isGeneratedOriginalDataNoteBody(
-  body: string,
-  metadata: OriginalDataNoteMetadata
-): boolean {
-  const normalizedBody = normalizeBody(body);
-
-  if (
-    normalizedBody === normalizeBody(buildLegacyOriginalDataNoteBody(metadata)) ||
-    normalizedBody === normalizeBody(buildTitleOnlyOriginalDataNoteBody(metadata)) ||
-    normalizedBody === normalizeBody(buildSingleLinkOriginalDataNoteBody(metadata))
-  ) {
-    return true;
-  }
-
-  const lines = normalizedBody.split("\n");
-
-  if ((lines[0] ?? "") !== `# ${resolveOriginalDataNoteName(metadata)}`) {
-    return false;
-  }
-
-  const remainingLines = trimLeadingBlankLines(lines.slice(1).join("\n"));
-
-  if (remainingLines.length === 0) {
-    return true;
-  }
-
-  const normalizedStoreRelativePath = normalizeWorkspaceRelativePath(metadata.storeRelativePath);
-  const expectedPrefix = `${normalizedStoreRelativePath}/`;
-
-  return remainingLines.split("\n").every((line) => {
-    const match = /^- \[[^\]\n]+\]\(([^)\n]+)\)$/u.exec(line);
-
-    if (!match) {
-      return false;
-    }
-
-    const targetPath = resolveWorkspaceMarkdownTarget(match[1] ?? "");
-    return (
-      targetPath !== null &&
-      (targetPath === normalizedStoreRelativePath || targetPath.startsWith(expectedPrefix))
-    );
-  });
-}
-
-function isGeneratedDatasetNoteBody(
-  body: string,
-  metadata: DatasetDataNoteMetadata
-): boolean {
-  const normalizedBody = normalizeBody(body);
-
-  if (
-    normalizedBody === normalizeBody(buildLegacyDatasetDataNoteBody(metadata)) ||
-    normalizedBody === normalizeBody(buildTitleOnlyDatasetNoteBody(metadata)) ||
-    normalizedBody === normalizeBody(buildSingleLinkDatasetNoteBody(metadata))
-  ) {
-    return true;
-  }
-
-  const lines = normalizedBody.split("\n");
-
-  if ((lines[0] ?? "") !== `# ${resolveDatasetDataNoteName(metadata)}`) {
-    return false;
-  }
-
-  const remainingLines = trimLeadingBlankLines(lines.slice(1).join("\n"));
-
-  if (remainingLines.length === 0) {
-    return true;
-  }
-
-  const expectedPrefix = `${normalizeWorkspaceRelativePath(metadata.storeRelativePath)}/`;
-
-  return remainingLines.split("\n").every((line) => {
-    const match = /^- \[[^\]\n]+\]\(([^)\n]+)\)$/u.exec(line);
-
-    if (!match) {
-      return false;
-    }
-
-    const targetPath = resolveWorkspaceMarkdownTarget(match[1] ?? "");
-    return targetPath !== null && targetPath.startsWith(expectedPrefix);
-  });
-}
-
-function resolveOriginalDataNoteName(
-  metadata: Pick<OriginalDataNoteMetadata, "originalDataId" | "originalName">
-): string {
-  const normalizedName = metadata.originalName.trim();
-
-  if (normalizedName.length > 0) {
-    return normalizedName;
-  }
-
-  const fallbackId = metadata.originalDataId.trim();
-  return fallbackId.length > 0 ? fallbackId : "original-data";
+function inferVisibilityFromPath(relativePath: string): ManagedDataVisibility {
+  return relativePath.startsWith(".store/") ? "hidden" : "visible";
 }
 
 function normalizeWorkspaceRelativePath(relativePath: string): string {
@@ -662,31 +521,12 @@ function normalizeWorkspaceRelativePath(relativePath: string): string {
     .join("/");
 }
 
-function createManagedDataNoteFileName(label: string, sequence: number): string {
-  const sanitizedLabel = sanitizeFileNameSegment(label);
-
-  if (sequence <= 1) {
-    return `${sanitizedLabel}.md`;
-  }
-
-  return `${sanitizedLabel}_${sequence}.md`;
-}
-
 function trimLeadingBlankLines(value: string): string {
   return value.replace(/^(?:\s*\n)+/u, "");
 }
 
 function serializeYamlValue(value: unknown): string {
   return value === undefined ? "null" : JSON.stringify(value);
-}
-
-function sanitizeFileNameSegment(value: string): string {
-  const sanitized = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
-    .replace(/[. ]+$/gu, "");
-
-  return sanitized.length > 0 ? sanitized : "data-note";
 }
 
 function escapeRegExp(value: string): string {
