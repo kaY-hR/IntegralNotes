@@ -409,3 +409,10 @@
   - confirm は current 実装では `basename` ベースの candidate 検出を使い、候補が一意なら自動追従し、複数なら dialog で選ばせる
   - `src/renderer/ManagedDataTrackingDialog.tsx` を追加し、recorded path / hash と候補 path 一覧を見ながら tracked path を更新できるようにした
   - `npm run build` が通ることを確認した
+* 2026-04-15 実装第5段:
+  - original data import に残っていた `.store/objects` canonical storage 前提を外した
+  - `cwd` 外から登録した original data は visible な `Data/` 配下へ copy し、`cwd` 内の対象はその場の path をそのまま managed `path` として採用するようにした
+  - `src/main/integralWorkspaceService.ts` の `resolveOriginalDataContentPath()` を visible `metadata.path` 基点へ変更し、source dataset materialize も hidden object ではなく current visible path を参照するようにした
+  - new metadata では `objectPath` を書かず、旧 metadata の hidden canonical 参照は reconciliation / update 時に段階的に消える形へ寄せた
+  - `docs/10_要求/10_MVP要件.md` と `docs/20_アーキテクチャ/10_データモデル.md` を更新し、original data の canonical 実体を `.store/objects` に置かない方針へ合わせた
+  - `npm run build` が通ることを確認した

@@ -231,43 +231,34 @@ export class IntegralWorkspaceService {
       }
 
       const originalDataId = createOpaqueId("ORD");
-      const objectPath = createOriginalDataObjectRelativePath(
-        originalDataId,
-        path.basename(resolvedSourcePath),
-        representation
-      );
       const visiblePath = await this.resolveOriginalDataVisiblePath(
         rootPath,
         resolvedSourcePath,
         originalDataId,
         representation
       );
-      const objectAbsolutePath = this.resolveWorkspacePath(objectPath);
       const visibleAbsolutePath = this.resolveWorkspacePath(visiblePath);
 
-      await fs.mkdir(path.dirname(objectAbsolutePath), { recursive: true });
-      await fs.mkdir(path.dirname(visibleAbsolutePath), { recursive: true });
-
-      if (sourceInsideWorkspace) {
-        await fs.rename(resolvedSourcePath, objectAbsolutePath);
-      } else {
-        await this.copyOriginalDataIntoStore(resolvedSourcePath, objectAbsolutePath, representation);
+      if (!sourceInsideWorkspace) {
+        await fs.mkdir(path.dirname(visibleAbsolutePath), { recursive: true });
+        await this.copyOriginalDataIntoWorkspace(
+          resolvedSourcePath,
+          visibleAbsolutePath,
+          representation
+        );
       }
-
-      await this.createVisibleAlias(objectAbsolutePath, visibleAbsolutePath, representation);
 
       const metadata: OriginalDataMetadata = {
         createdAt: new Date().toISOString(),
         displayName: path.basename(resolvedSourcePath),
         entityType: "original-data",
-        hash: await this.computeManagedDataHash(objectAbsolutePath, representation),
+        hash: await this.computeManagedDataHash(visibleAbsolutePath, representation),
         id: originalDataId,
-        objectPath,
         originalDataId,
         path: visiblePath,
         provenance: "source",
         representation,
-        visibility: "visible"
+        visibility: inferVisibilityFromPath(visiblePath)
       };
 
       await this.writeOriginalDataMetadata(originalDataId, metadata);
@@ -818,6 +809,7 @@ export class IntegralWorkspaceService {
       const nextMetadata: OriginalDataMetadata = {
         ...metadata,
         hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
+        objectPath: undefined,
         path: nextPath,
         visibility: inferVisibilityFromPath(nextPath)
       };
@@ -1054,7 +1046,7 @@ export class IntegralWorkspaceService {
   }
 
   private resolveOriginalDataContentPath(metadata: OriginalDataMetadata): string {
-    return this.resolveWorkspacePath(metadata.objectPath ?? metadata.path);
+    return this.resolveWorkspacePath(metadata.path);
   }
   private isWorkspacePath(rootPath: string, absolutePath: string): boolean {
     const normalizedRelative = path.relative(rootPath, absolutePath);
@@ -1102,7 +1094,7 @@ export class IntegralWorkspaceService {
     )}`;
   }
 
-  private async copyOriginalDataIntoStore(
+  private async copyOriginalDataIntoWorkspace(
     sourcePath: string,
     destinationPath: string,
     representation: OriginalDataRepresentation
@@ -1347,7 +1339,10 @@ export class IntegralWorkspaceService {
     workspaceEntries: readonly TrackableWorkspaceEntry[],
     claimedPaths: Set<string>
   ): Promise<ReconcileMetadataResult<OriginalDataMetadata>> {
-    const nextMetadata = { ...metadata };
+    const nextMetadata: OriginalDataMetadata = {
+      ...metadata,
+      objectPath: undefined
+    };
     const currentVisiblePath = await this.resolveIfExists(metadata.path);
 
     if (currentVisiblePath) {
@@ -1720,19 +1715,6 @@ function normalizeDatasetName(name: string | undefined, datasetId: string): stri
 
 function createOpaqueId(prefix: "ORD" | "BLK" | "DTS" | "PYS"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
-}
-
-function createOriginalDataObjectRelativePath(
-  originalDataId: string,
-  originalName: string,
-  representation: OriginalDataRepresentation
-): string {
-  if (representation === "directory") {
-    return `${STORE_DIRECTORY}/${STORE_OBJECTS_DIRECTORY}/${originalDataId}`;
-  }
-
-  const extension = path.extname(originalName.trim());
-  return `${STORE_DIRECTORY}/${STORE_OBJECTS_DIRECTORY}/${originalDataId}${extension}`;
 }
 
 function createDatasetObjectRelativePath(datasetId: string): string {

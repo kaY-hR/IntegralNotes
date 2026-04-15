@@ -7,7 +7,6 @@
 - すべての managed data は `.store/.integral/{id}.json` metadata を持つ
 - metadata には少なくとも `id`, `path`, `hash`, `representation`, `visibility`, `provenance`, `createdAt` を持たせる
 - `path` は current canonical workspace relative path とし、workspace 内のどこでもよい
-- hidden 管理したい data の `path` は `.store/` 配下でもよい
 - `Data/` は visible path の default に過ぎず、固定の canonical location ではない
 - `file` は content hash、`directory` は tree hash、`dataset-json` は manifest content hash で追跡する
 - 起動時には `path` / `hash` の差分から rename / move / content update を検知する
@@ -23,11 +22,8 @@
 - original data の `representation` は `file` または `directory`
 - `cwd` 外から登録した場合、app は workspace 内の default visible path へ copy してよい
 - `cwd` 内の対象を登録した場合、元の path をそのまま canonical path としてよい
-- hidden 管理したい場合、app は `.store/` 配下 path を canonical path にしてよい
-- user-facing な visible copy / mirror が必要な場合は
-  - file は hard link
-  - directory は junction
-  を使ってよい
+- original data の canonical 実体を `.store/objects` に退避し、visible 側を mirror / alias にする構成は採らない
+- data-note や dataset materialize は original data の current visible path を正として参照する
 
 ## 3. data-note
 
