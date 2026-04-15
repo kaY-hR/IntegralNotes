@@ -164,10 +164,10 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\DTS-7K2M9Q4D"
+    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\.store\\DTS-9X4Q2M1A"
+    "result": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A"
   },
   "params": {}
 }
@@ -177,6 +177,7 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 - `inputs` は絶対パスまたは `null`
 - `outputs` は絶対パスまたは `null`
+- `inputs` は current path をそのまま指す場合も、dataset-json を staging resolve した path の場合もある
 - `params` は常に `{}` とする
 - `blockId` は渡さない
 

@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import {
   type FrontmatterBlock,
   normalizeMarkdownBody as normalizeBody,
@@ -516,28 +514,8 @@ function buildDefaultOriginalDataNoteBody(
   metadata: OriginalDataNoteMetadata,
   canonicalFileRelativePaths: readonly string[] = []
 ): string {
-  const originalDataName = resolveOriginalDataNoteName(metadata);
-  const normalizedStoreRelativePath = normalizeWorkspaceRelativePath(metadata.storeRelativePath);
-  const normalizedFilePaths = canonicalFileRelativePaths
-    .map((relativePath) => normalizeWorkspaceRelativePath(relativePath))
-    .filter((relativePath) => relativePath.length > 0);
-
-  if (normalizedFilePaths.length === 0) {
-    return metadata.sourceKind === "file"
-      ? buildSingleLinkOriginalDataNoteBody(metadata)
-      : buildTitleOnlyOriginalDataNoteBody(metadata);
-  }
-
-  const fileLines = normalizedFilePaths.map((relativePath) => {
-    const linkLabel =
-      metadata.sourceKind === "file" && relativePath === normalizedStoreRelativePath
-        ? originalDataName
-        : formatCanonicalDataLinkLabel(relativePath, normalizedStoreRelativePath);
-
-    return `- [${linkLabel}](${toCanonicalWorkspaceTarget(relativePath)})`;
-  });
-
-  return `# ${originalDataName}\n\n${fileLines.join("\n")}\n`;
+  void canonicalFileRelativePaths;
+  return buildTitleOnlyOriginalDataNoteBody(metadata);
 }
 
 function buildLegacyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
@@ -576,22 +554,8 @@ function buildDefaultDatasetNoteBody(
   metadata: DatasetDataNoteMetadata,
   canonicalFileRelativePaths: readonly string[]
 ): string {
-  const datasetName = resolveDatasetDataNoteName(metadata);
-  const normalizedStoreRelativePath = normalizeWorkspaceRelativePath(metadata.storeRelativePath);
-  const normalizedFilePaths = canonicalFileRelativePaths
-    .map((relativePath) => normalizeWorkspaceRelativePath(relativePath))
-    .filter((relativePath) => relativePath.length > 0);
-
-  if (normalizedFilePaths.length === 0) {
-    return buildTitleOnlyDatasetNoteBody(metadata);
-  }
-
-  const fileLines = normalizedFilePaths.map(
-    (relativePath) =>
-      `- [${formatCanonicalDataLinkLabel(relativePath, normalizedStoreRelativePath)}](${toCanonicalWorkspaceTarget(relativePath)})`
-  );
-
-  return `# ${datasetName}\n\n${fileLines.join("\n")}\n`;
+  void canonicalFileRelativePaths;
+  return buildTitleOnlyDatasetNoteBody(metadata);
 }
 
 function isGeneratedOriginalDataNoteBody(
@@ -689,14 +653,6 @@ function resolveOriginalDataNoteName(
 
   const fallbackId = metadata.originalDataId.trim();
   return fallbackId.length > 0 ? fallbackId : "original-data";
-}
-
-function formatCanonicalDataLinkLabel(relativePath: string, normalizedRootPath: string): string {
-  if (relativePath.startsWith(`${normalizedRootPath}/`)) {
-    return relativePath.slice(normalizedRootPath.length + 1);
-  }
-
-  return path.posix.basename(relativePath);
 }
 
 function normalizeWorkspaceRelativePath(relativePath: string): string {

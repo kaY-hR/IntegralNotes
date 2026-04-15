@@ -109,8 +109,8 @@ original data 複数選択の場合:
 
 1. ユーザーが source dataset 名を決める
 2. app が新しい source dataset を作る
-3. source dataset は `.store/{datasetId}/` に普通の file / directory 群として materialize される
-4. data note file 名には dataset 名を使う
+3. source dataset は `dataset-json` または `directory` として保存される
+4. app は source dataset に紐づく data-note を system-managed に作る
 5. block の input には source dataset の `DTS-...` を書く
 
 ## 6. output 割当
@@ -124,7 +124,8 @@ original data 複数選択の場合:
 app は実行前に次を行う。
 
 1. input dataset を確認する
-2. output slot ごとに新しい dataset フォルダを作る
+2. input dataset を executable path に resolve する
+3. output slot ごとに新しい dataset path を確保する
 3. `analysis-args.json` を `.py-scripts/PYS-.../` に書く
 
 ## 8. analysis-args.json
@@ -134,10 +135,10 @@ app は実行前に次を行う。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\DTS-7K2M9Q4D"
+    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\.store\\DTS-9X4Q2M1A"
+    "result": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A"
   },
   "params": {}
 }
@@ -146,6 +147,7 @@ app は実行前に次を行う。
 ### ルール
 
 - 値は絶対パスまたは `null`
+- input path は current path をそのまま使う場合も、staging path の場合もある
 - `blockId` は渡さない
 - `params` は常に `{}` とする
 

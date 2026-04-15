@@ -317,3 +317,68 @@
   - `src/renderer/App.tsx` で画像保存後の workspace snapshot を反映し、`Data/` 配下の新規 file が explorer に現れるようにした
 * 2026-04-15 修正:
   - Electron renderer で `file://` が `Not allowed to load local resource` になるケースがあったため、`resolveWorkspaceFileUrl()` は `file:` URL ではなく `data:` URL を返すように変更した
+
+## [ ] 24. managed data を `id / path / hash` 基盤へ再設計し、data-note を system-managed 化したい
+- Status:in-progress
+- 優先重み:9
+- 記載日時:2026-04-15-12:20(UTC+9)
+
+* 現状は `data-catalog/` 配下の visible Markdown file を data-note として扱い、original data / dataset の canonical link を本文に自動生成しているが、このモデルはユーザーにとって path / file 名の管理責務が重すぎる
+* 新方針では、original data / dataset を共通の managed data とみなし、少なくとも `id`, `path`, `hash` を持つ
+* `path` は workspace relative path とし、visible / hidden のどちらでもよい。`.store` は hidden path の default に過ぎない
+* `Data/` は visible data や画像保存先の default location に過ぎず、canonical な特別フォルダではない
+* tracking の基盤は `source / derived`, `original data / dataset` を問わず共通にし、`path same + hash same`, `path changed + hash same`, `path same + hash changed`, `path changed + hash changed` を扱えるようにしたい
+* dataset は `directory` だけでなく `dataset-json` representation も扱いたい。少なくとも source dataset は `originalDataId[]` を持つ custom manifest で表せるようにしたい
+* block schema 上の `inputs / outputs` は従来どおり `datasetId | null` とし、実行時に app が `datasetId -> readable directory path` を resolve する層を入れたい
+* data-note は `1 managed data = 1 data-note` とし、ID に 1:1 で紐づけて `.store/.integral/data-notes/{id}.md` に保存したい
+* data-note は system-managed note とし、ユーザーは本文だけを編集する。rename / move は許可しない
+* data-note は canonical file link 集ではなく、「この data は何か」を記述するノートとして扱いたい
+* これにより、data-note は「データファイル / データセットという概念にぶら下がる説明ノート」として扱い、workspace 上の file path と切り離したい
+
+* まず修正すべき文書:
+  - `docs/10_要求/00_プロダクト概要.md`
+  - `docs/10_要求/10_MVP要件.md`
+  - `docs/10_要求/20_ユーザー体験.md`
+  - `docs/20_アーキテクチャ/00_全体アーキテクチャ.md`
+  - `docs/20_アーキテクチャ/10_データモデル.md`
+  - `docs/20_アーキテクチャ/30_Python汎用解析プラグイン.md`
+  - `docs/30_設計/10_ブロックJSON設計.md`
+  - `docs/30_設計/20_ワークスペースレイアウト.md`
+  - `docs/30_設計/30_Pythonスクリプト登録と実行.md`
+  - `docs/30_設計/40_標準描画と結果閲覧.md`
+  - `docs/30_設計/60_ノートリンク記法.md`
+
+* 実装修正の主対象:
+  - `src/main/dataNote.ts`
+    - data-note を frontmatter/path ベースではなく ID 直結の system-managed note として再設計する
+    - 自動生成本文から canonical file link 一覧前提を外す
+  - `src/main/workspaceService.ts`
+    - `data-catalog/` 同期を廃止し、`.store/.integral/data-notes/` 同期へ置き換える
+    - data-note を explorer 上の user-managed file として扱わない前提に寄せる
+  - `src/main/integralWorkspaceService.ts`
+    - original data / dataset metadata を `id / path / hash` ベースへ広げる
+    - `storeRelativePath / aliasRelativePath` 前提を見直す
+    - data-note path 解決を `data-catalog` 依存から ID 固定 path へ変更する
+    - dataset 実行時の path 解決を `datasetId -> readable directory path` 層に寄せる
+  - `src/shared/integral.ts`
+    - summary / inspection 系の型を新 metadata に合わせて更新する
+  - `src/renderer/App.tsx` と関連 dialog
+    - data-note open 導線を file path ではなく data entity 起点で扱う
+    - user-facing 文言から file 名管理前提を外す
+
+* 実装順序の推奨:
+  1. data-note を `.store/.integral/data-notes/{id}.md` へ移し、system-managed 化する
+  2. metadata schema を `id / path / hash` ベースへ拡張する
+  3. original data / dataset の current path 解決を `storeRelativePath` 固定から切り離す
+  4. source dataset の `dataset-json` representation と実行時 resolve 層を入れる
+  5. renderer 側の data-note 導線と表示文言を揃える
+
+* 補足:
+  - Issue 15, 21 の「visible data-note file / canonical link 本文」前提は、この Issue の設計で再定義される
+  - 未リリース前提のため、必要なら旧 `data-catalog/` layout との互換は持たなくてよい
+* 2026-04-15 実装第1段:
+  - `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` の主要文書を `id / path / hash` 基盤 + system-managed data-note 方針へ更新した
+  - `src/main/workspaceService.ts` を更新し、data-note の同期先を `data-catalog/` から `.store/.integral/data-notes/{id}.md` に変更した
+  - `src/main/integralWorkspaceService.ts` を更新し、data-note path を file 名解決ではなく ID 固定 path で返すようにした
+  - `src/main/dataNote.ts` を更新し、data-note 既定本文から canonical file link 一覧前提を外し、説明 note 寄りにした
+  - `npm run build` が通ることを確認した

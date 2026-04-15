@@ -27,18 +27,12 @@ import type {
 } from "../shared/integral";
 import type { InstalledPluginDefinition } from "../shared/plugins";
 import { PluginRegistry } from "./pluginRegistry";
-import {
-  createDataNoteTargetKey,
-  createDatasetDataNoteFileName,
-  createOriginalDataNoteFileName,
-  parseDataNoteTargetInfo
-} from "./dataNote";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
 
-const DATA_CATALOG_DIRECTORY = "data-catalog";
 const DATA_DIRECTORY = "Data";
+const DATA_NOTE_DIRECTORY = "data-notes";
 const NOTES_DIRECTORY = "Notes";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
@@ -125,11 +119,10 @@ export class IntegralWorkspaceService {
 
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
     await this.workspaceService.ensureWorkspaceReady();
-    const dataNotePathIndex = await this.readDataNotePathIndex();
 
     const [originalData, datasets, scripts, externalPlugins] = await Promise.all([
-      this.readOriginalDataSummaries(dataNotePathIndex),
-      this.readDatasetSummaries(dataNotePathIndex),
+      this.readOriginalDataSummaries(),
+      this.readDatasetSummaries(),
       this.readPythonScriptSummaries(),
       this.pluginRegistry.listInstalledPlugins()
     ]);
@@ -396,15 +389,9 @@ export class IntegralWorkspaceService {
         .filter((entry) => isRenderableExtension(path.extname(entry.relativePath)))
         .map((entry) => this.readRenderableFile(entry.absolutePath, entry.relativePath))
     );
-    const dataNotePathIndex = await this.readDataNotePathIndex();
 
     return {
-      dataNoteRelativePath: this.resolveDataNoteRelativePath(
-        "dataset",
-        datasetMetadata.datasetId,
-        createDatasetDataNoteFileName(datasetMetadata.name),
-        dataNotePathIndex
-      ),
+      dataNoteRelativePath: this.createDataNoteRelativePath(datasetMetadata.datasetId),
       datasetId: datasetMetadata.datasetId,
       createdAt: datasetMetadata.createdAt,
       createdByBlockId: datasetMetadata.createdByBlockId,
@@ -582,7 +569,7 @@ export class IntegralWorkspaceService {
       stderr = executionError.stderr ?? "";
 
       await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
-      await this.workspaceService.syncManagedDataCatalogNotes();
+      await this.workspaceService.syncManagedDataNotes();
 
       throw new Error(
         [
@@ -595,7 +582,7 @@ export class IntegralWorkspaceService {
     }
 
     await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
-    await this.workspaceService.syncManagedDataCatalogNotes();
+    await this.workspaceService.syncManagedDataNotes();
 
     const finishedAt = new Date().toISOString();
     const createdDatasets = (
@@ -678,11 +665,11 @@ export class IntegralWorkspaceService {
   }
 
   private async writeOriginalDataNote(_metadata: OriginalDataMetadata): Promise<void> {
-    await this.workspaceService.syncManagedDataCatalogNotes();
+    await this.workspaceService.syncManagedDataNotes();
   }
 
   private async writeDatasetNote(_metadata: DatasetMetadata): Promise<void> {
-    await this.workspaceService.syncManagedDataCatalogNotes();
+    await this.workspaceService.syncManagedDataNotes();
   }
 
   private async writePythonExecutionLogs(
@@ -756,9 +743,7 @@ export class IntegralWorkspaceService {
     };
   }
 
-  private async readOriginalDataSummaries(
-    dataNotePathIndex?: ReadonlyMap<string, string>
-  ): Promise<IntegralOriginalDataSummary[]> {
+  private async readOriginalDataSummaries(): Promise<IntegralOriginalDataSummary[]> {
     const metadataRootPath = this.resolveStoreMetadataRootPath();
     const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
     const summaries = await Promise.all(
@@ -767,7 +752,7 @@ export class IntegralWorkspaceService {
         .map(async (entry) => {
           const metadata = await readJsonFile<OriginalDataMetadata>(path.join(metadataRootPath, entry.name));
 
-          return metadata?.originalDataId ? this.toOriginalDataSummary(metadata, dataNotePathIndex) : null;
+          return metadata?.originalDataId ? this.toOriginalDataSummary(metadata) : null;
         })
     );
 
@@ -776,9 +761,7 @@ export class IntegralWorkspaceService {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  private async readDatasetSummaries(
-    dataNotePathIndex?: ReadonlyMap<string, string>
-  ): Promise<IntegralDatasetSummary[]> {
+  private async readDatasetSummaries(): Promise<IntegralDatasetSummary[]> {
     const metadataRootPath = this.resolveStoreMetadataRootPath();
     const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
     const summaries = await Promise.all(
@@ -787,9 +770,7 @@ export class IntegralWorkspaceService {
         .map(async (entry) => {
           const metadata = await readJsonFile<DatasetMetadata>(path.join(metadataRootPath, entry.name));
 
-          return metadata?.datasetId
-            ? this.readDatasetSummary(metadata.datasetId, dataNotePathIndex).catch(() => null)
-            : null;
+          return metadata?.datasetId ? this.readDatasetSummary(metadata.datasetId).catch(() => null) : null;
         })
     );
 
@@ -798,10 +779,7 @@ export class IntegralWorkspaceService {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  private async readDatasetSummary(
-    datasetId: string,
-    dataNotePathIndex?: ReadonlyMap<string, string>
-  ): Promise<IntegralDatasetSummary> {
+  private async readDatasetSummary(datasetId: string): Promise<IntegralDatasetSummary> {
     const metadata = await this.readDatasetMetadata(datasetId);
 
     if (metadata === null) {
@@ -815,12 +793,7 @@ export class IntegralWorkspaceService {
     ).length;
 
     return {
-      dataNoteRelativePath: this.resolveDataNoteRelativePath(
-        "dataset",
-        metadata.datasetId,
-        createDatasetDataNoteFileName(metadata.name),
-        dataNotePathIndex
-      ),
+      dataNoteRelativePath: this.createDataNoteRelativePath(metadata.datasetId),
       datasetId: metadata.datasetId,
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
@@ -909,17 +882,11 @@ export class IntegralWorkspaceService {
   }
 
   private async toOriginalDataSummary(
-    metadata: OriginalDataMetadata,
-    dataNotePathIndex?: ReadonlyMap<string, string>
+    metadata: OriginalDataMetadata
   ): Promise<IntegralOriginalDataSummary> {
     return {
       aliasRelativePath: metadata.aliasRelativePath,
-      dataNoteRelativePath: this.resolveDataNoteRelativePath(
-        "original-data",
-        metadata.originalDataId,
-        createOriginalDataNoteFileName(metadata.originalName),
-        dataNotePathIndex
-      ),
+      dataNoteRelativePath: this.createDataNoteRelativePath(metadata.originalDataId),
       originalDataId: metadata.originalDataId,
       createdAt: metadata.createdAt,
       originalName: metadata.originalName,
@@ -932,48 +899,8 @@ export class IntegralWorkspaceService {
     return this.resolveWorkspacePath(metadata.storeRelativePath);
   }
 
-  private async readDataNotePathIndex(): Promise<Map<string, string>> {
-    const dataCatalogRootPath = this.resolveWorkspacePath(DATA_CATALOG_DIRECTORY);
-    const entries = await fs.readdir(dataCatalogRootPath, { withFileTypes: true });
-    const index = new Map<string, string>();
-
-    await Promise.all(
-      entries
-        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".md")
-        .map(async (entry) => {
-          const content = await readTextFileIfExists(path.join(dataCatalogRootPath, entry.name));
-
-          if (content === undefined) {
-            return;
-          }
-
-          const targetInfo = parseDataNoteTargetInfo(content);
-
-          if (!targetInfo) {
-            return;
-          }
-
-          const targetKey = createDataNoteTargetKey(targetInfo.dataTargetType, targetInfo.targetId);
-          const relativePath = `${DATA_CATALOG_DIRECTORY}/${entry.name}`;
-          const currentPath = index.get(targetKey);
-
-          if (!currentPath || relativePath.localeCompare(currentPath, "ja") < 0) {
-            index.set(targetKey, relativePath);
-          }
-        })
-    );
-
-    return index;
-  }
-
-  private resolveDataNoteRelativePath(
-    dataTargetType: "original-data" | "dataset",
-    targetId: string,
-    fallbackFileName: string,
-    dataNotePathIndex?: ReadonlyMap<string, string>
-  ): string {
-    const indexedPath = dataNotePathIndex?.get(createDataNoteTargetKey(dataTargetType, targetId));
-    return indexedPath ?? `${DATA_CATALOG_DIRECTORY}/${fallbackFileName}`;
+  private createDataNoteRelativePath(targetId: string): string {
+    return `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/${DATA_NOTE_DIRECTORY}/${targetId.trim()}.md`;
   }
 
   private isWorkspacePath(rootPath: string, absolutePath: string): boolean {
@@ -991,9 +918,7 @@ export class IntegralWorkspaceService {
     const topLevelSegment = normalizedRelative.split(path.sep).filter(Boolean)[0] ?? "";
 
     if (
-      [DATA_CATALOG_DIRECTORY, DATA_DIRECTORY, NOTES_DIRECTORY, PYTHON_SCRIPTS_DIRECTORY, STORE_DIRECTORY].includes(
-        topLevelSegment
-      )
+      [DATA_DIRECTORY, NOTES_DIRECTORY, PYTHON_SCRIPTS_DIRECTORY, STORE_DIRECTORY].includes(topLevelSegment)
     ) {
       throw new Error("system 管理ディレクトリ配下は元データ登録できません。");
     }
@@ -1414,14 +1339,6 @@ async function pathExists(targetPath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-async function readTextFileIfExists(filePath: string): Promise<string | undefined> {
-  try {
-    return await fs.readFile(filePath, "utf8");
-  } catch {
-    return undefined;
   }
 }
 
