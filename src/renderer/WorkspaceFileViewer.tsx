@@ -1,12 +1,20 @@
 import type { WorkspaceFileDocument } from "../shared/workspace";
 
+interface WorkspaceFileViewerAction {
+  buttonLabel: string;
+  buttonTitle?: string;
+  onOpen: () => void;
+}
+
 interface WorkspaceFileViewerProps {
   file: WorkspaceFileDocument;
+  managedDataAction?: WorkspaceFileViewerAction;
   onOpenInExternalApp?: (relativePath: string) => void;
 }
 
 export function WorkspaceFileViewer({
   file,
+  managedDataAction,
   onOpenInExternalApp
 }: WorkspaceFileViewerProps): JSX.Element {
   if (file.kind === "unsupported" || file.content === null) {
@@ -16,6 +24,18 @@ export function WorkspaceFileViewer({
           <strong>{file.name}</strong>
           <p>この形式はまだ main app 上で表示できません。</p>
           <div className="workspace-file-viewer__actions">
+            {managedDataAction ? (
+              <button
+                className="button button--ghost"
+                onClick={() => {
+                  managedDataAction.onOpen();
+                }}
+                title={managedDataAction.buttonTitle}
+                type="button"
+              >
+                {managedDataAction.buttonLabel}
+              </button>
+            ) : null}
             <button
               className="button button--primary"
               onClick={() => {
@@ -33,6 +53,20 @@ export function WorkspaceFileViewer({
 
   return (
     <div className="workspace-file-viewer">
+      {managedDataAction ? (
+        <div className="workspace-file-viewer__toolbar">
+          <button
+            className="button button--ghost button--xs"
+            onClick={() => {
+              managedDataAction.onOpen();
+            }}
+            title={managedDataAction.buttonTitle}
+            type="button"
+          >
+            {managedDataAction.buttonLabel}
+          </button>
+        </div>
+      ) : null}
       <section className="integral-renderable-card workspace-file-viewer__card">
         {file.kind === "html" ? (
           <iframe

@@ -423,3 +423,32 @@
   - これにより、ソフト内 rename / move で `json` が追随しない問題を、個別操作パスの継ぎ足しではなく `WorkspaceService` の変異イベント起点で吸収する構成へ寄せた
   - 併せて `src/main/workspaceService.ts` の bulk delete mutation 収集を修正し、途中で壊れていた `deleteEntries()` を正常化した
   - `workspace:renameEntry` で非 `.md` file rename が落ちない修正もこの流れで維持し、`npm run build` が通ることを確認した
+* 2026-04-15 実装第7段:
+  - `src/renderer/App.tsx` に managed data catalog を保持する state と `relativePath -> managed data` 解決を追加し、現在開いている file / path が original data または dataset に属するかを renderer 側で判定できるようにした
+  - 同じ解決層を使って `targetId -> data-note` open 時の tab 名を friendly name (`<displayName> のノート`) に寄せ、hidden file 名が前面に出ないようにした
+  - `src/renderer/WorkspaceFileViewer.tsx` と `src/renderer/styles.css` を更新し、renderable / text / unsupported file を見ているとき、対応する managed data があれば右上または action row から `[ノートを開く]` を押せるようにした
+  - `src/renderer/App.tsx` の markdown tab toolbar にも同じ note open action を足し、managed data が Markdown file の場合でも別タブで note を開けるようにした
+  - `npm run build` が通ることを確認した
+
+## [x] 25. managed data を見ている文脈から data-note を別タブで開けるようにしたい
+- Status:in-progress
+- 優先重み:7
+- 記載日時:2026-04-15-21:31(UTC+9)
+
+* `data-note` は system-managed note になったが、現状は「ある original data / dataset を見ているときに、その data の note を当然のように開ける」導線がまだ弱い
+* UX としては、tab 内分割や hidden folder 表示ではなく、VS Code の preview に近い感覚で「今見ている managed data に対応する note を別タブで開く」形に寄せたい
+* managed data を app 内で開いたときは、右上に `[ノートを開く]` または `[<displayName> のノートを開く]` 相当の action を出したい
+* その action は hidden path を UI component が直接知るのではなく、managed data の `targetId` から対応する `data-note` tab を開く経路にしたい
+* 対象は original data / dataset の両方とし、renderable / text / unsupported のどの viewer 文脈でも一貫して note を開けるようにしたい
+* renderable file は従来どおり preview を主とし、note は別タブで開く
+* 表示不可 file は従来どおり `[外部アプリで開く]` を維持しつつ、同じ画面から note も開けるようにしたい
+* すでに対象 `data-note` tab が開いている場合は、新規 tab を増やすのではなく既存 tab を選択する挙動にしたい
+* user-facing な tab 名や action 文言は hidden file 名 (`ORD-...md`, `DTS-...md`) ではなく、managed data の `displayName` / `name` を優先したい
+* 実装上は `relativePath -> managed data entity` を解決できる層を renderer / main のどちらかに持ち、通常 file open と managed-data open を分岐できるようにしたい
+* Issue 24 の `data-note を entity 起点で扱う` 方針の延長だが、こちらは基盤よりも viewer / tab UX の明確化を主対象とする
+* 2026-04-15 実装:
+  - `src/renderer/App.tsx` で asset catalog を保持し、開いている `relativePath` が managed data の current path または directory 配下 path に一致する場合、対応する target を引けるようにした
+  - `src/renderer/WorkspaceFileViewer.tsx` に note open action を追加し、renderable / text は右上、unsupported は action row から `[ノートを開く]` を押せるようにした
+  - `src/renderer/App.tsx` の markdown toolbar にも同じ action を出し、managed data が Markdown file の場合でも note を別タブで開けるようにした
+  - `OPEN_MANAGED_DATA_NOTE_EVENT` 経由の open では tab 名を `<displayName> のノート` へ寄せ、既存 tab があればその tab を再利用する挙動を維持した
+  - `npm run build` が通ることを確認した

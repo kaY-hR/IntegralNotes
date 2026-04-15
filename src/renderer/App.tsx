@@ -2,6 +2,7 @@ import * as FlexLayout from "flexlayout-react";
 import { type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 
 import type {
+  IntegralAssetCatalog,
   IntegralManagedDataTrackingIssue,
   IntegralOriginalDataSummary,
   RegisterPythonScriptResult
@@ -83,10 +84,29 @@ interface ExplorerClipboardState {
   sourcePaths: string[];
 }
 
+interface ManagedDataTarget {
+  displayName: string;
+  targetId: string;
+}
+
+interface OpenWorkspaceFileOptions {
+  openUnsupportedExternally?: boolean;
+  tabNameOverride?: string;
+}
+
 const MAIN_TABSET_ID = "editor-main";
 const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
 const TREE_DRAG_MIME = "application/x-integralnotes-workspace-selection";
+
+function createEmptyIntegralAssetCatalog(): IntegralAssetCatalog {
+  return {
+    blockTypes: [],
+    datasets: [],
+    originalData: [],
+    scripts: []
+  };
+}
 
 function createLayoutModel(): FlexLayout.Model {
   return FlexLayout.Model.fromJson({
@@ -187,6 +207,119 @@ function isHiddenWorkspacePath(relativePath: string): boolean {
 function createManagedDataNoteRelativePath(targetId: string): string {
   const normalizedId = targetId.trim();
   return `.store/.integral/data-notes/${normalizedId}.md`;
+}
+
+function createManagedDataNoteTabName(displayName: string): string {
+  return `${displayName} のノート`;
+}
+
+function findManagedDataTargetById(
+  catalog: IntegralAssetCatalog,
+  targetId: string
+): ManagedDataTarget | null {
+  const normalizedTargetId = targetId.trim();
+
+  if (normalizedTargetId.length === 0) {
+    return null;
+  }
+
+  const originalData = catalog.originalData.find(
+    (entry) => entry.originalDataId === normalizedTargetId
+  );
+
+  if (originalData) {
+    return {
+      displayName: originalData.displayName,
+      targetId: originalData.originalDataId
+    };
+  }
+
+  const dataset = catalog.datasets.find((entry) => entry.datasetId === normalizedTargetId);
+
+  if (dataset) {
+    return {
+      displayName: dataset.name,
+      targetId: dataset.datasetId
+    };
+  }
+
+  return null;
+}
+
+function findManagedDataTargetForPath(
+  catalog: IntegralAssetCatalog,
+  relativePath: string
+): ManagedDataTarget | null {
+  const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+  if (normalizedRelativePath.length === 0) {
+    return null;
+  }
+
+  const matches: Array<
+    ManagedDataTarget & {
+      isExactMatch: boolean;
+      matchedPath: string;
+    }
+  > = [];
+
+  const collectMatch = (
+    displayName: string,
+    targetId: string,
+    managedPath: string,
+    representation: "directory" | "file" | "dataset-json"
+  ): void => {
+    const normalizedManagedPath = normalizeRelativePath(managedPath);
+
+    if (normalizedManagedPath.length === 0) {
+      return;
+    }
+
+    const isExactMatch = normalizedRelativePath === normalizedManagedPath;
+    const isDirectoryMatch =
+      representation === "directory" &&
+      normalizedRelativePath.startsWith(`${normalizedManagedPath}/`);
+
+    if (!isExactMatch && !isDirectoryMatch) {
+      return;
+    }
+
+    matches.push({
+      displayName,
+      isExactMatch,
+      matchedPath: normalizedManagedPath,
+      targetId
+    });
+  };
+
+  for (const entry of catalog.originalData) {
+    collectMatch(entry.displayName, entry.originalDataId, entry.path, entry.representation);
+  }
+
+  for (const entry of catalog.datasets) {
+    collectMatch(entry.name, entry.datasetId, entry.path, entry.representation);
+  }
+
+  matches.sort((left, right) => {
+    if (left.isExactMatch !== right.isExactMatch) {
+      return left.isExactMatch ? -1 : 1;
+    }
+
+    if (left.matchedPath.length !== right.matchedPath.length) {
+      return right.matchedPath.length - left.matchedPath.length;
+    }
+
+    return left.displayName.localeCompare(right.displayName, "ja");
+  });
+
+  const [bestMatch] = matches;
+
+  return bestMatch
+    ? {
+        displayName: bestMatch.displayName,
+        targetId: bestMatch.targetId
+      }
+    : null;
 }
 
 function createPathChange(previousPath: string, nextPath: string): WorkspacePathChange | null {
@@ -345,7 +478,9 @@ function isDirty(tab: OpenWorkspaceTab | undefined): boolean {
   return Boolean(isMarkdownTab(tab) && tab.content !== tab.savedContent);
 }
 
-function createOpenTab(document: WorkspaceFileDocument): OpenWorkspaceTab {
+function createOpenTab(document: WorkspaceFileDocument, nameOverride?: string): OpenWorkspaceTab {
+  const name = nameOverride ?? document.name;
+
   if (document.kind === "markdown") {
     return {
       content: document.content ?? "",
@@ -353,7 +488,7 @@ function createOpenTab(document: WorkspaceFileDocument): OpenWorkspaceTab {
       isSaving: false,
       kind: "markdown",
       modifiedAt: document.modifiedAt,
-      name: document.name,
+      name,
       relativePath: document.relativePath,
       savedContent: document.content ?? ""
     };
@@ -363,7 +498,7 @@ function createOpenTab(document: WorkspaceFileDocument): OpenWorkspaceTab {
     content: document.content,
     kind: document.kind as ReadonlyWorkspaceFileKind,
     modifiedAt: document.modifiedAt,
-    name: document.name,
+    name,
     relativePath: document.relativePath
   };
 }
@@ -450,6 +585,9 @@ function clampContextMenuPosition(x: number, y: number): Pick<TreeContextMenuSta
 }
 
 export function App(): JSX.Element {
+  const [assetCatalog, setAssetCatalog] = useState<IntegralAssetCatalog>(
+    createEmptyIntegralAssetCatalog()
+  );
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
   const [openTabs, setOpenTabs] = useState<Record<string, OpenWorkspaceTab>>({});
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
@@ -540,6 +678,7 @@ export function App(): JSX.Element {
     setInlineEditor(null);
     setContextMenu(null);
     setDropTargetPath(null);
+    setAssetCatalog(createEmptyIntegralAssetCatalog());
     setDeleteDialog(null);
     setTrackingIssues([]);
     setTrackingDialogDismissed(false);
@@ -606,6 +745,11 @@ export function App(): JSX.Element {
     }
   };
 
+  const refreshAssetCatalog = async (): Promise<void> => {
+    const catalog = await window.integralNotes.getIntegralAssetCatalog();
+    setAssetCatalog(catalog);
+  };
+
   const refreshWorkspace = async (nextStatus?: string): Promise<void> => {
     setLoadingWorkspace(true);
 
@@ -621,7 +765,7 @@ export function App(): JSX.Element {
         resetTabs: workspace === null,
         statusMessage: nextStatus
       });
-      await refreshManagedDataTrackingIssues();
+      await Promise.all([refreshManagedDataTrackingIssues(), refreshAssetCatalog()]);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
@@ -644,7 +788,7 @@ export function App(): JSX.Element {
         resetTabs: true,
         statusMessage: `${snapshot.rootName} を開きました`
       });
-      await refreshManagedDataTrackingIssues();
+      await Promise.all([refreshManagedDataTrackingIssues(), refreshAssetCatalog()]);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
@@ -902,7 +1046,7 @@ export function App(): JSX.Element {
         return;
       }
 
-      void openWorkspaceFile(createManagedDataNoteRelativePath(targetId));
+      void openManagedDataNote(targetId);
     };
 
     window.addEventListener(
@@ -924,7 +1068,7 @@ export function App(): JSX.Element {
         handleOpenManagedDataNoteEvent as EventListener
       );
     };
-  }, [workspace, openTabs]);
+  }, [assetCatalog, openTabs, workspace]);
 
   useEffect(() => {
     if (
@@ -1088,6 +1232,16 @@ export function App(): JSX.Element {
     await openWorkspaceFile(relativePath);
   };
 
+  const openManagedDataNote = async (targetId: string): Promise<void> => {
+    const managedDataTarget = findManagedDataTargetById(assetCatalog, targetId);
+
+    await openWorkspaceFile(createManagedDataNoteRelativePath(targetId), {
+      tabNameOverride: managedDataTarget
+        ? createManagedDataNoteTabName(managedDataTarget.displayName)
+        : undefined
+    });
+  };
+
   const syncTreeSelectionForPath = (relativePath: string): void => {
     if (!workspace || !hasEntry(workspace.entries, relativePath)) {
       return;
@@ -1098,15 +1252,29 @@ export function App(): JSX.Element {
 
   const openWorkspaceFile = async (
     relativePath: string,
-    options?: { openUnsupportedExternally?: boolean }
+    options?: OpenWorkspaceFileOptions
   ): Promise<void> => {
     const existingTab = openTabs[relativePath];
     const tabId = toTabId(relativePath);
     const openUnsupportedExternally = options?.openUnsupportedExternally ?? false;
+    const tabNameOverride = options?.tabNameOverride;
 
     syncTreeSelectionForPath(relativePath);
 
     if (existingTab) {
+      if (tabNameOverride && existingTab.name !== tabNameOverride) {
+        const renamedTab = {
+          ...existingTab,
+          name: tabNameOverride
+        };
+
+        setOpenTabs((currentTabs) => ({
+          ...currentTabs,
+          [relativePath]: renamedTab
+        }));
+        syncTabLabel(relativePath, tabNameOverride, isDirty(renamedTab));
+      }
+
       if (
         openUnsupportedExternally &&
         (existingTab.kind === "unsupported" || existingTab.content === null)
@@ -1118,7 +1286,9 @@ export function App(): JSX.Element {
       model.doAction(FlexLayout.Actions.selectTab(tabId));
       setSelectedTabId(tabId);
       setStatusMessage(
-        isMarkdownTab(existingTab) ? `${existingTab.name} を編集中` : `${existingTab.name} を表示中`
+        isMarkdownTab(existingTab)
+          ? `${tabNameOverride ?? existingTab.name} を編集中`
+          : `${tabNameOverride ?? existingTab.name} を表示中`
       );
       return;
     }
@@ -1134,9 +1304,11 @@ export function App(): JSX.Element {
         return;
       }
 
+      const nextTab = createOpenTab(document, tabNameOverride);
+
       setOpenTabs((currentTabs) => ({
         ...currentTabs,
-        [relativePath]: createOpenTab(document)
+        [relativePath]: nextTab
       }));
 
       const activeTabsetId =
@@ -1148,7 +1320,7 @@ export function App(): JSX.Element {
             type: "tab",
             id: tabId,
             component: "editor",
-            name: document.name,
+            name: nextTab.name,
             config: {
               relativePath: document.relativePath
             }
@@ -1161,7 +1333,7 @@ export function App(): JSX.Element {
       );
 
       setSelectedTabId(tabId);
-      setStatusMessage(`${document.name} を開きました`);
+      setStatusMessage(`${nextTab.name} を開きました`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
@@ -2060,24 +2232,39 @@ export function App(): JSX.Element {
 
     if (isMarkdownTab(tab)) {
       const toggleLabel = tab.editorMode === "wysiwyg" ? "Markdown編集" : "見たまま編集";
+      const managedDataTarget = findManagedDataTargetForPath(assetCatalog, relativePath);
       const editorToolbar = (
-        <button
-          className="button button--ghost button--xs editor-mode-toggle"
-          onClick={() => {
-            setMarkdownEditorMode(
-              relativePath,
-              tab.editorMode === "wysiwyg" ? "text" : "wysiwyg"
-            );
-          }}
-          title={
-            tab.editorMode === "wysiwyg"
-              ? "本文を Markdown テキストとして編集します。frontmatter は保持されます。"
-              : "本文を見たまま編集に戻します。frontmatter は保持されます。"
-          }
-          type="button"
-        >
-          {toggleLabel}
-        </button>
+        <>
+          {managedDataTarget ? (
+            <button
+              className="button button--ghost button--xs editor-mode-toggle"
+              onClick={() => {
+                void openManagedDataNote(managedDataTarget.targetId);
+              }}
+              title={`${managedDataTarget.displayName} に対応するノートを別タブで開きます。`}
+              type="button"
+            >
+              ノートを開く
+            </button>
+          ) : null}
+          <button
+            className="button button--ghost button--xs editor-mode-toggle"
+            onClick={() => {
+              setMarkdownEditorMode(
+                relativePath,
+                tab.editorMode === "wysiwyg" ? "text" : "wysiwyg"
+              );
+            }}
+            title={
+              tab.editorMode === "wysiwyg"
+                ? "本文を Markdown テキストとして編集します。frontmatter は保持されます。"
+                : "本文を見たまま編集に戻します。frontmatter は保持されます。"
+            }
+            type="button"
+          >
+            {toggleLabel}
+          </button>
+        </>
       );
 
       if (tab.editorMode === "text") {
@@ -2120,9 +2307,22 @@ export function App(): JSX.Element {
       );
     }
 
+    const managedDataTarget = findManagedDataTargetForPath(assetCatalog, relativePath);
+
     return (
       <WorkspaceFileViewer
         file={tab}
+        managedDataAction={
+          managedDataTarget
+            ? {
+                buttonLabel: "ノートを開く",
+                buttonTitle: `${managedDataTarget.displayName} に対応するノートを別タブで開きます。`,
+                onOpen: () => {
+                  void openManagedDataNote(managedDataTarget.targetId);
+                }
+              }
+            : undefined
+        }
         onOpenInExternalApp={(relativePath) => {
           void openPathInExternalApp(relativePath);
         }}

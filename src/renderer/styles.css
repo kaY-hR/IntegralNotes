@@ -558,10 +558,17 @@ textarea:focus-visible {
 
 .workspace-file-viewer {
   display: flex;
+  flex-direction: column;
   height: 100%;
   min-width: 0;
   min-height: 0;
   background: var(--app-bg);
+}
+
+.workspace-file-viewer__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 12px 0;
 }
 
 .workspace-file-viewer--empty {
@@ -589,6 +596,8 @@ textarea:focus-visible {
 .workspace-file-viewer__actions {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .workspace-file-viewer__card {
