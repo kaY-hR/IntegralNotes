@@ -830,10 +830,9 @@ textarea:focus-visible {
 }
 
 .editor-surface .milkdown .editor-workspace-embed--inline {
-  display: inline-grid;
-  vertical-align: top;
-  width: min(360px, 100%);
-  margin: 0 4px;
+  display: grid;
+  width: 100%;
+  margin: 6px 0;
 }
 
 .editor-surface .milkdown .editor-workspace-embed--openable {
@@ -855,15 +854,20 @@ textarea:focus-visible {
 
 .editor-surface .milkdown .editor-workspace-embed__surface {
   position: relative;
+  display: grid;
   min-width: 0;
   overflow: hidden;
   border-radius: 6px;
 }
 
+.editor-surface .milkdown .editor-workspace-embed__surface--openable {
+  cursor: pointer;
+}
+
 .editor-surface .milkdown .editor-workspace-embed__frame,
 .editor-surface .milkdown .editor-workspace-embed__markdown {
   width: 100%;
-  min-height: 220px;
+  height: 100%;
   border: 1px solid #d6e0ea;
   border-radius: 6px;
   background: #ffffff;
@@ -871,13 +875,17 @@ textarea:focus-visible {
 
 .editor-surface .milkdown .editor-workspace-embed--inline .editor-workspace-embed__frame,
 .editor-surface .milkdown .editor-workspace-embed--inline .editor-workspace-embed__markdown {
-  min-height: 160px;
+  min-height: 140px;
 }
 
 .editor-surface .milkdown .editor-workspace-embed__image {
   display: block;
+  width: auto;
   max-width: 100%;
-  width: 100%;
+  height: auto;
+  max-height: 100%;
+  justify-self: center;
+  align-self: start;
   border: 1px solid #d6e0ea;
   border-radius: 6px;
   background: #ffffff;
@@ -887,7 +895,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 96px;
+  height: 100%;
   padding: 10px 12px;
   border: 1px solid #d6e0ea;
   border-radius: 6px;
@@ -904,25 +912,38 @@ textarea:focus-visible {
   color: #9d2f2f;
 }
 
-.editor-surface .milkdown .editor-workspace-embed__open-hitbox {
+.editor-surface .milkdown .editor-workspace-embed__frame,
+.editor-surface .milkdown .editor-workspace-embed__image,
+.editor-surface .milkdown .editor-workspace-embed__markdown {
+  pointer-events: none;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__resize-handle {
   position: absolute;
-  inset: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 2;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: inherit;
-  background: transparent;
-  cursor: pointer;
+  height: 14px;
+  cursor: ns-resize;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0),
+      rgba(15, 108, 189, 0.08)
+    );
 }
 
-.editor-surface .milkdown .editor-workspace-embed__open-hitbox:hover {
-  background: rgba(15, 108, 189, 0.03);
-}
-
-.editor-surface .milkdown .editor-workspace-embed__open-hitbox:focus-visible {
-  outline: 1px solid #c7e0f4;
-  outline-offset: -2px;
+.editor-surface .milkdown .editor-workspace-embed__resize-handle::before {
+  content: "";
+  position: absolute;
+  right: 50%;
+  bottom: 4px;
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(93, 112, 130, 0.45);
+  transform: translateX(50%);
 }
 
 .editor-surface .milkdown .editor-workspace-embed__markdown .milkdown {
@@ -934,8 +955,10 @@ textarea:focus-visible {
 .editor-surface .milkdown .editor-workspace-embed__markdown .milkdown .editor {
   max-width: none;
   min-height: 100%;
+  height: 100%;
+  overflow: auto;
   margin: 0;
-  padding: 16px 18px;
+  padding: 16px 18px 22px;
   border: 0;
   border-radius: 0;
   background: #ffffff;

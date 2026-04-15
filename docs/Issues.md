@@ -491,3 +491,21 @@
   - app 内 preview 非対応 file の managed `data-note` fallback も同じ markdown preview に寄せた
   - embed block 全体の click で、workspace file は通常 tab、managed `data-note` fallback は note tab を開けるようにした
   - `npm run build` が通ることを確認した
+* 2026-04-16 レイアウト調整:
+  - embed は基本的に横幅いっぱいを使う方針に寄せ、従来の inline 幅制限を外した
+  - embed surface に縦方向の drag resize handle を追加し、画像 / iframe / markdown preview を高さだけ変えられるようにした
+  - click-to-open はそのまま維持しつつ、preview 本体は pointer event を持たず、surface click で tab open する構成に整理した
+  - なお高さは現状 editor session 内の UI state であり、Markdown source への永続化はまだしていない
+  - `npm run build` が通ることを確認した
+* 2026-04-16 永続化と画像拡大抑止:
+  - embed 高さは target suffix の `#integral-embed-height=NNN` として保持し、再オープン後も同じ高さで復元できるようにした
+  - `src/shared/workspaceLinks.ts` でこの suffix を path 解決時に無視しつつ、rename / move rewrite 時には保持するようにした
+  - 画像 embed は `object-fit: scale-down` に変更し、枠が大きくても元画像以上には拡大表示しないようにした
+  - default 高さに戻した場合は suffix を落とし、必要なときだけ source に metadata が残るようにした
+  - `npm run build` が通ることを確認した
+* 2026-04-16 画像は Milkdown 標準へ戻す:
+  - `src/renderer/workspaceEmbedFeature.tsx` の image / image-block node view を bridge 化し、workspace の非画像 path だけ custom embed renderer を使うようにした
+  - `png / jpg / jpeg / gif / webp / bmp / avif` など通常画像は、workspace path でも外部 URL でも Milkdown 標準の image view に委譲するようにした
+  - これにより画像だけは custom の full-width / click-open / resize surface ではなく、Milkdown 既定の選択・編集 UI を使えるようにした
+  - 以前の custom image resize で残っていた `#integral-embed-height=NNN` は、標準画像 view に入るノードでは自動で落とすようにした
+  - `npm run build` が通ることを確認した

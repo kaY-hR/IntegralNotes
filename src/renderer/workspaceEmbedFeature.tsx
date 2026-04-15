@@ -8,14 +8,22 @@ import type {
 
 import { Crepe } from "@milkdown/crepe";
 
-import { imageBlockSchema } from "@milkdown/kit/component/image-block";
+import {
+  imageBlockSchema,
+  imageBlockView as standardImageBlockView
+} from "@milkdown/kit/component/image-block";
+import { inlineImageView } from "@milkdown/kit/component/image-inline";
 import { imageSchema } from "@milkdown/kit/preset/commonmark";
 import { replaceAll, $view } from "@milkdown/kit/utils";
-import { useEffect, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import type { IntegralAssetCatalog } from "../shared/integral";
-import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
+import {
+  extractWorkspaceEmbedHeight,
+  resolveWorkspaceMarkdownTarget,
+  withWorkspaceEmbedHeight
+} from "../shared/workspaceLinks";
 import {
   requestOpenManagedDataNote,
   requestOpenWorkspaceFile
@@ -82,7 +90,7 @@ function createWorkspaceInlineEmbedView(options: WorkspaceEmbedFeatureOptions) {
   return $view(
     imageSchema.node,
     (): NodeViewConstructor => (node, view, getPos) =>
-      new WorkspaceEmbedNodeView("inline", node, view, getPos, options)
+      new WorkspaceEmbedBridgeNodeView("inline", node, view, getPos, options)
   );
 }
 
@@ -90,8 +98,109 @@ function createWorkspaceBlockEmbedView(options: WorkspaceEmbedFeatureOptions) {
   return $view(
     imageBlockSchema.node,
     (): NodeViewConstructor => (node, view, getPos) =>
-      new WorkspaceEmbedNodeView("block", node, view, getPos, options)
+      new WorkspaceEmbedBridgeNodeView("block", node, view, getPos, options)
   );
+}
+
+class WorkspaceEmbedBridgeNodeView implements NodeView {
+  readonly dom: HTMLElement;
+
+  private readonly delegate: NodeView;
+  private readonly delegateKind: "custom" | "standard";
+
+  constructor(
+    private readonly mode: WorkspaceEmbedMode,
+    public node: ProseNode,
+    public view: EditorView,
+    public getPos: () => number | undefined,
+    private readonly options: WorkspaceEmbedFeatureOptions
+  ) {
+    this.delegateKind = shouldRenderWorkspaceEmbed(readWorkspaceEmbedSource(node))
+      ? "custom"
+      : "standard";
+    this.cleanupLegacyImageEmbedMetadata();
+    this.delegate = this.createDelegate(node);
+    this.dom = this.delegate.dom;
+  }
+
+  update(node: ProseNode): boolean {
+    if (node.type !== this.node.type) {
+      return false;
+    }
+
+    const nextDelegateKind = shouldRenderWorkspaceEmbed(readWorkspaceEmbedSource(node))
+      ? "custom"
+      : "standard";
+
+    if (nextDelegateKind !== this.delegateKind) {
+      return false;
+    }
+
+    this.node = node;
+    return this.delegate.update?.(node) ?? false;
+  }
+
+  selectNode(): void {
+    this.delegate.selectNode?.();
+  }
+
+  deselectNode(): void {
+    this.delegate.deselectNode?.();
+  }
+
+  stopEvent(event: Event): boolean {
+    return this.delegate.stopEvent?.(event) ?? false;
+  }
+
+  ignoreMutation(mutation: ViewMutationRecord): boolean {
+    return this.delegate.ignoreMutation?.(mutation) ?? false;
+  }
+
+  destroy(): void {
+    this.delegate.destroy?.();
+  }
+
+  private createDelegate(node: ProseNode): NodeView {
+    if (this.delegateKind === "custom") {
+      return new WorkspaceEmbedNodeView(this.mode, node, this.view, this.getPos, this.options);
+    }
+
+    return getStandardImageNodeViewConstructor(this.mode)(node, this.view, this.getPos);
+  }
+
+  private cleanupLegacyImageEmbedMetadata(): void {
+    if (this.delegateKind !== "standard") {
+      return;
+    }
+
+    const source = readWorkspaceEmbedSource(this.node);
+
+    if (extractWorkspaceEmbedHeight(source) === null) {
+      return;
+    }
+
+    const nextSource = withWorkspaceEmbedHeight(source, null);
+
+    if (nextSource === source.trim()) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      const position = this.getPos();
+
+      if (position === undefined) {
+        return;
+      }
+
+      const currentNode = this.view.state.doc.nodeAt(position);
+
+      if (!currentNode || `${currentNode.attrs.src ?? ""}` !== source) {
+        return;
+      }
+
+      this.view.dispatch(this.view.state.tr.setNodeAttribute(position, "src", nextSource));
+    });
+  }
 }
 
 class WorkspaceEmbedNodeView implements NodeView {
@@ -147,7 +256,7 @@ class WorkspaceEmbedNodeView implements NodeView {
 
     return Boolean(
       target.closest(
-        "button, input, textarea, label, iframe, .editor-workspace-embed__empty"
+        "button, input, textarea, label, iframe, .editor-workspace-embed__surface, .editor-workspace-embed__resize-handle, .editor-workspace-embed__empty"
       )
     );
   }
@@ -203,13 +312,20 @@ function WorkspaceEmbedPanel({
   source: string;
   uploadImage: (file: File) => Promise<string>;
 }): JSX.Element {
+  const cleanupResizeListenersRef = useRef<(() => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [draftSource, setDraftSource] = useState(source);
   const [resolution, setResolution] = useState<WorkspaceEmbedResolution>(createLoadingResolution());
+  const [surfaceHeight, setSurfaceHeight] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const persistedSurfaceHeight = extractWorkspaceEmbedHeight(source);
 
   useEffect(() => {
     setDraftSource(source);
+    cleanupResizeListenersRef.current?.();
+    cleanupResizeListenersRef.current = null;
+    setSurfaceHeight(extractWorkspaceEmbedHeight(source));
     setUploadError(null);
   }, [source]);
 
@@ -251,6 +367,82 @@ function WorkspaceEmbedPanel({
 
     openWorkspaceEmbedTarget(resolution.openTarget);
   };
+  const defaultSurfaceHeight = getDefaultEmbedHeight(mode, resolution.kind);
+  const minimumSurfaceHeight = getMinimumEmbedHeight(mode, resolution.kind);
+  const shouldAutoSizeImage =
+    resolution.kind === "image" && persistedSurfaceHeight === null && surfaceHeight === null;
+  const currentSurfaceHeight = shouldAutoSizeImage
+    ? null
+    : clampNumber(surfaceHeight ?? defaultSurfaceHeight, minimumSurfaceHeight, 1200);
+
+  const handleResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const surfaceElement = surfaceRef.current;
+
+    if (!surfaceElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    cleanupResizeListenersRef.current?.();
+
+    const startHeight = surfaceElement.getBoundingClientRect().height;
+    const startY = event.clientY;
+    let latestHeight = Math.round(startHeight);
+    const canPersistHeight = resolveWorkspaceMarkdownTarget(source) !== null;
+
+    const handleResizePointerMove = (pointerEvent: PointerEvent): void => {
+      const nextHeight = Math.round(
+        clampNumber(startHeight + (pointerEvent.clientY - startY), minimumSurfaceHeight, 1200)
+      );
+
+      latestHeight = nextHeight;
+      setSurfaceHeight(nextHeight);
+    };
+
+    const cleanupResizeListeners = (): void => {
+      window.removeEventListener("pointermove", handleResizePointerMove);
+      window.removeEventListener("pointerup", handleResizePointerUp);
+    };
+
+    const handleResizePointerUp = (): void => {
+      cleanupResizeListeners();
+      cleanupResizeListenersRef.current = null;
+
+      if (!canPersistHeight) {
+        return;
+      }
+
+      const nextSource =
+        resolution.kind === "image"
+          ? withWorkspaceEmbedHeight(
+              source,
+              persistedSurfaceHeight === null && Math.abs(latestHeight - startHeight) <= 1
+                ? null
+                : latestHeight
+            )
+          : withWorkspaceEmbedHeight(
+              source,
+              normalizePersistedEmbedHeight(latestHeight, defaultSurfaceHeight)
+            );
+
+      if (nextSource !== source.trim()) {
+        onChangeSource(nextSource);
+      }
+    };
+
+    cleanupResizeListenersRef.current = cleanupResizeListeners;
+    window.addEventListener("pointermove", handleResizePointerMove);
+    window.addEventListener("pointerup", handleResizePointerUp);
+  };
+
+  useEffect(
+    () => () => {
+      cleanupResizeListenersRef.current?.();
+      cleanupResizeListenersRef.current = null;
+    },
+    []
+  );
 
   if (source.trim().length === 0) {
     return (
@@ -335,7 +527,29 @@ function WorkspaceEmbedPanel({
 
   return (
     <div className={rootClassName}>
-      <div className="editor-workspace-embed__surface">
+      <div
+        className={`editor-workspace-embed__surface${
+          resolution.openTarget ? " editor-workspace-embed__surface--openable" : ""
+        }`}
+        onClick={resolution.openTarget ? handleOpenTarget : undefined}
+        onKeyDown={
+          resolution.openTarget
+            ? (event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                  return;
+                }
+
+                event.preventDefault();
+                handleOpenTarget();
+              }
+            : undefined
+        }
+        ref={surfaceRef}
+        style={{
+          height: currentSurfaceHeight === null ? undefined : `${currentSurfaceHeight}px`
+        }}
+        tabIndex={resolution.openTarget ? 0 : undefined}
+      >
         {resolution.kind === "loading" ? (
           <div className="editor-workspace-embed__status">読み込み中...</div>
         ) : null}
@@ -368,15 +582,11 @@ function WorkspaceEmbedPanel({
           </div>
         ) : null}
 
-        {resolution.openTarget ? (
-          <button
-            aria-label="別タブで開く"
-            className="editor-workspace-embed__open-hitbox"
-            onClick={handleOpenTarget}
-            title="別タブで開く"
-            type="button"
-          />
-        ) : null}
+        <div
+          className="editor-workspace-embed__resize-handle"
+          onPointerDown={handleResizePointerDown}
+          title="縦方向にリサイズ"
+        />
       </div>
     </div>
   );
@@ -454,6 +664,10 @@ function MarkdownEmbedPreview({
 
 async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedResolution> {
   const trimmedSource = source.trim();
+  const displaySource =
+    extractWorkspaceEmbedHeight(trimmedSource) !== null
+      ? withWorkspaceEmbedHeight(trimmedSource, null)
+      : trimmedSource;
   const relativePath = resolveWorkspaceMarkdownTarget(trimmedSource);
   const workspaceFileOpenTarget = relativePath
     ? {
@@ -464,10 +678,10 @@ async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedReso
 
   if (!relativePath) {
     return {
-      alt: trimmedSource || "External image",
+      alt: displaySource || "External image",
       kind: "image",
       openTarget: null,
-      src: trimmedSource,
+      src: displaySource,
     };
   }
 
@@ -609,6 +823,28 @@ function readWorkspaceEmbedSource(node: ProseNode): string {
   return `${node.attrs.src ?? ""}`;
 }
 
+function shouldRenderWorkspaceEmbed(source: string): boolean {
+  const relativePath = resolveWorkspaceMarkdownTarget(source.trim());
+
+  if (!relativePath) {
+    return false;
+  }
+
+  return !STANDARD_IMAGE_EXTENSIONS.has(getLowercaseExtension(relativePath));
+}
+
+function getStandardImageNodeViewConstructor(mode: WorkspaceEmbedMode): NodeViewConstructor {
+  const viewPlugin = (
+    mode === "inline" ? inlineImageView : standardImageBlockView
+  ) as ViewPluginWithConstructor;
+
+  if (typeof viewPlugin.view !== "function") {
+    throw new Error(`Milkdown ${mode} image view is not initialized.`);
+  }
+
+  return viewPlugin.view;
+}
+
 function getLowercaseExtension(relativePath: string): string {
   const normalized = relativePath.trim().toLowerCase();
   const slashIndex = normalized.lastIndexOf("/");
@@ -616,6 +852,46 @@ function getLowercaseExtension(relativePath: string): string {
   const dotIndex = baseName.lastIndexOf(".");
 
   return dotIndex >= 0 ? baseName.slice(dotIndex) : "";
+}
+
+function getDefaultEmbedHeight(
+  mode: WorkspaceEmbedMode,
+  resolutionKind: WorkspaceEmbedResolution["kind"]
+): number {
+  const compact = mode === "inline";
+
+  switch (resolutionKind) {
+    case "image":
+      return compact ? 220 : 280;
+    case "error":
+    case "loading":
+    case "unsupported":
+      return compact ? 140 : 180;
+    case "frame":
+    case "markdown":
+      return compact ? 220 : 320;
+    default:
+      return compact ? 220 : 280;
+  }
+}
+
+function getMinimumEmbedHeight(
+  mode: WorkspaceEmbedMode,
+  resolutionKind: WorkspaceEmbedResolution["kind"]
+): number {
+  if (resolutionKind === "error" || resolutionKind === "loading" || resolutionKind === "unsupported") {
+    return mode === "inline" ? 96 : 120;
+  }
+
+  return mode === "inline" ? 140 : 180;
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function normalizePersistedEmbedHeight(height: number, defaultHeight: number): number | null {
+  return Math.abs(height - defaultHeight) <= 1 ? null : height;
 }
 
 function createTextFrameDocument(content: string, title: string): string {
@@ -667,6 +943,26 @@ async function proxyWorkspaceEmbedImageUrl(url: string): Promise<string> {
     return url;
   }
 }
+
+const STANDARD_IMAGE_EXTENSIONS = new Set([
+  ".apng",
+  ".avif",
+  ".bmp",
+  ".gif",
+  ".heic",
+  ".heif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".tif",
+  ".tiff",
+  ".webp"
+]);
+
+type ViewPluginWithConstructor = {
+  view?: NodeViewConstructor;
+};
 
 function escapeHtml(value: string): string {
   return value

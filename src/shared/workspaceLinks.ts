@@ -6,6 +6,7 @@ export interface WorkspacePathChange {
 const FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/gu;
 const MARKDOWN_LINK_PATTERN = /(!?\[[^\]\n]*\])\(([^)\n]+)\)/gu;
 const EXTERNAL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/u;
+const EMBED_HEIGHT_FRAGMENT_PATTERN = /#integral-embed-height=(\d+)$/u;
 
 export function toCanonicalWorkspaceTarget(relativePath: string): string {
   const normalized = normalizeWorkspaceRelativePath(relativePath);
@@ -13,8 +14,40 @@ export function toCanonicalWorkspaceTarget(relativePath: string): string {
   return normalized ? `/${normalized}` : "/";
 }
 
+export function extractWorkspaceEmbedHeight(target: string): number | null {
+  const match = target.trim().match(EMBED_HEIGHT_FRAGMENT_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  const height = Number.parseInt(match[1] ?? "", 10);
+
+  if (!Number.isFinite(height) || height <= 0) {
+    return null;
+  }
+
+  return height;
+}
+
+export function withWorkspaceEmbedHeight(target: string, height: number | null): string {
+  const { pathTarget } = splitWorkspaceMarkdownTarget(target);
+  const normalizedTarget = pathTarget.trim();
+
+  if (normalizedTarget.length === 0) {
+    return normalizedTarget;
+  }
+
+  if (!height || !Number.isFinite(height) || height <= 0) {
+    return normalizedTarget;
+  }
+
+  return `${normalizedTarget}#integral-embed-height=${Math.round(height)}`;
+}
+
 export function resolveWorkspaceMarkdownTarget(target: string): string | null {
-  const trimmed = target.trim();
+  const { pathTarget } = splitWorkspaceMarkdownTarget(target);
+  const trimmed = pathTarget.trim();
 
   if (
     trimmed.length === 0 ||
@@ -88,7 +121,8 @@ function rewriteMarkdownSegment(markdown: string, pathChanges: WorkspacePathChan
 }
 
 function rewriteWorkspaceTarget(target: string, pathChanges: WorkspacePathChange[]): string {
-  const resolvedPath = resolveWorkspaceMarkdownTarget(target);
+  const { metadataSuffix, pathTarget } = splitWorkspaceMarkdownTarget(target);
+  const resolvedPath = resolveWorkspaceMarkdownTarget(pathTarget);
 
   if (!resolvedPath) {
     return target;
@@ -112,7 +146,27 @@ function rewriteWorkspaceTarget(target: string, pathChanges: WorkspacePathChange
     return target;
   }
 
-  return target.trimStart().startsWith("/") ? `/${rewrittenPath}` : rewrittenPath;
+  return `${pathTarget.trimStart().startsWith("/") ? `/${rewrittenPath}` : rewrittenPath}${metadataSuffix}`;
+}
+
+function splitWorkspaceMarkdownTarget(target: string): {
+  metadataSuffix: string;
+  pathTarget: string;
+} {
+  const trimmed = target.trim();
+  const match = trimmed.match(EMBED_HEIGHT_FRAGMENT_PATTERN);
+
+  if (!match || match.index === undefined) {
+    return {
+      metadataSuffix: "",
+      pathTarget: trimmed
+    };
+  }
+
+  return {
+    metadataSuffix: trimmed.slice(match.index),
+    pathTarget: trimmed.slice(0, match.index)
+  };
 }
 
 function normalizePathChanges(pathChanges: WorkspacePathChange[]): WorkspacePathChange[] {
