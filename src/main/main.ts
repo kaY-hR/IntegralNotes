@@ -18,6 +18,8 @@ import type {
   RenameEntryRequest,
   SaveClipboardImageRequest,
   SaveNoteImageRequest,
+  WorkspaceReplaceRequest,
+  WorkspaceSearchRequest,
   WorkspaceSnapshot
 } from "../shared/workspace";
 import {
@@ -242,6 +244,12 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("workspace:readNote", async (_event, relativePath: string) =>
     workspaceService.readNote(relativePath)
+  );
+  ipcMain.handle("workspace:searchText", async (_event, request: WorkspaceSearchRequest) =>
+    workspaceService.searchWorkspaceText(request)
+  );
+  ipcMain.handle("workspace:replaceText", async (_event, request: WorkspaceReplaceRequest) =>
+    workspaceService.replaceWorkspaceText(request)
   );
   ipcMain.handle("workspace:readFile", async (_event, relativePath: string) => {
     const specialDocument =

@@ -31,8 +31,8 @@ Sidebar Host の中に表示される実体。
 例:
 
 - Explorer
+- Search
 - Plugins
-- 将来の Search
 - 装置 plugin 独自 navigator
 
 ## MVP 構成
@@ -40,6 +40,7 @@ Sidebar Host の中に表示される実体。
 ### built-in views
 
 - `builtin:explorer`
+- `builtin:search`
 - `builtin:plugins`
 
 ### external views
@@ -174,4 +175,15 @@ MVP では次はまだやらない。
 - drag で sidebar width を自由に resize
 - Activity Bar item の並び替え
 - plugin sidebar view から app への汎用 command bridge
-- Search や SCM のような built-in view 一式
+- SCM のような built-in view 一式
+
+## Search view
+
+Search は built-in sidebar view として実装する。
+
+- renderer 側は `SearchSidebarView` が query / replace / include / exclude / option toggle を描画する
+- host は `workspace:searchText` / `workspace:replaceText` IPC を呼ぶ
+- 検索対象は workspace 内の text file とし、binary / image は除外する
+- 検索結果は file ごとにまとめて表示し、click で既存の file open 経路を使う
+- replace は current query と同じ条件で file を書き戻す
+- dirty な markdown tab と衝突する replace は renderer 側で止める

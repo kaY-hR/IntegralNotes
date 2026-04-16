@@ -163,6 +163,52 @@ export interface SaveNoteImageResult {
   snapshot: WorkspaceSnapshot;
 }
 
+export interface WorkspaceSearchRequest {
+  caseSensitive?: boolean;
+  excludePattern?: string;
+  includePattern?: string;
+  maxResults?: number;
+  query: string;
+  regex?: boolean;
+  wholeWord?: boolean;
+}
+
+export interface WorkspaceSearchMatch {
+  endColumn: number;
+  lineNumber: number;
+  lineText: string;
+  startColumn: number;
+}
+
+export interface WorkspaceSearchFileResult {
+  matchCount: number;
+  matches: WorkspaceSearchMatch[];
+  relativePath: string;
+}
+
+export interface WorkspaceSearchResult {
+  files: WorkspaceSearchFileResult[];
+  searchedFileCount: number;
+  totalMatchCount: number;
+  truncated: boolean;
+}
+
+export interface WorkspaceReplaceRequest extends WorkspaceSearchRequest {
+  replacement: string;
+}
+
+export interface WorkspaceReplaceFileResult {
+  relativePath: string;
+  replacedCount: number;
+}
+
+export interface WorkspaceReplaceResult {
+  files: WorkspaceReplaceFileResult[];
+  replacedFileCount: number;
+  replacedMatchCount: number;
+  snapshot: WorkspaceSnapshot;
+}
+
 export interface ExecuteIntegralActionRequest {
   actionId: string;
   blockType: string;
@@ -232,6 +278,8 @@ export interface IntegralNotesApi {
   saveNoteImage: (request: SaveNoteImageRequest, content: Uint8Array) => Promise<SaveNoteImageResult>;
   writeClipboardText: (text: string) => void;
   clipboardHasImage: () => boolean;
+  searchWorkspaceText: (request: WorkspaceSearchRequest) => Promise<WorkspaceSearchResult>;
+  replaceWorkspaceText: (request: WorkspaceReplaceRequest) => Promise<WorkspaceReplaceResult>;
   resolveWorkspaceFileUrl: (relativePath: string) => Promise<string>;
   openPathInExternalApp: (relativePath: string) => Promise<void>;
   uninstallPlugin: (pluginId: string) => Promise<UninstallPluginResult>;

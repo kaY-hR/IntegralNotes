@@ -595,3 +595,57 @@
 * 少なくとも `.store/` 配下や hidden path は候補から除外し、`data-note` を file path として挿入させないようにしたい
 * `[` 補完と `![` / `!` 補完で同じ filtering policy を使いたい
 * explorer の hidden toggle は tree 表示専用の状態とし、Milkdown 補完候補の集合とは切り離したい
+
+## [x] 31. Activity Bar に Search view を追加し、workspace 全文検索と一括置換をしたい
+- 優先重み:6
+- 記載日時:2026-04-17-00:12(UTC+9)
+
+* Activity Bar の built-in sidebar view として `Search` を追加したい
+* UI は VS Code の search pane に寄せつつ、少なくとも `query / replace / include files / exclude files` を持たせたい
+* `replace` と file filter は普段 fold されていてよい
+* 検索オプションとして `case sensitive / whole word / regex` を切り替えたい
+* 検索結果は file ごとに group 表示し、match を click すると対応 file を開けるようにしたい
+* 一括置換は current query と同じ条件で workspace text file に適用したい
+* 実装は plugin ではなく built-in view とし、既存の `Activity Bar / Sidebar Host / Main Workspace` 構成に載せたい
+* 2026-04-17 実装:
+  - `builtin:search` を追加し、Activity Bar から Explorer / Search / Plugins を切り替えられるようにした
+  - `src/renderer/SearchSidebarView.tsx` を追加し、`query / replace / include files / exclude files / case sensitive / whole word / regex` をまとめた built-in search pane を実装した
+  - `replace` と file filter は foldable section とし、普段は閉じた状態から使えるようにした
+  - `src/shared/workspace.ts`, `src/main/main.ts`, `src/main/preload.ts`, `src/main/workspaceService.ts` を拡張し、workspace text search / replace の IPC を追加した
+  - 検索は workspace file を再帰走査し、text 判定できる file を対象に path glob include / exclude を掛けて検索する構成にした
+  - 一括置換は検索条件と同じ matcher を使って file 単位に書き戻し、workspace snapshot と open tab を再同期するようにした
+  - dirty な markdown tab と衝突する file がある場合は replace を拒否し、先に保存を促すようにした
+  - `docs/10_要求/20_ユーザー体験.md` と `docs/30_設計/80_ActivityBarとSidebarView.md` に Search view を追記した
+  - `npm run build` が通ることを確認した
+
+## [ ] 32. Activity Bar から開ける AI Chat Panel を追加したい
+- 優先重み:7
+- 記載日時:2026-04-17-00:16(UTC+9)
+
+* Claude Code / Codex / GitHub Copilot Chat に近い体験を目標に、Activity Bar に AI 用 icon を追加し、click で専用の chat panel を main workspace の tab として開きたい
+* 2026-04-17 調査:
+  - 現在の app shell はすでに `Activity Bar / Sidebar Host / Main Workspace` の 3 列構成で、`Explorer` と `Plugins` は built-in sidebar view として registry 化されている
+  - 一方で current 設計の `Activity Bar` は「sidebar view を切り替える shell」として整理されているため、AI Chat をそのまま sidebar view に入れると `Copilot / Codex` 的な長い会話 panel よりも「左サイド補助ペイン」に寄りやすい
+  - UX 的には、AI Chat は `Search` や `Plugins` よりも `main workspace` 側に固定 tab を持つ方が自然で、Activity Bar item は「sidebar view 切替」ではなく「AI Chat tab を開く built-in command item」として扱うのがよい
+  - そのため実装時は `ActivityBar` の item model を少し広げ、`sidebar view` と `main tab opener` を同じ bar に載せられるようにするのが最小変更になる
+* MVP としてまず必要なのは次の範囲:
+  - 単一の `AI Chat` tab を開閉・再選択できること
+  - 会話履歴、prompt 入力、streaming 応答、cancel、clear を持つこと
+  - active tab の text / markdown / html / dataset manifest など、text 化しやすい文脈を chat へ渡せること
+  - explorer 上の選択 path 一覧を補助 context として渡せること
+  - まだ first version では file edit、tool use、autonomous agent 実行までは入れず、まずは「文脈付き chat」を成立させること
+* provider / transport の第一候補は `Vercel AI Gateway + BYOK` がよい
+  - 複数 provider を 1 つの gateway で扱えるため、`Claude / OpenAI 系 / 将来の他 model` を UI 変更なしで切り替えやすい
+  - Vercel 公式 docs では、BYOK は provider 側 credits や private access を使いたいときに有効で、request-scoped BYOK も可能とされている
+  - ただし 2026-01-21 更新 docs では、BYOK 利用時でも `AI Gateway credits` 自体は常に必要とされているため、完全な素通しコストにはならない点は注意が要る
+  - vendor lock-in を避けるため、実装 abstraction は `Vercel AI Gateway` 固定ではなく、`OpenAI-compatible endpoint` を差し替え可能な transport interface にしておくのがよい
+* `GitHub Copilot Extensions / SDK` は standalone Electron app の基盤としては優先度を下げる
+  - GitHub 公式 docs では、Copilot Extensions built as GitHub Apps は `2025-09-23` に新規作成が停止され、`2025-11-10` に既存 extension も無効化された。VS Code Copilot Extensions は継続サポートだが、これは VS Code client ecosystem 向けであり、IntegralNotes の独自 app shell を直接支える土台にはならない
+  - 可用性や商用導線の以前に、platform 依存が強すぎるため、新規実装の中核に置くのは避けたい
+  - もし GitHub 側資産を使うなら、Copilot Extension ではなく `MCP` や provider 非依存の tool contract を別層に持つ方が長寿命
+* 実装に進むなら、まずは次の単位で切るのが妥当:
+  - `src/renderer/App.tsx`: Activity Bar item 追加、AI Chat tab open/select の配線
+  - `src/renderer/ActivityBar.tsx`: `sidebar switch` と `command opener` を同居できる item model へ調整
+  - `src/renderer/AIChatPanel.tsx` 追加: message list / composer / provider config / context summary
+  - `src/main/main.ts` または専用 service: provider 呼び出しと streaming bridge
+  - `src/shared/*`: AI request / response / stream event の共通型

@@ -26,6 +26,9 @@ import type {
   WorkspaceEntryKind,
   WorkspaceFileDocument,
   WorkspaceFileViewKind,
+  WorkspaceReplaceResult,
+  WorkspaceSearchRequest,
+  WorkspaceSearchResult,
   WorkspaceSnapshot
 } from "../shared/workspace";
 import type { InstalledPluginDefinition } from "../shared/plugins";
@@ -41,6 +44,7 @@ import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { RawMarkdownEditor } from "./RawMarkdownEditor";
+import { SearchSidebarView, type SearchSidebarState } from "./SearchSidebarView";
 import { SidebarPluginManagerView } from "./SidebarPluginManagerView";
 import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
@@ -99,6 +103,7 @@ interface OpenWorkspaceFileOptions {
 
 const MAIN_TABSET_ID = "editor-main";
 const BUILTIN_EXPLORER_SIDEBAR_VIEW_ID = "builtin:explorer";
+const BUILTIN_SEARCH_SIDEBAR_VIEW_ID = "builtin:search";
 const BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID = "builtin:plugins";
 const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
@@ -147,6 +152,15 @@ function PluginSidebarIcon(): JSX.Element {
   );
 }
 
+function SearchSidebarIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
+      <circle cx="6.5" cy="6.5" r="3.75" />
+      <path d="m9.4 9.4 4.1 4.1" />
+    </svg>
+  );
+}
+
 function SidebarTextIcon({ label }: { label: string }): JSX.Element {
   return <span className="activity-bar__icon-label">{label}</span>;
 }
@@ -161,6 +175,20 @@ function createEmptyIntegralAssetCatalog(): IntegralAssetCatalog {
     blockTypes: [],
     datasets: [],
     originalData: []
+  };
+}
+
+function createDefaultSearchSidebarState(): SearchSidebarState {
+  return {
+    caseSensitive: false,
+    excludePattern: "",
+    includePattern: "",
+    query: "",
+    regex: false,
+    replacement: "",
+    showFileFilters: false,
+    showReplace: false,
+    wholeWord: false
   };
 }
 
@@ -612,6 +640,22 @@ function toErrorMessage(error: unknown): string {
   return "不明なエラーが発生しました。";
 }
 
+function createWorkspaceSearchRequest(
+  state: SearchSidebarState,
+  overrides: Partial<WorkspaceSearchRequest> = {}
+): WorkspaceSearchRequest {
+  return {
+    caseSensitive: state.caseSensitive,
+    excludePattern: state.excludePattern,
+    includePattern: state.includePattern,
+    maxResults: 400,
+    query: state.query,
+    regex: state.regex,
+    wholeWord: state.wholeWord,
+    ...overrides
+  };
+}
+
 function isEditableElement(element: HTMLElement | null): boolean {
   if (!element) {
     return false;
@@ -693,6 +737,15 @@ export function App(): JSX.Element {
   const [datasetCreationDialog, setDatasetCreationDialog] = useState<DatasetCreationDialogState | null>(null);
   const [datasetCreationPending, setDatasetCreationPending] = useState(false);
   const [activeSidebarViewId, setActiveSidebarViewId] = useState(BUILTIN_EXPLORER_SIDEBAR_VIEW_ID);
+  const [searchSidebarState, setSearchSidebarState] = useState<SearchSidebarState>(
+    createDefaultSearchSidebarState()
+  );
+  const [workspaceSearchResult, setWorkspaceSearchResult] = useState<WorkspaceSearchResult | null>(
+    null
+  );
+  const [workspaceSearchPending, setWorkspaceSearchPending] = useState(false);
+  const [workspaceReplacePending, setWorkspaceReplacePending] = useState(false);
+  const [workspaceSearchError, setWorkspaceSearchError] = useState<string | null>(null);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
@@ -702,6 +755,7 @@ export function App(): JSX.Element {
   const openTabsRef = useRef(openTabs);
   const shouldAutoOpenInitialFileRef = useRef(false);
   const sidebarPanelRef = useRef<HTMLElement>(null);
+  const workspaceSearchSequenceRef = useRef(0);
 
   const visibleWorkspaceEntries = workspace
     ? filterWorkspaceEntries(workspace.entries, showHiddenEntries)
@@ -859,6 +913,172 @@ export function App(): JSX.Element {
       setStatusMessage(toErrorMessage(error));
     } finally {
       setLoadingWorkspace(false);
+    }
+  };
+
+  const reloadWorkspaceTabsFromDisk = async (relativePaths: Iterable<string>): Promise<void> => {
+    const reloadTargets = Array.from(new Set(Array.from(relativePaths))).filter((relativePath) => {
+      const tab = openTabsRef.current[relativePath];
+
+      return Boolean(tab) && (!isMarkdownTab(tab) || !isDirty(tab));
+    });
+
+    if (reloadTargets.length === 0) {
+      return;
+    }
+
+    const documents = await Promise.all(
+      reloadTargets.map(async (relativePath) => {
+        try {
+          return await window.integralNotes.readWorkspaceFile(relativePath);
+        } catch {
+          return null;
+        }
+      })
+    );
+    const updates = documents.flatMap((document) => {
+      if (!document) {
+        return [];
+      }
+
+      const currentTab = openTabsRef.current[document.relativePath];
+
+      if (!currentTab || (isMarkdownTab(currentTab) && isDirty(currentTab))) {
+        return [];
+      }
+
+      const nextTab = createOpenTab(document, currentTab.name);
+
+      if (isMarkdownTab(currentTab) && isMarkdownTab(nextTab)) {
+        nextTab.editorMode = currentTab.editorMode;
+      }
+
+      return [
+        {
+          relativePath: document.relativePath,
+          tab: nextTab
+        }
+      ];
+    });
+
+    if (updates.length === 0) {
+      return;
+    }
+
+    setOpenTabs((currentTabs) => {
+      let hasChanged = false;
+      const nextTabs = { ...currentTabs };
+
+      for (const update of updates) {
+        const currentTab = currentTabs[update.relativePath];
+
+        if (!currentTab || (isMarkdownTab(currentTab) && isDirty(currentTab))) {
+          continue;
+        }
+
+        nextTabs[update.relativePath] = update.tab;
+        hasChanged = true;
+      }
+
+      return hasChanged ? nextTabs : currentTabs;
+    });
+
+    for (const update of updates) {
+      syncTabLabel(update.relativePath, update.tab.name, false);
+    }
+  };
+
+  const runWorkspaceSearch = async (
+    stateOverride?: SearchSidebarState
+  ): Promise<WorkspaceSearchResult | null> => {
+    const effectiveState = stateOverride ?? searchSidebarState;
+    const query = effectiveState.query.trim();
+    const request = createWorkspaceSearchRequest(effectiveState);
+    const requestSequence = workspaceSearchSequenceRef.current + 1;
+
+    workspaceSearchSequenceRef.current = requestSequence;
+
+    if (!workspace || query.length === 0) {
+      setWorkspaceSearchPending(false);
+      setWorkspaceSearchResult(null);
+      setWorkspaceSearchError(null);
+      return null;
+    }
+
+    setWorkspaceSearchPending(true);
+    setWorkspaceSearchError(null);
+
+    try {
+      const result = await window.integralNotes.searchWorkspaceText(request);
+
+      if (workspaceSearchSequenceRef.current !== requestSequence) {
+        return result;
+      }
+
+      setWorkspaceSearchResult(result);
+      return result;
+    } catch (error) {
+      if (workspaceSearchSequenceRef.current === requestSequence) {
+        setWorkspaceSearchResult(null);
+        setWorkspaceSearchError(toErrorMessage(error));
+      }
+
+      return null;
+    } finally {
+      if (workspaceSearchSequenceRef.current === requestSequence) {
+        setWorkspaceSearchPending(false);
+      }
+    }
+  };
+
+  const replaceWorkspaceSearchResults = async (): Promise<void> => {
+    const query = searchSidebarState.query.trim();
+
+    if (!workspace || query.length === 0) {
+      return;
+    }
+
+    const dirtyTabPaths = new Set(
+      Object.values(openTabsRef.current)
+        .filter((tab): tab is OpenMarkdownTab => isMarkdownTab(tab) && isDirty(tab))
+        .map((tab) => tab.relativePath)
+    );
+    const conflictingDirtyPath = workspaceSearchResult?.files
+      .map((file) => file.relativePath)
+      .find((relativePath) => dirtyTabPaths.has(relativePath));
+
+    if (conflictingDirtyPath) {
+      setWorkspaceSearchError(
+        `${conflictingDirtyPath} は未保存変更があります。保存してから一括置換してください。`
+      );
+      return;
+    }
+
+    setWorkspaceReplacePending(true);
+    setWorkspaceSearchError(null);
+
+    try {
+      const result: WorkspaceReplaceResult = await window.integralNotes.replaceWorkspaceText({
+        ...createWorkspaceSearchRequest(searchSidebarState),
+        replacement: searchSidebarState.replacement
+      });
+
+      applyWorkspaceSnapshot(result.snapshot, {
+        statusMessage:
+          result.replacedMatchCount > 0
+            ? `${result.replacedFileCount} files / ${result.replacedMatchCount} matches を置換しました`
+            : "置換対象はありませんでした"
+      });
+      await Promise.all([
+        reloadWorkspaceTabsFromDisk(result.files.map((file) => file.relativePath)),
+        refreshManagedDataTrackingIssues(),
+        refreshAssetCatalog()
+      ]);
+      await runWorkspaceSearch();
+    } catch (error) {
+      setWorkspaceSearchError(toErrorMessage(error));
+    } finally {
+      setWorkspaceReplacePending(false);
     }
   };
 
@@ -1109,6 +1329,35 @@ export function App(): JSX.Element {
   useEffect(() => {
     void refreshInstalledPluginState();
   }, []);
+
+  useEffect(() => {
+    if (!workspace || searchSidebarState.query.trim().length === 0) {
+      workspaceSearchSequenceRef.current += 1;
+      setWorkspaceSearchPending(false);
+      setWorkspaceSearchResult(null);
+      setWorkspaceSearchError(null);
+      return;
+    }
+
+    setWorkspaceSearchPending(true);
+    setWorkspaceSearchError(null);
+
+    const debounceHandle = window.setTimeout(() => {
+      void runWorkspaceSearch();
+    }, 240);
+
+    return () => {
+      window.clearTimeout(debounceHandle);
+    };
+  }, [
+    workspace?.rootPath,
+    searchSidebarState.caseSensitive,
+    searchSidebarState.excludePattern,
+    searchSidebarState.includePattern,
+    searchSidebarState.query,
+    searchSidebarState.regex,
+    searchSidebarState.wholeWord
+  ]);
 
   useEffect(() => {
     const handleOpenWorkspaceFileEvent = (event: Event): void => {
@@ -2662,12 +2911,38 @@ export function App(): JSX.Element {
     />
   );
 
+  const renderSearchSidebarView = (): JSX.Element => (
+    <SearchSidebarView
+      errorMessage={workspaceSearchError}
+      onChange={setSearchSidebarState}
+      onOpenResult={(relativePath) => {
+        void openWorkspaceFile(relativePath);
+      }}
+      onReplaceAll={() => {
+        void replaceWorkspaceSearchResults();
+      }}
+      onSearchNow={() => {
+        void runWorkspaceSearch();
+      }}
+      replacePending={workspaceReplacePending}
+      result={workspaceSearchResult}
+      searchPending={workspaceSearchPending}
+      state={searchSidebarState}
+    />
+  );
+
   const sidebarViewDefinitions: SidebarViewDefinition[] = [
     {
       activityIcon: <ExplorerSidebarIcon />,
       id: BUILTIN_EXPLORER_SIDEBAR_VIEW_ID,
       render: renderExplorerSidebarView,
       title: "Explorer"
+    },
+    {
+      activityIcon: <SearchSidebarIcon />,
+      id: BUILTIN_SEARCH_SIDEBAR_VIEW_ID,
+      render: renderSearchSidebarView,
+      title: "Search"
     },
     {
       activityIcon: <PluginSidebarIcon />,

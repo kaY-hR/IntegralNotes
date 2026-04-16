@@ -2265,6 +2265,212 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   text-align: right;
 }
 
+.sidebar-search {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  padding: 12px;
+}
+
+.sidebar-search__header {
+  display: grid;
+  gap: 4px;
+}
+
+.sidebar-search__title {
+  margin: 0;
+  color: var(--text-0);
+  font-size: 1rem;
+}
+
+.sidebar-search__description {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.sidebar-search__toolbar,
+.sidebar-search__controls,
+.sidebar-search__advanced,
+.sidebar-search__file-button,
+.sidebar-search__match {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-search__toolbar {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sidebar-search__query-box,
+.sidebar-search__field {
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-search__query-box {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sidebar-search__controls {
+  flex-wrap: wrap;
+}
+
+.sidebar-search__chip {
+  min-width: 42px;
+}
+
+.sidebar-search__chip.is-active {
+  border-color: #bfd1e5;
+  background: #e7f0fa;
+  color: #0f6cbd;
+}
+
+.sidebar-search__input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+
+.sidebar-search__submit {
+  min-width: 70px;
+}
+
+.sidebar-search__advanced {
+  align-items: stretch;
+}
+
+.sidebar-search__advanced--filters {
+  display: grid;
+}
+
+.sidebar-search__field span {
+  color: var(--text-2);
+  font-size: 0.76rem;
+}
+
+.sidebar-search__summary {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-2);
+  font-size: 0.78rem;
+}
+
+.sidebar-search__error {
+  color: #a4262c;
+  font-size: 0.78rem;
+}
+
+.sidebar-search__results {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.sidebar-search__empty {
+  display: grid;
+  gap: 6px;
+  place-items: start;
+  padding: 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  color: var(--text-2);
+}
+
+.sidebar-search__file {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-1);
+}
+
+.sidebar-search__file-button,
+.sidebar-search__match {
+  width: 100%;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.sidebar-search__file-button {
+  justify-content: space-between;
+  padding: 4px 2px;
+}
+
+.sidebar-search__file-button:hover,
+.sidebar-search__match:hover {
+  background: rgba(15, 108, 189, 0.08);
+}
+
+.sidebar-search__file-path {
+  overflow-wrap: anywhere;
+  color: var(--text-0);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.sidebar-search__file-count {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-size: 0.74rem;
+}
+
+.sidebar-search__match-list {
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-search__match {
+  align-items: flex-start;
+  padding: 6px 4px;
+}
+
+.sidebar-search__line-number {
+  flex-shrink: 0;
+  min-width: 28px;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.sidebar-search__match-line {
+  overflow-wrap: anywhere;
+  color: var(--text-1);
+  font-family:
+    "Cascadia Mono",
+    "Consolas",
+    "Courier New",
+    monospace;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.sidebar-search__match-line mark {
+  padding: 0;
+  background: #ffe08a;
+  color: #3d2b00;
+}
+
 .sidebar-plugin-view {
   display: flex;
   flex: 1;
@@ -2743,6 +2949,7 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 
   .plugin-manager__toolbar,
   .sidebar-plugin-manager__toolbar,
+  .sidebar-search__advanced,
   .plugin-card__header,
   .plugin-card__blocks li,
   .asset-picker__toolbar,
@@ -2756,5 +2963,9 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 
   .plugin-card__blocks code {
     text-align: left;
+  }
+
+  .sidebar-search__query-box {
+    grid-template-columns: 1fr;
   }
 }
