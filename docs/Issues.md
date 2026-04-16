@@ -633,7 +633,11 @@
   - 会話履歴、prompt 入力、streaming 応答、cancel、clear を持つこと
   - active tab の text / markdown / html / dataset manifest など、text 化しやすい文脈を chat へ渡せること
   - explorer 上の選択 path 一覧を補助 context として渡せること
-  - まだ first version では file edit、tool use、autonomous agent 実行までは入れず、まずは「文脈付き chat」を成立させること
+  - ただし `Claude Code / Codex` 的な usage を本気で目指すなら、chat UI 単体では不十分で、別 Issue として `workspace tool API` を並行整備する必要がある
+* 想定ユースケース:
+  - ユーザーは `cwd` に Markdown の実験ノートを作成し、そのノートを中心に過去の実験ノート、実験結果、論文、特許を読みながら判断する
+  - そのため AI Chat は単なる雑談 UI ではなく、「現在のノート文脈」と「過去資料群の探索」を往復できる研究支援 panel である必要がある
+  - first version でも、どのノート / dataset / 補助資料を見ながら答えたかが分かる context summary は必要
 * provider / transport の第一候補は `Vercel AI Gateway + BYOK` がよい
   - 複数 provider を 1 つの gateway で扱えるため、`Claude / OpenAI 系 / 将来の他 model` を UI 変更なしで切り替えやすい
   - Vercel 公式 docs では、BYOK は provider 側 credits や private access を使いたいときに有効で、request-scoped BYOK も可能とされている
@@ -649,3 +653,44 @@
   - `src/renderer/AIChatPanel.tsx` 追加: message list / composer / provider config / context summary
   - `src/main/main.ts` または専用 service: provider 呼び出しと streaming bridge
   - `src/shared/*`: AI request / response / stream event の共通型
+
+## [ ] 33. AI agent が workspace を読んで編集できる tool API を整備したい
+- 優先重み:8
+- 記載日時:2026-04-17-07:51(UTC+9)
+
+* `Claude Code` や `Codex` に近い使用感を目指すなら、chat panel とは別に、AI が workspace を段階的に探索・判断・編集できる tool API が必須
+* 重要なのは「巨大な workspace を毎回丸ごと prompt に流す」ことではなく、必要な範囲だけを agent が順に取得できること
+* 最低限必要な API 候補:
+  - `list_tree`: directory 配下の file / directory を列挙する
+  - `grep_text`: query, regex, include / exclude を受けて workspace 横断検索する
+  - `read_text`: text file や note を範囲付きで読む
+  - `read_document`: PDF や将来の補助資料を text 抽出した view として読む
+  - `get_active_context`: 現在開いている note / file / dataset / selected path を取得する
+  - `apply_patch`: file 全置換ではなく diff patch ベースで安全に更新する
+  - `write_text`: patch に向かない新規 file 作成や全文保存用の補助 API
+* API 設計上の基本方針:
+  - read 系と write 系を明確に分ける
+  - write は `diff patch` を第一級にし、差分レビューしやすくする
+  - `grep -> read -> patch` の逐次操作を前提にし、1 回で全部読ませる設計にしない
+  - `cwd` 配下を基本対象にしつつ、system-managed path と user-facing path の扱いを分ける
+  - 将来的な `MCP` 化や外部 agent 接続を見据え、renderer 直結ではなく main process / service 層に契約を置く
+* IntegralNotes 固有に必要な拡張:
+  - Markdown note は本文だけでなく frontmatter 保持契約を壊さず read / write できる必要がある
+  - `.idts` dataset manifest は raw text ではなく、dataset 名、member、note、resolve path を含む構造化 read API も欲しい
+  - `data-note` は hidden path を直接晒すのではなく target ID 起点で開ける方がよい
+  - 実験結果、過去ノート、論文、特許を横断して判断する前提なので、単純な file read だけでなく「補助資料を text として読む」層が要る
+* 文書種別ごとの考慮:
+  - 実験ノート: Markdown 本文と link / embed を解釈できること
+  - 実験結果: `.idts`, text, table 系、plugin viewer 対象 file をどう text 化するか整理が要る
+  - 論文 / 特許: first version では PDF text extraction を優先し、画像 OCR や高精度 layout 復元は後段に分けるのが現実的
+* 安全性と UX の観点で必要なもの:
+  - write 前 preview
+  - file ごとの permission / confirmation policy
+  - open tabs の dirty state と衝突しない保存契約
+  - どの tool 呼び出しで何を根拠に編集したかの trace
+* 実装に進むなら、まずは次の単位で切るのが妥当:
+  - `src/shared/*`: tool request / response / patch / document text model の共通型
+  - `src/main/workspaceService.ts`: list / grep / read / write / patch の中核
+  - `src/main/main.ts`, `src/main/preload.ts`: IPC bridge
+  - `src/renderer/AIChatPanel.tsx`: tool call 状態や edit preview の表示
+  - 必要なら `docs/30_設計` に AI tool contract を別紙で起こす
