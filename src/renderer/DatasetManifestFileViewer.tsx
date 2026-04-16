@@ -1,6 +1,9 @@
 import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
 import type { WorkspaceDatasetManifestView } from "../shared/workspace";
-import { requestOpenWorkspaceFile } from "./workspaceOpenEvents";
+import {
+  requestOpenManagedDataNote,
+  requestOpenWorkspaceFile
+} from "./workspaceOpenEvents";
 import { ReadonlyMarkdownPreview } from "./ReadonlyMarkdownPreview";
 
 interface DatasetManifestFileViewerProps {
@@ -12,6 +15,10 @@ export function DatasetManifestFileViewer({
   manifest,
   onOpenInExternalApp
 }: DatasetManifestFileViewerProps): JSX.Element {
+  const handleOpenNote = (): void => {
+    requestOpenManagedDataNote(manifest.noteTargetId);
+  };
+
   return (
     <div className="workspace-dataset-viewer">
       <section className="workspace-dataset-viewer__section">
@@ -114,11 +121,28 @@ export function DatasetManifestFileViewer({
           <span>{manifest.noteTargetId}</span>
         </div>
         {manifest.noteMarkdown && manifest.noteMarkdown.trim().length > 0 ? (
-          <ReadonlyMarkdownPreview
-            className="workspace-dataset-viewer__note"
-            content={manifest.noteMarkdown}
-            proxyDomURL={proxyWorkspaceDatasetNoteImageUrl}
-          />
+          <div
+            aria-label="ノートを別タブで開く"
+            className="workspace-dataset-viewer__note-surface"
+            onClick={handleOpenNote}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") {
+                return;
+              }
+
+              event.preventDefault();
+              handleOpenNote();
+            }}
+            role="button"
+            tabIndex={0}
+            title="クリックしてノートを別タブで開く"
+          >
+            <ReadonlyMarkdownPreview
+              className="workspace-dataset-viewer__note"
+              content={manifest.noteMarkdown}
+              proxyDomURL={proxyWorkspaceDatasetNoteImageUrl}
+            />
+          </div>
         ) : (
           <div className="workspace-dataset-viewer__empty">
             紐づくノートはまだありません。

@@ -471,7 +471,7 @@ function IntegralBlockPanel({
             </button>
             {hasSourceNote ? (
               <button
-                className="integral-slot-row__link"
+                className="integral-slot-row__link integral-slot-row__link--note"
                 onClick={() => {
                   openDatasetNote(sourceDatasetId);
                 }}
@@ -528,7 +528,7 @@ function IntegralBlockPanel({
                 <div className="integral-slot-row__actions">
                   {isAssigned && assignedId !== null && datasetMap.has(assignedId) ? (
                     <button
-                      className="integral-slot-row__link"
+                      className="integral-slot-row__link integral-slot-row__link--note"
                       onClick={() => {
                         openDatasetNote(assignedId);
                       }}
@@ -561,7 +561,7 @@ function IntegralBlockPanel({
               {outputId && datasetMap.has(outputId) ? (
                 <div className="integral-slot-row__actions">
                   <button
-                    className="integral-slot-row__link"
+                    className="integral-slot-row__link integral-slot-row__link--note"
                     onClick={() => {
                       openDatasetNote(outputId);
                     }}

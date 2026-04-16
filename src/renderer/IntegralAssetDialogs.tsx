@@ -121,7 +121,7 @@ export function DatasetPickerDialog({
                     </div>
                   </label>
                   <button
-                    className="asset-picker__row-link"
+                    className="asset-picker__row-link asset-picker__row-link--note"
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -382,7 +382,7 @@ export function OriginalDataSelectionDialog({
                       </div>
                     </label>
                     <button
-                      className="asset-picker__row-link"
+                      className="asset-picker__row-link asset-picker__row-link--note"
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();

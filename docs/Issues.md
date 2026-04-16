@@ -561,3 +561,8 @@
   - `src/renderer/WorkspaceFileViewer.tsx`, `src/renderer/App.tsx`, `src/renderer/workspaceEmbedFeature.tsx`, `src/renderer/styles.css` を更新し、`.idts` 表示と readonly tab の extra model 保持に対応した
   - `docs/30_設計/40_標準描画と結果閲覧.md` に `.idts` built-in viewer を追記した
   - `npm run build` が通ることを確認した
+* 2026-04-16 追記:
+  - `.idts` viewer の埋め込み note preview 全体を clickable にし、クリックまたは Enter / Space で対応する managed data note を別タブで開けるようにした
+  - `src/renderer/DatasetManifestFileViewer.tsx` で `requestOpenManagedDataNote()` を飛ばす導線を追加した
+  - `src/renderer/styles.css` で note preview card の hover / focus と pointer event 制御を追加した
+  - `npm run build` が通ることを確認した

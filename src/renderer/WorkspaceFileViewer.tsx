@@ -28,7 +28,7 @@ export function WorkspaceFileViewer({
           <div className="workspace-file-viewer__actions">
             {managedDataAction ? (
               <button
-                className="button button--ghost"
+                className="button button--note"
                 onClick={() => {
                   managedDataAction.onOpen();
                 }}
@@ -58,7 +58,7 @@ export function WorkspaceFileViewer({
       {managedDataAction ? (
         <div className="workspace-file-viewer__toolbar">
           <button
-            className="button button--ghost button--xs"
+            className="button button--note button--xs"
             onClick={() => {
               managedDataAction.onOpen();
             }}

@@ -2236,7 +2236,7 @@ export function App(): JSX.Element {
         <>
           {managedDataTarget ? (
             <button
-              className="button button--ghost button--xs editor-mode-toggle"
+              className="button button--note button--xs"
               onClick={() => {
                 void openManagedDataNote(managedDataTarget.targetId);
               }}
