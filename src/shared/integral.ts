@@ -1,6 +1,7 @@
 import type {
   InstalledPluginOrigin,
-  PluginActionContribution
+  PluginActionContribution,
+  ResolvedPluginViewer
 } from "./plugins";
 
 export interface IntegralSlotDefinition {
@@ -77,8 +78,9 @@ export interface IntegralDatasetSummary {
 
 export interface IntegralRenderableFile {
   data: string;
-  kind: "html" | "image" | "text";
+  kind: "html" | "image" | "plugin" | "text";
   name: string;
+  pluginViewer?: ResolvedPluginViewer;
   relativePath: string;
 }
 

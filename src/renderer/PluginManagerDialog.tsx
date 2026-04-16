@@ -86,6 +86,9 @@ export function PluginManagerDialog({
                             <span className="plugin-card__badge">renderer</span>
                           ) : null}
                           {plugin.hasHost ? <span className="plugin-card__badge">host</span> : null}
+                          {plugin.viewers.length > 0 ? (
+                            <span className="plugin-card__badge">{plugin.viewers.length} viewers</span>
+                          ) : null}
                         </div>
                       </div>
 
@@ -106,6 +109,7 @@ export function PluginManagerDialog({
                     <div className="plugin-card__meta">
                       <span>Namespace: {plugin.namespace}</span>
                       <span>Blocks: {plugin.blocks.length}</span>
+                      <span>Viewers: {plugin.viewers.length}</span>
                     </div>
 
                     <ul className="plugin-card__blocks">

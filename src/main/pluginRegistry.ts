@@ -29,6 +29,7 @@ interface ResolvedInstalledPlugin {
   manifest: PluginManifest;
   rendererEntryPath: string | null;
   rootPath: string;
+  viewerEntryPaths: Map<string, string>;
 }
 
 export class PluginRegistry {
@@ -60,6 +61,21 @@ export class PluginRegistry {
     return await prepareRendererDocument(
       await fs.readFile(plugin.rendererEntryPath, "utf8"),
       path.dirname(plugin.rendererEntryPath),
+      plugin.rootPath
+    );
+  }
+
+  async loadViewerDocument(pluginId: string, viewerId: string): Promise<string> {
+    const plugin = await this.findPluginById(pluginId);
+    const viewerEntryPath = plugin?.viewerEntryPaths.get(viewerId);
+
+    if (!plugin || !viewerEntryPath) {
+      throw new Error(`plugin viewer が見つかりません: ${pluginId}/${viewerId}`);
+    }
+
+    return await prepareRendererDocument(
+      await fs.readFile(viewerEntryPath, "utf8"),
+      path.dirname(viewerEntryPath),
       plugin.rootPath
     );
   }
@@ -224,7 +240,13 @@ export class PluginRegistry {
       rendererEntryPath: manifest.renderer
         ? path.join(pluginRootPath, ...manifest.renderer.entry.split("/"))
         : null,
-      rootPath: pluginRootPath
+      rootPath: pluginRootPath,
+      viewerEntryPaths: new Map(
+        (manifest.viewers ?? []).map((viewer) => [
+          viewer.id,
+          path.join(pluginRootPath, ...viewer.renderer.entry.split("/"))
+        ])
+      )
     };
   }
 
@@ -240,9 +262,12 @@ export class PluginRegistry {
         continue;
       }
 
-      const filteredBlocks = plugin.manifest.blocks.filter((block) => !seenBlockTypes.has(block.type));
+      const filteredBlocks = (plugin.manifest.blocks ?? []).filter(
+        (block) => !seenBlockTypes.has(block.type)
+      );
+      const filteredViewers = plugin.manifest.viewers ?? [];
 
-      if (filteredBlocks.length === 0) {
+      if (filteredBlocks.length === 0 && filteredViewers.length === 0) {
         continue;
       }
 
@@ -253,7 +278,8 @@ export class PluginRegistry {
 
       const manifest: PluginManifest = {
         ...plugin.manifest,
-        blocks: filteredBlocks
+        blocks: filteredBlocks,
+        viewers: filteredViewers
       };
 
       merged.push({
@@ -270,7 +296,7 @@ export class PluginRegistry {
     const plugins = await this.getResolvedPlugins();
 
     for (const plugin of plugins) {
-      if (plugin.manifest.blocks.some((block) => block.type === blockType)) {
+      if ((plugin.manifest.blocks ?? []).some((block) => block.type === blockType)) {
         return plugin;
       }
     }

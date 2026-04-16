@@ -1,3 +1,4 @@
+import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
 import type { WorkspaceFileDocument } from "../shared/workspace";
 
 interface WorkspaceFileViewerAction {
@@ -80,6 +81,18 @@ export function WorkspaceFileViewer({
             alt={file.name}
             className="integral-renderable-card__image workspace-file-viewer__image"
             src={file.content}
+          />
+        ) : file.kind === "plugin" && file.pluginViewer ? (
+          <ExternalPluginFileViewer
+            file={{
+              content: file.content ?? "",
+              name: file.name,
+              pluginViewer: file.pluginViewer,
+              relativePath: file.relativePath
+            }}
+            source={{
+              kind: "workspace-file"
+            }}
           />
         ) : (
           <pre className="integral-renderable-card__text workspace-file-viewer__text">{file.content}</pre>

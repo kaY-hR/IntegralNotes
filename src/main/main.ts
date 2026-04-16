@@ -276,6 +276,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle("plugins:loadRendererDocument", async (_event, pluginId: string) =>
     getPluginRegistry().loadRendererDocument(pluginId)
   );
+  ipcMain.handle(
+    "plugins:loadViewerDocument",
+    async (_event, pluginId: string, viewerId: string) =>
+      getPluginRegistry().loadViewerDocument(pluginId, viewerId)
+  );
   ipcMain.handle("plugins:uninstall", async (_event, pluginId: string) =>
     getPluginRegistry().uninstallPlugin(pluginId)
   );
@@ -376,6 +381,7 @@ if (!hasSingleInstanceLock) {
     pluginRegistry = new PluginRegistry({
       installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
     });
+    workspaceService.setPluginRegistry(pluginRegistry);
     integralWorkspaceService = new IntegralWorkspaceService(workspaceService, pluginRegistry);
     workspaceService.addMutationListener((mutations) =>
       getIntegralWorkspaceService().handleWorkspaceMutations(mutations)

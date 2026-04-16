@@ -7,6 +7,7 @@ export const PLUGIN_HOST_MODULE_EXPORT = "runIntegralPluginAction";
 export const PLUGIN_HOST_RUNTIME = "module";
 export const PLUGIN_MANIFEST_FILENAME = "integral-plugin.json";
 export const PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
+export const PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE = "integral:set-viewer";
 export const PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
 export const PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE = "integral:request-action";
 export const PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
@@ -32,6 +33,14 @@ export interface PluginRendererContribution {
   mode: "iframe";
 }
 
+export interface PluginViewerContribution {
+  description: string;
+  displayName: string;
+  extensions: string[];
+  id: string;
+  renderer: PluginRendererContribution;
+}
+
 export interface PluginHostContribution {
   entry: string;
   runtime: typeof PLUGIN_HOST_RUNTIME;
@@ -39,7 +48,7 @@ export interface PluginHostContribution {
 
 export interface PluginManifest {
   apiVersion: typeof PLUGIN_API_VERSION;
-  blocks: PluginBlockContribution[];
+  blocks?: PluginBlockContribution[];
   description: string;
   displayName: string;
   host?: PluginHostContribution;
@@ -47,6 +56,14 @@ export interface PluginManifest {
   namespace: string;
   renderer?: PluginRendererContribution;
   version: string;
+  viewers?: PluginViewerContribution[];
+}
+
+export interface InstalledPluginViewerDefinition {
+  description: string;
+  displayName: string;
+  extensions: string[];
+  id: string;
 }
 
 export interface InstalledPluginDefinition {
@@ -60,6 +77,7 @@ export interface InstalledPluginDefinition {
   origin: InstalledPluginOrigin;
   sourcePath: string | null;
   version: string;
+  viewers: InstalledPluginViewerDefinition[];
 }
 
 export interface PluginRendererBlock extends JsonRecord {
@@ -79,6 +97,41 @@ export interface PluginRendererModel {
 export interface PluginRenderSetBlockMessage {
   payload: PluginRendererModel;
   type: typeof PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE;
+}
+
+export type PluginViewerDataEncoding = "data-url" | "text";
+
+export type PluginViewerFileSource =
+  | {
+      kind: "dataset-file";
+      datasetId: string;
+      datasetName: string;
+    }
+  | {
+      kind: "workspace-file";
+    };
+
+export interface PluginViewerFileModel {
+  data: string;
+  dataEncoding: PluginViewerDataEncoding;
+  mediaType: string;
+  name: string;
+  relativePath: string;
+  source: PluginViewerFileSource;
+}
+
+export interface PluginViewerRendererModel {
+  file: PluginViewerFileModel;
+  plugin: Pick<
+    InstalledPluginDefinition,
+    "description" | "displayName" | "id" | "namespace" | "origin" | "version"
+  >;
+  viewer: Pick<InstalledPluginViewerDefinition, "description" | "displayName" | "extensions" | "id">;
+}
+
+export interface PluginRenderSetViewerMessage {
+  payload: PluginViewerRendererModel;
+  type: typeof PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE;
 }
 
 export interface PluginRenderUpdateParamsPayload {
@@ -134,6 +187,20 @@ export interface PluginHostModule {
   ) => Promise<PluginHostActionResult> | PluginHostActionResult;
 }
 
+export interface ResolvedPluginViewer {
+  dataEncoding: PluginViewerDataEncoding;
+  mediaType: string;
+  pluginDescription: string;
+  pluginDisplayName: string;
+  pluginId: string;
+  pluginNamespace: string;
+  pluginVersion: string;
+  viewerDescription: string;
+  viewerDisplayName: string;
+  viewerExtensions: string[];
+  viewerId: string;
+}
+
 export function findInstalledPluginBlock(
   plugins: readonly InstalledPluginDefinition[],
   blockType: string
@@ -152,12 +219,38 @@ export function findInstalledPluginBlock(
   return null;
 }
 
+export function findInstalledPluginViewerByExtension(
+  plugins: readonly InstalledPluginDefinition[],
+  extension: string
+): { plugin: InstalledPluginDefinition; viewer: InstalledPluginViewerDefinition } | null {
+  const normalizedExtension = normalizePluginViewerExtension(extension);
+
+  if (normalizedExtension === null) {
+    return null;
+  }
+
+  for (const plugin of plugins) {
+    const viewer = plugin.viewers.find((candidate) =>
+      candidate.extensions.includes(normalizedExtension)
+    );
+
+    if (viewer) {
+      return {
+        plugin,
+        viewer
+      };
+    }
+  }
+
+  return null;
+}
+
 export function findPluginBlockContribution(
   manifests: readonly PluginManifest[],
   blockType: string
 ): PluginBlockContribution | null {
   for (const manifest of manifests) {
-    for (const block of manifest.blocks) {
+    for (const block of manifest.blocks ?? []) {
       if (block.type === blockType) {
         return block;
       }
@@ -191,10 +284,17 @@ export function parsePluginManifest(manifest: unknown): PluginManifest | null {
   }
 
   const blocks = parsePluginBlocks(manifest.blocks, namespace);
+  const viewers = parsePluginViewers(manifest.viewers);
   const renderer = parsePluginRendererContribution(manifest.renderer);
   const host = parsePluginHostContribution(manifest.host);
 
-  if (blocks === null || blocks.length === 0 || renderer === null || host === null) {
+  if (
+    blocks === null ||
+    viewers === null ||
+    renderer === null ||
+    host === null ||
+    (blocks.length === 0 && viewers.length === 0)
+  ) {
     return null;
   }
 
@@ -207,7 +307,8 @@ export function parsePluginManifest(manifest: unknown): PluginManifest | null {
     id,
     namespace,
     renderer: renderer ?? undefined,
-    version
+    version,
+    viewers: viewers.length > 0 ? viewers : undefined
   };
 }
 
@@ -225,7 +326,7 @@ export function toInstalledPluginDefinition(
   sourcePath: string | null
 ): InstalledPluginDefinition {
   return {
-    blocks: manifest.blocks.map((block) => ({
+    blocks: (manifest.blocks ?? []).map((block) => ({
       actions: block.actions?.map((action) => ({ ...action })),
       description: block.description,
       title: block.title,
@@ -239,11 +340,21 @@ export function toInstalledPluginDefinition(
     namespace: manifest.namespace,
     origin,
     sourcePath,
-    version: manifest.version
+    version: manifest.version,
+    viewers: (manifest.viewers ?? []).map((viewer) => ({
+      description: viewer.description,
+      displayName: viewer.displayName,
+      extensions: [...viewer.extensions],
+      id: viewer.id
+    }))
   };
 }
 
 function parsePluginBlocks(value: unknown, namespace: string): PluginBlockContribution[] | null {
+  if (value === undefined) {
+    return [];
+  }
+
   if (!Array.isArray(value)) {
     return null;
   }
@@ -263,6 +374,41 @@ function parsePluginBlocks(value: unknown, namespace: string): PluginBlockContri
   }
 
   return blocks;
+}
+
+function parsePluginViewers(value: unknown): PluginViewerContribution[] | null {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const viewers: PluginViewerContribution[] = [];
+  const seenIds = new Set<string>();
+  const seenExtensions = new Set<string>();
+
+  for (const item of value) {
+    const viewer = parsePluginViewerContribution(item);
+
+    if (viewer === null || seenIds.has(viewer.id)) {
+      return null;
+    }
+
+    for (const extension of viewer.extensions) {
+      if (seenExtensions.has(extension)) {
+        return null;
+      }
+
+      seenExtensions.add(extension);
+    }
+
+    seenIds.add(viewer.id);
+    viewers.push(viewer);
+  }
+
+  return viewers;
 }
 
 function parsePluginBlockContribution(value: unknown, namespace: string): PluginBlockContribution | null {
@@ -293,12 +439,71 @@ function parsePluginBlockContribution(value: unknown, namespace: string): Plugin
   };
 }
 
+function parsePluginViewerContribution(value: unknown): PluginViewerContribution | null {
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  const id = readNonEmptyString(value.id);
+  const displayName = readNonEmptyString(value.displayName);
+  const description = readNonEmptyString(value.description);
+  const extensions = parsePluginViewerExtensions(value.extensions);
+  const renderer = parsePluginRendererContribution(value.renderer);
+
+  if (
+    id === null ||
+    displayName === null ||
+    description === null ||
+    extensions === null ||
+    extensions.length === 0 ||
+    renderer === null ||
+    renderer === undefined ||
+    !isValidPluginViewerId(id)
+  ) {
+    return null;
+  }
+
+  return {
+    description,
+    displayName,
+    extensions,
+    id,
+    renderer
+  };
+}
+
 function isValidPluginBlockType(type: string, namespace: string): boolean {
   if (type.startsWith(`${namespace}.`)) {
     return true;
   }
 
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(type);
+}
+
+function isValidPluginViewerId(id: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(id);
+}
+
+function parsePluginViewerExtensions(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const extensions: string[] = [];
+  const seenExtensions = new Set<string>();
+
+  for (const item of value) {
+    const extension = normalizePluginViewerExtension(item);
+
+    if (extension === null || seenExtensions.has(extension)) {
+      return null;
+    }
+
+    seenExtensions.add(extension);
+    extensions.push(extension);
+  }
+
+  return extensions;
 }
 
 function parsePluginActionContributions(value: unknown): PluginActionContribution[] | null {
@@ -410,6 +615,22 @@ function readNonEmptyString(value: unknown): string | null {
   const trimmed = value.trim();
 
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizePluginViewerExtension(value: unknown): string | null {
+  const extension = readNonEmptyString(value);
+
+  if (extension === null) {
+    return null;
+  }
+
+  const normalized = extension.toLowerCase();
+
+  if (!/^\.[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function isJsonRecord(value: unknown): value is JsonRecord {

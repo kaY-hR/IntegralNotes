@@ -2,7 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type {
+import {
+  findInstalledPluginViewerByExtension,
+  type InstalledPluginDefinition,
+  type PluginViewerDataEncoding,
+  type ResolvedPluginViewer
+} from "../shared/plugins";
+import {
   CopyEntriesRequest,
   CopyEntriesResult,
   CopyExternalEntriesRequest,
@@ -44,6 +50,7 @@ import {
   serializeFrontmatterDocument,
   splitFrontmatterBlock
 } from "./frontmatter";
+import { type PluginRegistry } from "./pluginRegistry";
 
 interface WorkspaceServiceOptions {
   initialRootPath?: string;
@@ -109,6 +116,7 @@ export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
   private readonly mutationListeners = new Set<WorkspaceMutationListener>();
+  private pluginRegistry: PluginRegistry | null = null;
   private readonly stateFilePath: string;
 
   constructor(options: WorkspaceServiceOptions) {
@@ -119,6 +127,10 @@ export class WorkspaceService {
 
   get currentRootPath(): string | undefined {
     return this.rootPath;
+  }
+
+  setPluginRegistry(pluginRegistry: PluginRegistry): void {
+    this.pluginRegistry = pluginRegistry;
   }
 
   async initialize(): Promise<void> {
@@ -726,6 +738,21 @@ export class WorkspaceService {
       };
     }
 
+    const pluginViewer = await this.resolvePluginViewer(extension);
+
+    if (pluginViewer) {
+      const payload = await readPluginViewerPayload(absolutePath, extension);
+
+      return {
+        content: payload.data,
+        kind: "plugin",
+        modifiedAt: stats.mtime.toISOString(),
+        name: path.basename(absolutePath),
+        pluginViewer: buildResolvedPluginViewer(pluginViewer.plugin, pluginViewer.viewer, payload),
+        relativePath
+      };
+    }
+
     if (HTML_EXTENSIONS.has(extension)) {
       return {
         content: injectHtmlBaseTag(await fs.readFile(absolutePath, "utf8"), path.dirname(absolutePath)),
@@ -777,6 +804,17 @@ export class WorkspaceService {
       name: path.basename(absolutePath),
       relativePath
     };
+  }
+
+  private async resolvePluginViewer(
+    extension: string
+  ): Promise<ReturnType<typeof findInstalledPluginViewerByExtension> | null> {
+    if (!this.pluginRegistry) {
+      return null;
+    }
+
+    const installedPlugins = await this.pluginRegistry.listInstalledPlugins();
+    return findInstalledPluginViewerByExtension(installedPlugins, extension);
   }
 
   private async emitWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
@@ -1314,10 +1352,24 @@ function injectHtmlBaseTag(document: string, baseDirectoryPath: string): string 
 
 function inferMimeType(assetPath: string): string {
   switch (path.extname(assetPath).toLowerCase()) {
+    case ".csv":
+      return "text/csv";
+    case ".html":
+    case ".htm":
+      return "text/html";
+    case ".json":
+      return "application/json";
     case ".bmp":
       return "image/bmp";
     case ".gif":
       return "image/gif";
+    case ".md":
+    case ".txt":
+    case ".tsv":
+    case ".xml":
+    case ".yaml":
+    case ".yml":
+      return "text/plain";
     case ".png":
       return "image/png";
     case ".jpg":
@@ -1330,6 +1382,64 @@ function inferMimeType(assetPath: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+function buildResolvedPluginViewer(
+  plugin: InstalledPluginDefinition,
+  viewer: InstalledPluginDefinition["viewers"][number],
+  payload: {
+    dataEncoding: PluginViewerDataEncoding;
+    mediaType: string;
+  }
+): ResolvedPluginViewer {
+  return {
+    dataEncoding: payload.dataEncoding,
+    mediaType: payload.mediaType,
+    pluginDescription: plugin.description,
+    pluginDisplayName: plugin.displayName,
+    pluginId: plugin.id,
+    pluginNamespace: plugin.namespace,
+    pluginVersion: plugin.version,
+    viewerDescription: viewer.description,
+    viewerDisplayName: viewer.displayName,
+    viewerExtensions: [...viewer.extensions],
+    viewerId: viewer.id
+  };
+}
+
+async function readPluginViewerPayload(
+  absolutePath: string,
+  extension: string
+): Promise<{
+  data: string;
+  dataEncoding: PluginViewerDataEncoding;
+  mediaType: string;
+}> {
+  const mediaType = inferMimeType(absolutePath);
+
+  if (TEXT_EXTENSIONS.has(extension)) {
+    return {
+      data: await fs.readFile(absolutePath, "utf8"),
+      dataEncoding: "text",
+      mediaType
+    };
+  }
+
+  const buffer = await fs.readFile(absolutePath);
+
+  if (isProbablyTextFile(buffer)) {
+    return {
+      data: buffer.toString("utf8"),
+      dataEncoding: "text",
+      mediaType
+    };
+  }
+
+  return {
+    data: `data:${mediaType};base64,${buffer.toString("base64")}`,
+    dataEncoding: "data-url",
+    mediaType
+  };
 }
 
 function escapeHtmlAttribute(value: string): string {

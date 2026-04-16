@@ -1,4 +1,7 @@
-import type { InstalledPluginDefinition } from "./plugins";
+import type {
+  InstalledPluginDefinition,
+  ResolvedPluginViewer
+} from "./plugins";
 import type {
   CreateSourceDatasetRequest,
   CreateSourceDatasetFromWorkspaceEntriesRequest,
@@ -39,7 +42,7 @@ export interface NoteDocument {
   modifiedAt: string;
 }
 
-export type WorkspaceFileViewKind = "markdown" | "html" | "image" | "text" | "unsupported";
+export type WorkspaceFileViewKind = "markdown" | "html" | "image" | "plugin" | "text" | "unsupported";
 
 export interface WorkspaceFileDocument {
   relativePath: string;
@@ -47,6 +50,7 @@ export interface WorkspaceFileDocument {
   content: string | null;
   kind: WorkspaceFileViewKind;
   modifiedAt: string;
+  pluginViewer?: ResolvedPluginViewer;
 }
 
 export interface CreateEntryRequest {
@@ -188,6 +192,7 @@ export interface IntegralNotesApi {
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
   loadPluginRendererDocument: (pluginId: string) => Promise<string>;
+  loadPluginViewerDocument: (pluginId: string, viewerId: string) => Promise<string>;
   registerPythonScript: (
     request: RegisterPythonScriptRequest
   ) => Promise<RegisterPythonScriptResult>;

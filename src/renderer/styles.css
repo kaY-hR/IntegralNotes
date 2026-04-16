@@ -1228,14 +1228,14 @@ textarea:focus-visible {
   line-height: 1.45;
 }
 
-.editor-surface .milkdown .integral-plugin-frame-shell {
+.integral-plugin-frame-shell {
   overflow: hidden;
   border: 0;
   border-radius: 0;
   background: transparent;
 }
 
-.editor-surface .milkdown .integral-plugin-frame-shell--loading {
+.integral-plugin-frame-shell--loading {
   display: grid;
   min-height: 360px;
   place-items: center;
@@ -1243,7 +1243,7 @@ textarea:focus-visible {
   font-size: 0.82rem;
 }
 
-.editor-surface .milkdown .integral-plugin-frame {
+.integral-plugin-frame {
   display: block;
   width: 100%;
   min-height: 360px;

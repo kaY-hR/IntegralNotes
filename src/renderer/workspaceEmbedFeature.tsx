@@ -734,6 +734,14 @@ async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedReso
       };
     }
 
+    if (file.kind === "plugin") {
+      return {
+        kind: "unsupported",
+        message: "この file の専用 viewer は埋め込み preview では未対応です。",
+        openTarget: workspaceFileOpenTarget
+      };
+    }
+
     const managedDataNote = await resolveManagedDataNoteFallback(relativePath);
 
     if (managedDataNote) {

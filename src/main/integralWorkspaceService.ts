@@ -27,7 +27,11 @@ import type {
   RegisterPythonScriptRequest,
   RegisterPythonScriptResult
 } from "../shared/integral";
-import type { InstalledPluginDefinition } from "../shared/plugins";
+import {
+  findInstalledPluginViewerByExtension,
+  type InstalledPluginDefinition,
+  type PluginViewerDataEncoding
+} from "../shared/plugins";
 import { PluginRegistry } from "./pluginRegistry";
 import { WorkspaceService, type WorkspaceMutation } from "./workspaceService";
 
@@ -482,12 +486,19 @@ export class IntegralWorkspaceService {
 
     const datasetRootPath = await this.resolveDatasetReadablePath(datasetMetadata);
     const inspectableFiles = await this.collectInspectableFiles(datasetRootPath, datasetMetadata);
+    const installedPlugins = await this.pluginRegistry.listInstalledPlugins();
     const relativeFilePaths = inspectableFiles.map((entry) => entry.relativePath);
-    const renderables = await Promise.all(
-      inspectableFiles
-        .filter((entry) => isRenderableExtension(path.extname(entry.relativePath)))
-        .map((entry) => this.readRenderableFile(entry.absolutePath, entry.relativePath))
-    );
+    const renderables = (
+      await Promise.all(
+        inspectableFiles.map((entry) =>
+          this.readRenderableFile(
+            entry.absolutePath,
+            entry.relativePath,
+            installedPlugins
+          )
+        )
+      )
+    ).filter((renderable): renderable is IntegralRenderableFile => renderable !== null);
 
     return {
       datasetId: datasetMetadata.datasetId,
@@ -990,8 +1001,9 @@ export class IntegralWorkspaceService {
 
     const datasetRootPath = await this.resolveDatasetReadablePath(metadata);
     const inspectableFiles = await this.collectInspectableFiles(datasetRootPath, metadata);
+    const installedPlugins = await this.pluginRegistry.listInstalledPlugins();
     const renderableCount = inspectableFiles.filter((entry) =>
-      isRenderableExtension(path.extname(entry.relativePath))
+      isRenderableExtension(path.extname(entry.relativePath), installedPlugins)
     ).length;
 
     return {
@@ -1042,9 +1054,23 @@ export class IntegralWorkspaceService {
 
   private async readRenderableFile(
     absolutePath: string,
-    relativePath: string
-  ): Promise<IntegralRenderableFile> {
+    relativePath: string,
+    installedPlugins: readonly InstalledPluginDefinition[]
+  ): Promise<IntegralRenderableFile | null> {
     const extension = path.extname(relativePath).toLowerCase();
+    const pluginViewer = findInstalledPluginViewerByExtension(installedPlugins, extension);
+
+    if (pluginViewer) {
+      const payload = await readPluginViewerPayload(absolutePath, extension);
+
+      return {
+        data: payload.data,
+        kind: "plugin",
+        name: path.basename(relativePath),
+        pluginViewer: buildResolvedPluginViewer(pluginViewer.plugin, pluginViewer.viewer, payload),
+        relativePath
+      };
+    }
 
     if (HTML_EXTENSIONS.has(extension)) {
       return {
@@ -1066,12 +1092,16 @@ export class IntegralWorkspaceService {
       };
     }
 
-    return {
-      data: await fs.readFile(absolutePath, "utf8"),
-      kind: "text",
-      name: path.basename(relativePath),
-      relativePath
-    };
+    if (TEXT_EXTENSIONS.has(extension)) {
+      return {
+        data: await fs.readFile(absolutePath, "utf8"),
+        kind: "text",
+        name: path.basename(relativePath),
+        relativePath
+      };
+    }
+
+    return null;
   }
 
   private async collectInspectableFiles(
@@ -2280,8 +2310,16 @@ function resolvePythonCommand(): string {
   return configured && configured.length > 0 ? configured : "python";
 }
 
-function isRenderableExtension(extension: string): boolean {
+function isRenderableExtension(
+  extension: string,
+  installedPlugins: readonly InstalledPluginDefinition[]
+): boolean {
   const normalized = extension.toLowerCase();
+
+  if (findInstalledPluginViewerByExtension(installedPlugins, normalized)) {
+    return true;
+  }
+
   return (
     HTML_EXTENSIONS.has(normalized) ||
     IMAGE_EXTENSIONS.has(normalized) ||
@@ -2329,6 +2367,55 @@ function inferMimeType(assetPath: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+function buildResolvedPluginViewer(
+  plugin: InstalledPluginDefinition,
+  viewer: InstalledPluginDefinition["viewers"][number],
+  payload: {
+    dataEncoding: PluginViewerDataEncoding;
+    mediaType: string;
+  }
+) {
+  return {
+    dataEncoding: payload.dataEncoding,
+    mediaType: payload.mediaType,
+    pluginDescription: plugin.description,
+    pluginDisplayName: plugin.displayName,
+    pluginId: plugin.id,
+    pluginNamespace: plugin.namespace,
+    pluginVersion: plugin.version,
+    viewerDescription: viewer.description,
+    viewerDisplayName: viewer.displayName,
+    viewerExtensions: [...viewer.extensions],
+    viewerId: viewer.id
+  };
+}
+
+async function readPluginViewerPayload(
+  absolutePath: string,
+  extension: string
+): Promise<{
+  data: string;
+  dataEncoding: PluginViewerDataEncoding;
+  mediaType: string;
+}> {
+  const mediaType = inferMimeType(absolutePath);
+  const buffer = await fs.readFile(absolutePath);
+
+  if (TEXT_EXTENSIONS.has(extension) || !buffer.includes(0)) {
+    return {
+      data: buffer.toString("utf8"),
+      dataEncoding: "text",
+      mediaType
+    };
+  }
+
+  return {
+    data: `data:${mediaType};base64,${buffer.toString("base64")}`,
+    dataEncoding: "data-url",
+    mediaType
+  };
 }
 
 function escapeHtmlAttribute(value: string): string {

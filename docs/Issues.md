@@ -509,3 +509,36 @@
   - これにより画像だけは custom の full-width / click-open / resize surface ではなく、Milkdown 既定の選択・編集 UI を使えるようにした
   - 以前の custom image resize で残っていた `#integral-embed-height=NNN` は、標準画像 view に入るノードでは自動で落とすようにした
   - `npm run build` が通ることを確認した
+
+## [x] 27. 拡張子ごとに専用 viewer を plugin できる統合 plugin system を追加したい
+- Status:completed
+- 優先重み:6
+- 記載日時:2026-04-16-08:42(UTC+9)
+
+* plugin system 自体は分けず、既存の plugin package / install / manifest / registry に viewer contribution を追加したい
+* 設計方針は「plugin system は統合、contribution type は分離」とし、同一 plugin が `blocks` と `viewers` の両方を持てるようにしたい
+* first version の viewer matcher は extension-only に限定し、`extensions: [".foo", ".bar"]` で専用 viewer を解決したい
+* 既存 plugin への影響は additive に抑え、`viewers` を持たない既存 plugin はそのまま読めるようにしたい
+* viewer 解決順は `plugin viewer -> built-in viewer -> unsupported / 外部アプリ` にしたい
+* 対象は少なくとも workspace file viewer と dataset の標準表示 block の両方にしたい
+* `.md` の note editor / note tab override は first version の対象外とし、Markdown は従来どおり note として扱いたい
+* first version の viewer renderer は `iframe` ベースの read-only preview でよく、編集や block 実行とは契約を分けたい
+* 実装の主対象は少なくとも以下
+  - `src/shared/plugins.ts`
+  - `src/main/pluginRegistry.ts`
+  - `src/main/workspaceService.ts`
+  - `src/main/integralWorkspaceService.ts`
+  - `src/renderer/WorkspaceFileViewer.tsx`
+  - `src/renderer/IntegralAssetDialogs.tsx`
+* 関連設計文書として、少なくとも `docs/30_設計/50_プラグイン定義.md` と `docs/30_設計/40_標準描画と結果閲覧.md` を current 方針へ合わせて維持したい
+* 2026-04-16 実装:
+  - `src/shared/plugins.ts` に `viewers` contribution、viewer message model、viewer metadata 型を追加した
+  - plugin manifest parse を `blocks` または `viewers` のどちらかを持てば成立する形へ広げ、既存 plugin 互換を維持した
+  - `src/main/pluginRegistry.ts`, `src/main/main.ts`, `src/main/preload.ts`, `src/shared/workspace.ts` を更新し、`loadPluginViewerDocument(pluginId, viewerId)` を追加した
+  - `src/main/workspaceService.ts` で非 `.md` workspace file を開くとき、拡張子に一致する plugin viewer を built-in より先に解決するようにした
+  - `src/main/integralWorkspaceService.ts` でも dataset inspection / renderable 判定に同じ viewer registry を使い、plugin viewer 対象 file を標準表示 block で扱えるようにした
+  - `src/renderer/ExternalPluginFileViewer.tsx` を追加し、viewer iframe へ file payload を postMessage で渡す generic renderer を実装した
+  - `src/renderer/WorkspaceFileViewer.tsx` と `src/renderer/IntegralAssetDialogs.tsx` を更新し、`kind === "plugin"` の file を app 内で表示できるようにした
+  - `src/renderer/workspaceEmbedFeature.tsx` は plugin viewer file の embed を明示的に未対応扱いにした
+  - `src/renderer/PluginManagerDialog.tsx` で viewer 数を表示し、`src/renderer/styles.css` で plugin iframe style を一般 viewer でも使えるようにした
+  - `npm run build` が通ることを確認した

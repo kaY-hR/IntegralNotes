@@ -6,6 +6,7 @@ import type {
   IntegralDatasetSummary,
   IntegralOriginalDataSummary
 } from "../shared/integral";
+import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 
 function toErrorMessage(error: unknown): string {
@@ -547,6 +548,20 @@ export function DatasetRenderableView({ datasetId }: { datasetId: string | null 
           />
         ) : renderable.kind === "image" ? (
           <img alt={renderable.name} className="integral-renderable-card__image" src={renderable.data} />
+        ) : renderable.kind === "plugin" && renderable.pluginViewer ? (
+          <ExternalPluginFileViewer
+            file={{
+              content: renderable.data,
+              name: renderable.name,
+              pluginViewer: renderable.pluginViewer,
+              relativePath: renderable.relativePath
+            }}
+            source={{
+              datasetId: inspection.datasetId,
+              datasetName: inspection.name,
+              kind: "dataset-file"
+            }}
+          />
         ) : (
           <pre className="integral-renderable-card__text">{renderable.data}</pre>
         )}
