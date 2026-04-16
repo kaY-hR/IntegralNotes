@@ -99,6 +99,24 @@ const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.m
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
 const TREE_DRAG_MIME = "application/x-integralnotes-workspace-selection";
 
+function ExplorerVisibilityIcon({
+  showHiddenEntries
+}: {
+  showHiddenEntries: boolean;
+}): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="sidebar__action-icon-svg"
+      viewBox="0 0 18 16"
+    >
+      <path d="M1.5 8c1.82-3.03 4.86-4.75 7.5-4.75S14.68 4.97 16.5 8c-1.82 3.03-4.86 4.75-7.5 4.75S3.32 11.03 1.5 8Z" />
+      <circle cx="9" cy="8" r="2.2" />
+      {!showHiddenEntries ? <path d="M3 14 15 2" /> : null}
+    </svg>
+  );
+}
+
 function createEmptyIntegralAssetCatalog(): IntegralAssetCatalog {
   return {
     blockTypes: [],
@@ -201,7 +219,35 @@ function normalizeRelativePath(relativePath: string): string {
 }
 
 function isHiddenWorkspacePath(relativePath: string): boolean {
-  return normalizeRelativePath(relativePath).startsWith(".");
+  return normalizeRelativePath(relativePath)
+    .split("/")
+    .some((segment) => segment.startsWith("."));
+}
+
+function filterWorkspaceEntries(
+  entries: WorkspaceEntry[],
+  showHiddenEntries: boolean
+): WorkspaceEntry[] {
+  if (showHiddenEntries) {
+    return entries;
+  }
+
+  return entries.flatMap((entry) => {
+    if (isHiddenWorkspacePath(entry.relativePath)) {
+      return [];
+    }
+
+    if (!entry.children) {
+      return [entry];
+    }
+
+    return [
+      {
+        ...entry,
+        children: filterWorkspaceEntries(entry.children, showHiddenEntries)
+      }
+    ];
+  });
 }
 
 function createManagedDataNoteRelativePath(targetId: string): string {
@@ -588,6 +634,7 @@ export function App(): JSX.Element {
     createEmptyIntegralAssetCatalog()
   );
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
+  const [showHiddenEntries, setShowHiddenEntries] = useState(false);
   const [openTabs, setOpenTabs] = useState<Record<string, OpenWorkspaceTab>>({});
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
   const [selectedEntryPaths, setSelectedEntryPaths] = useState<Set<string>>(new Set());
@@ -619,8 +666,11 @@ export function App(): JSX.Element {
   const shouldAutoOpenInitialFileRef = useRef(false);
   const sidebarRef = useRef<HTMLElement>(null);
 
-  const selectedEntry = workspace ? findEntryByPath(workspace.entries, selectedEntryPath) : undefined;
-  const selectedEntries = workspace ? findEntriesByPaths(workspace.entries, selectedEntryPaths) : [];
+  const visibleWorkspaceEntries = workspace
+    ? filterWorkspaceEntries(workspace.entries, showHiddenEntries)
+    : [];
+  const selectedEntry = findEntryByPath(visibleWorkspaceEntries, selectedEntryPath);
+  const selectedEntries = findEntriesByPaths(visibleWorkspaceEntries, selectedEntryPaths);
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
   const activeTab = selectedTabPath ? openTabs[selectedTabPath] : undefined;
   const activeTrackingIssue = trackingDialogDismissed ? null : (trackingIssues[0] ?? null);
@@ -696,6 +746,8 @@ export function App(): JSX.Element {
       statusMessage?: string;
     } = {}
   ): void => {
+    const visibleSnapshotEntries = filterWorkspaceEntries(snapshot.entries, showHiddenEntries);
+
     setInlineEditor(null);
     setContextMenu(null);
     setDropTargetPath(null);
@@ -705,21 +757,24 @@ export function App(): JSX.Element {
       resetOpenTabs();
       setSelectedEntryPath("");
       setSelectedEntryPaths(new Set());
-      setExpandedPaths(defaultExpandedPaths(snapshot.entries));
+      setExpandedPaths(defaultExpandedPaths(visibleSnapshotEntries));
     } else {
       closeTabsMatching(
-        (relativePath) => !hasEntry(snapshot.entries, relativePath) && !isHiddenWorkspacePath(relativePath)
+        (relativePath) =>
+          !hasEntry(visibleSnapshotEntries, relativePath) && !isHiddenWorkspacePath(relativePath)
       );
-      setExpandedPaths((current) => reconcileExpandedPaths(current, snapshot.entries));
+      setExpandedPaths((current) => reconcileExpandedPaths(current, visibleSnapshotEntries));
 
-      if (!hasEntry(snapshot.entries, selectedEntryPath)) {
+      if (!hasEntry(visibleSnapshotEntries, selectedEntryPath)) {
         setSelectedEntryPath("");
       }
 
       setSelectedEntryPaths((current) => {
-        const next = new Set(Array.from(current).filter((entryPath) => hasEntry(snapshot.entries, entryPath)));
+        const next = new Set(
+          Array.from(current).filter((entryPath) => hasEntry(visibleSnapshotEntries, entryPath))
+        );
 
-        if (selectedEntryPath.length > 0 && hasEntry(snapshot.entries, selectedEntryPath)) {
+        if (selectedEntryPath.length > 0 && hasEntry(visibleSnapshotEntries, selectedEntryPath)) {
           next.add(selectedEntryPath);
         }
 
@@ -864,6 +919,29 @@ export function App(): JSX.Element {
     setPythonScriptDialogOpen(true);
   };
 
+  const toggleHiddenEntriesVisibility = (): void => {
+    const nextShowHiddenEntries = !showHiddenEntries;
+    const nextVisibleEntries = workspace
+      ? filterWorkspaceEntries(workspace.entries, nextShowHiddenEntries)
+      : [];
+
+    setShowHiddenEntries(nextShowHiddenEntries);
+    setContextMenu(null);
+    setDropTargetPath(null);
+    setExpandedPaths((current) => reconcileExpandedPaths(current, nextVisibleEntries));
+
+    if (!hasEntry(nextVisibleEntries, selectedEntryPath)) {
+      setSelectedEntryPath("");
+    }
+
+    setSelectedEntryPaths(
+      new Set(Array.from(selectedEntryPaths).filter((entryPath) => hasEntry(nextVisibleEntries, entryPath)))
+    );
+    setStatusMessage(
+      nextShowHiddenEntries ? "hidden フォルダを表示しました。" : "hidden フォルダを非表示にしました。"
+    );
+  };
+
   const replaceSelection = (relativePaths: Iterable<string>, primaryPath = ""): void => {
     const normalizedPaths = collapseNestedSelection(relativePaths);
     setSelectedEntryPath(primaryPath);
@@ -895,7 +973,7 @@ export function App(): JSX.Element {
     }
 
     if (fallbackEntry && selectedEntryPaths.has(fallbackEntry.relativePath)) {
-      return findEntriesByPaths(workspace.entries, selectedEntryPaths);
+      return findEntriesByPaths(visibleWorkspaceEntries, selectedEntryPaths);
     }
 
     if (selectedEntries.length > 0) {
@@ -1080,14 +1158,14 @@ export function App(): JSX.Element {
     }
 
     shouldAutoOpenInitialFileRef.current = false;
-    const firstFile = findFirstFile(workspace.entries);
+    const firstFile = findFirstFile(visibleWorkspaceEntries);
 
     if (!firstFile) {
       return;
     }
 
     void openNote(firstFile.relativePath);
-  }, [workspace, openTabs, selectedTabId]);
+  }, [visibleWorkspaceEntries, workspace, openTabs, selectedTabId]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -1242,7 +1320,7 @@ export function App(): JSX.Element {
   };
 
   const syncTreeSelectionForPath = (relativePath: string): void => {
-    if (!workspace || !hasEntry(workspace.entries, relativePath)) {
+    if (!workspace || !hasEntry(visibleWorkspaceEntries, relativePath)) {
       return;
     }
 
@@ -2301,7 +2379,7 @@ export function App(): JSX.Element {
             setStatusMessage(message);
           }}
           toolbar={editorToolbar}
-          workspaceEntries={workspace?.entries ?? []}
+          workspaceEntries={visibleWorkspaceEntries}
         />
       );
     }
@@ -2390,6 +2468,16 @@ export function App(): JSX.Element {
                   type="button"
                 >
                   <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FOLDER_ICON_URL} />
+                </button>
+                <button
+                  aria-label={showHiddenEntries ? "hidden フォルダを非表示" : "hidden フォルダを表示"}
+                  aria-pressed={showHiddenEntries}
+                  className="button button--icon"
+                  onClick={toggleHiddenEntriesVisibility}
+                  title={showHiddenEntries ? "hidden フォルダを非表示にします" : "hidden フォルダを表示します"}
+                  type="button"
+                >
+                  <ExplorerVisibilityIcon showHiddenEntries={showHiddenEntries} />
                 </button>
                 <button
                   className="button button--ghost sidebar__action-text"
@@ -2540,7 +2628,7 @@ export function App(): JSX.Element {
                 dropTargetPath={dropTargetPath}
                 editingPending={inlineEditorPending}
                 editingState={inlineEditor}
-                entries={workspace.entries}
+                entries={visibleWorkspaceEntries}
                 expandedPaths={expandedPaths}
                 primarySelectedPath={selectedEntryPath}
                 selectedPaths={selectedEntryPaths}

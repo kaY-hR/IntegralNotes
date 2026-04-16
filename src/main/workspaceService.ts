@@ -673,15 +673,13 @@ export class WorkspaceService {
     const absolutePath = this.resolveWorkspacePath(relativePath);
     const directoryEntries = await fs.readdir(absolutePath, { withFileTypes: true });
 
-    const supportedEntries = directoryEntries
-      .filter((entry) => this.isVisibleEntry(entry.name, entry.isDirectory()))
-      .sort((left, right) => {
-        if (left.isDirectory() !== right.isDirectory()) {
-          return left.isDirectory() ? -1 : 1;
-        }
+    const supportedEntries = directoryEntries.sort((left, right) => {
+      if (left.isDirectory() !== right.isDirectory()) {
+        return left.isDirectory() ? -1 : 1;
+      }
 
-        return left.name.localeCompare(right.name, "ja");
-      });
+      return left.name.localeCompare(right.name, "ja");
+    });
 
     const entries = await Promise.all(
       supportedEntries.map(async (entry) => {
@@ -889,14 +887,6 @@ export class WorkspaceService {
 
   private combineRelativePath(parentPath: string, name: string): string {
     return parentPath.length === 0 ? name : `${parentPath}/${name}`;
-  }
-
-  private isVisibleEntry(name: string, isDirectory: boolean): boolean {
-    if (name.startsWith(".")) {
-      return false;
-    }
-
-    return isDirectory || name.length > 0;
   }
 
   private async syncManagedDataNotesInternal(rootPath: string): Promise<void> {
