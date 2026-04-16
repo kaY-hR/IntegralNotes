@@ -585,3 +585,13 @@
   - `src/renderer/WorkspaceFileViewer.tsx` と `src/renderer/IntegralAssetDialogs.tsx` では `presentation="full"` を渡すようにした
   - `docs/30_設計/40_標準描画と結果閲覧.md` と `docs/30_設計/50_プラグイン定義.md` に embed 方針を追記した
   - `npm run build` が通ることを確認した
+
+## [ ] 30. Milkdown の link/embed 補完候補から hidden file を除外したい
+- 優先重み:4
+- 記載日時:2026-04-16-18:05(UTC+9)
+
+* 現状の補完候補は explorer の hidden 表示状態に依存しており、hidden 表示を有効にすると `.store/.integral/data-notes/*.md` のような system-managed file まで候補に混ざりうる
+* note 本文の link / embed 補完対象は、hidden 表示 state に関わらず user-facing な通常 workspace file に限定したい
+* 少なくとも `.store/` 配下や hidden path は候補から除外し、`data-note` を file path として挿入させないようにしたい
+* `[` 補完と `![` / `!` 補完で同じ filtering policy を使いたい
+* explorer の hidden toggle は tree 表示専用の状態とし、Milkdown 補完候補の集合とは切り離したい

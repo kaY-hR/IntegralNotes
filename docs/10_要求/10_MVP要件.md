@@ -7,6 +7,7 @@
 - すべての managed data は `.store/.integral/{id}.json` metadata を持つ
 - metadata には少なくとも `id`, `path`, `hash`, `representation`, `visibility`, `provenance`, `createdAt` を持たせる
 - `path` は current canonical workspace relative path とし、workspace 内のどこでもよい
+- `visibility` はその `path` を app が hidden 扱いするかどうかの属性であり、hidden canonical copy の存在を意味しない
 - `Data/` は visible path の default に過ぎず、固定の canonical location ではない
 - `file` は content hash、`directory` は tree hash、`dataset-json` は manifest content hash で追跡する
 - dataset metadata の `path` は `.idts` manifest の path を指す
@@ -24,7 +25,7 @@
 - `cwd` 外から登録した場合、app は workspace 内の default visible path へ copy してよい
 - `cwd` 内の対象を登録した場合、元の path をそのまま canonical path としてよい
 - original data の canonical 実体を `.store/objects` に退避し、visible 側を mirror / alias にする構成は採らない
-- data-note や dataset materialize は original data の current visible path を正として参照する
+- data-note や dataset materialize は original data の current path を正として参照する
 
 ## 3. data-note
 
@@ -125,13 +126,15 @@
 
 ## 10. 標準表示
 
-- `html`
-- `png / jpg / jpeg / svg`
-- `txt / md / json / csv`
+- `htm / html`
+- `bmp / gif / jpg / jpeg / png / svg / webp`
+- `bat / c / css / csv / env / ini / js / json / log / md / mjs / ps1 / py / sh / sql / toml / ts / tsx / tsv / txt / xml / yaml / yml`
+- `.idts`
 
 を標準表示対象とする。
 
 - 表示対象ファイルは拡張子で自動判定する
+- 拡張子未登録でも text と読める file は text viewer で扱ってよい
 - renderable ファイルが複数ある場合は、すべて flex-layout で表示する
 
 ## 11. 可視化 plugin

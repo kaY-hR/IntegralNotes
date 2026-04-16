@@ -10,7 +10,7 @@ type DataNoteTargetType = "dataset" | "original-data";
 type ManagedDataVisibility = "hidden" | "visible";
 type ManagedDataProvenance = "derived" | "source";
 type OriginalDataRepresentation = "directory" | "file";
-type DatasetRepresentation = "dataset-json" | "directory";
+type DatasetRepresentation = "dataset-json";
 
 interface ManagedDataNoteMetadataBase {
   createdAt: string;
@@ -99,40 +99,6 @@ export function normalizeOriginalDataNoteMetadata(value: unknown): OriginalDataN
     };
   }
 
-  if (
-    typeof value.originalDataId === "string" &&
-    typeof value.originalName === "string" &&
-    typeof value.createdAt === "string" &&
-    (value.sourceKind === "file" || value.sourceKind === "directory")
-  ) {
-    const preferredPath =
-      typeof value.aliasRelativePath === "string"
-        ? value.aliasRelativePath
-        : typeof value.storeRelativePath === "string"
-          ? value.storeRelativePath
-          : null;
-
-    if (!preferredPath) {
-      return null;
-    }
-
-    const originalDataId = value.originalDataId.trim();
-    const normalizedPath = normalizeWorkspaceRelativePath(preferredPath);
-
-    return {
-      createdAt: value.createdAt,
-      displayName: value.originalName,
-      entityType: "original-data",
-      hash: typeof value.hash === "string" ? value.hash : "",
-      id: originalDataId,
-      originalDataId,
-      path: normalizedPath,
-      provenance: "source",
-      representation: value.sourceKind,
-      visibility: inferVisibilityFromPath(normalizedPath)
-    };
-  }
-
   return null;
 }
 
@@ -149,7 +115,7 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
     typeof value.hash === "string" &&
     typeof value.kind === "string" &&
     (value.displayName === undefined || typeof value.displayName === "string") &&
-    (value.representation === "directory" || value.representation === "dataset-json") &&
+    value.representation === "dataset-json" &&
     (value.visibility === "visible" || value.visibility === "hidden") &&
     (value.provenance === "source" || value.provenance === "derived") &&
     (value.createdByBlockId === null ||
@@ -173,43 +139,6 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
       provenance: value.provenance,
       representation: value.representation,
       visibility: value.visibility
-    };
-  }
-
-  if (
-    typeof value.datasetId === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.kind === "string" &&
-    typeof value.storeRelativePath === "string" &&
-    (value.createdByBlockId === null ||
-      value.createdByBlockId === undefined ||
-      typeof value.createdByBlockId === "string")
-  ) {
-    const datasetId = value.datasetId.trim();
-    const normalizedPath = normalizeWorkspaceRelativePath(value.storeRelativePath);
-    const sourceMembers = Array.isArray(value.sourceMembers)
-      ? value.sourceMembers
-          .filter(
-            (member) =>
-              isJsonRecord(member) && typeof member.originalDataId === "string"
-          )
-          .map((member) => member.originalDataId)
-      : undefined;
-
-    return {
-      createdAt: value.createdAt,
-      createdByBlockId: value.createdByBlockId ?? null,
-      datasetId,
-      displayName: normalizeDatasetName(value.name, datasetId),
-      entityType: "dataset",
-      hash: typeof value.hash === "string" ? value.hash : "",
-      id: datasetId,
-      kind: value.kind,
-      memberIds: sourceMembers,
-      path: normalizedPath,
-      provenance: value.createdByBlockId ? "derived" : "source",
-      representation: "directory",
-      visibility: inferVisibilityFromPath(normalizedPath)
     };
   }
 
@@ -525,10 +454,6 @@ function parseFrontmatterValue(frontmatter: string, key: string): unknown {
   } catch {
     return serializedValue;
   }
-}
-
-function inferVisibilityFromPath(relativePath: string): ManagedDataVisibility {
-  return relativePath.startsWith(".store/") ? "hidden" : "visible";
 }
 
 function normalizeWorkspaceRelativePath(relativePath: string): string {

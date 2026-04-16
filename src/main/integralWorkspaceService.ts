@@ -61,14 +61,38 @@ const SHIMADZU_PLUGIN_ID = "shimadzu-lc";
 const SHIMADZU_BLOCK_TYPE = "run-sequence";
 const STANDARD_GRAPHS_PLUGIN_ID = "integralnotes.standard-graphs";
 
-const HTML_EXTENSIONS = new Set([".html"]);
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".svg"]);
-const TEXT_EXTENSIONS = new Set([".txt", ".md", ".json", ".csv"]);
+const HTML_EXTENSIONS = new Set([".htm", ".html"]);
+const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
+const TEXT_EXTENSIONS = new Set([
+  ".bat",
+  ".c",
+  ".css",
+  ".csv",
+  ".env",
+  ".ini",
+  ".js",
+  ".json",
+  ".log",
+  ".md",
+  ".mjs",
+  ".ps1",
+  ".py",
+  ".sh",
+  ".sql",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".tsv",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml"
+]);
 
 type ManagedDataVisibility = "hidden" | "visible";
 type ManagedDataProvenance = "derived" | "source";
 type OriginalDataRepresentation = "directory" | "file";
-type DatasetRepresentation = "dataset-json" | "directory";
+type DatasetRepresentation = "dataset-json";
 
 interface ManagedMetadataBase {
   createdAt: string;
@@ -82,7 +106,6 @@ interface ManagedMetadataBase {
 
 interface OriginalDataMetadata extends ManagedMetadataBase {
   entityType: "original-data";
-  objectPath?: string;
   originalDataId: string;
   representation: OriginalDataRepresentation;
 }
@@ -1020,7 +1043,6 @@ export class IntegralWorkspaceService {
       const nextMetadata: OriginalDataMetadata = {
         ...metadata,
         hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
-        objectPath: undefined,
         path: nextPath,
         visibility: inferVisibilityFromPath(nextPath)
       };
@@ -1269,6 +1291,17 @@ export class IntegralWorkspaceService {
       };
     }
 
+    const buffer = await fs.readFile(absolutePath);
+
+    if (!buffer.includes(0)) {
+      return {
+        data: buffer.toString("utf8"),
+        kind: "text",
+        name: path.basename(relativePath),
+        relativePath
+      };
+    }
+
     return null;
   }
 
@@ -1399,10 +1432,6 @@ export class IntegralWorkspaceService {
   }
 
   private async resolveDatasetReadablePath(metadata: DatasetMetadata): Promise<string> {
-    if (metadata.representation === "directory") {
-      return this.resolveWorkspacePath(metadata.path);
-    }
-
     const manifest = await this.readDatasetManifest(metadata.path);
 
     if (manifest?.dataPath) {
@@ -1650,8 +1679,7 @@ export class IntegralWorkspaceService {
     claimedPaths: Set<string>
   ): Promise<ReconcileMetadataResult<OriginalDataMetadata>> {
     const nextMetadata: OriginalDataMetadata = {
-      ...metadata,
-      objectPath: undefined
+      ...metadata
     };
     const currentVisiblePath = await this.resolveIfExists(metadata.path);
 
@@ -2510,38 +2538,11 @@ function normalizeOriginalDataMetadata(value: unknown): OriginalDataMetadata | n
       entityType: "original-data",
       hash: value.hash,
       id: originalDataId,
-      objectPath: typeof value.objectPath === "string" ? normalizeRelativePath(value.objectPath) : undefined,
       originalDataId,
       path: normalizeRelativePath(value.path),
       provenance: value.provenance,
       representation: value.representation,
       visibility: value.visibility
-    };
-  }
-
-  if (
-    typeof value.originalDataId === "string" &&
-    typeof value.originalName === "string" &&
-    typeof value.createdAt === "string" &&
-    (value.sourceKind === "file" || value.sourceKind === "directory") &&
-    typeof value.storeRelativePath === "string"
-  ) {
-    const originalDataId = value.originalDataId.trim();
-    const pathValue =
-      typeof value.aliasRelativePath === "string" ? value.aliasRelativePath : value.storeRelativePath;
-
-    return {
-      createdAt: value.createdAt,
-      displayName: value.originalName,
-      entityType: "original-data",
-      hash: typeof value.hash === "string" ? value.hash : "",
-      id: originalDataId,
-      objectPath: normalizeRelativePath(value.storeRelativePath),
-      originalDataId,
-      path: normalizeRelativePath(pathValue),
-      provenance: "source",
-      representation: value.sourceKind,
-      visibility: inferVisibilityFromPath(pathValue)
     };
   }
 
@@ -2561,7 +2562,7 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
     typeof value.hash === "string" &&
     typeof value.kind === "string" &&
     (value.displayName === undefined || typeof value.displayName === "string") &&
-    (value.representation === "directory" || value.representation === "dataset-json") &&
+    value.representation === "dataset-json" &&
     (value.visibility === "visible" || value.visibility === "hidden") &&
     (value.provenance === "source" || value.provenance === "derived") &&
     (value.createdByBlockId === null ||
@@ -2596,50 +2597,6 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
       provenance: value.provenance,
       representation: value.representation,
       visibility: value.visibility
-    };
-  }
-
-  if (
-    typeof value.datasetId === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.kind === "string" &&
-    typeof value.storeRelativePath === "string" &&
-    (value.createdByBlockId === null ||
-      value.createdByBlockId === undefined ||
-      typeof value.createdByBlockId === "string")
-  ) {
-    const datasetId = value.datasetId.trim();
-    const memberIds = Array.isArray(value.sourceMembers)
-      ? value.sourceMembers
-          .filter(
-            (item) => isJsonRecord(item) && typeof item.originalDataId === "string"
-          )
-          .map((item) => item.originalDataId)
-      : undefined;
-    const name = normalizeDatasetName(
-      typeof value.name === "string" ? value.name : undefined,
-      datasetId
-    );
-
-    return {
-      createdAt: value.createdAt,
-      createdByBlockId: value.createdByBlockId ?? null,
-      dataPath:
-        typeof value.dataPath === "string" && value.dataPath.trim().length > 0
-          ? normalizeRelativePath(value.dataPath)
-          : undefined,
-      datasetId,
-      displayName: name,
-      entityType: "dataset",
-      hash: typeof value.hash === "string" ? value.hash : "",
-      id: datasetId,
-      kind: value.kind,
-      memberIds,
-      name,
-      path: normalizeRelativePath(value.storeRelativePath),
-      provenance: value.createdByBlockId ? "derived" : "source",
-      representation: "directory",
-      visibility: inferVisibilityFromPath(value.storeRelativePath)
     };
   }
 
@@ -2840,6 +2797,24 @@ function injectHtmlBaseTag(document: string, baseDirectoryPath: string): string 
 
 function inferMimeType(assetPath: string): string {
   switch (path.extname(assetPath).toLowerCase()) {
+    case ".csv":
+      return "text/csv";
+    case ".html":
+    case ".htm":
+      return "text/html";
+    case ".json":
+      return "application/json";
+    case ".bmp":
+      return "image/bmp";
+    case ".gif":
+      return "image/gif";
+    case ".md":
+    case ".txt":
+    case ".tsv":
+    case ".xml":
+    case ".yaml":
+    case ".yml":
+      return "text/plain";
     case ".png":
       return "image/png";
     case ".jpg":
@@ -2847,15 +2822,8 @@ function inferMimeType(assetPath: string): string {
       return "image/jpeg";
     case ".svg":
       return "image/svg+xml";
-    case ".json":
-      return "application/json";
-    case ".csv":
-      return "text/csv";
-    case ".md":
-    case ".txt":
-      return "text/plain";
-    case ".html":
-      return "text/html";
+    case ".webp":
+      return "image/webp";
     default:
       return "application/octet-stream";
   }

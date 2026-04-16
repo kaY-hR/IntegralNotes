@@ -47,7 +47,7 @@ export type IntegralManagedDataVisibility = "visible" | "hidden";
 export type IntegralManagedDataProvenance = "source" | "derived";
 export type IntegralManagedDataEntityType = "original-data" | "dataset";
 export type IntegralOriginalDataRepresentation = "directory" | "file";
-export type IntegralDatasetRepresentation = "dataset-json" | "directory";
+export type IntegralDatasetRepresentation = "dataset-json";
 
 export interface IntegralOriginalDataSummary {
   createdAt: string;
