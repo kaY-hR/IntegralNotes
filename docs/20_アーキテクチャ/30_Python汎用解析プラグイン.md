@@ -121,6 +121,7 @@ Python block では
 - workspace 上の `.py` file 自体を source of truth にする
 - `.py-scripts/` のような専用コピー領域は持たない
 - helper module や隣接 file も、通常の workspace file として扱う
+- ただし `from integral import ...` をそのまま使いたい callable は `scripts/` 配下に置くのを推奨する
 
 ### 実行場所
 
@@ -166,17 +167,17 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 定義場所:
 
-- `plugin-sdk/python/integral/__init__.py`
+- `scripts/integral/__init__.py`
 
-app runner は実行時にこの SDK root を `sys.path` の先頭へ追加し、user script の import を成立させる。
+app は必要に応じてこの package を workspace の `scripts/integral/` へ同期し、runner は `scripts/` を `sys.path` の先頭へ追加して import を成立させる。
 
 開発時:
 
-- `plugin-sdk/python`
+- workspace の `scripts/`
 
 packaged app:
 
-- `process.resourcesPath/python-sdk`
+- `process.resourcesPath/python-sdk/integral` を template source として保持し、workspace の `scripts/integral/` へ同期する
 
 詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
 

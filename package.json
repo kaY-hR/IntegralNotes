@@ -29,8 +29,8 @@
     },
     "extraResources": [
       {
-        "from": "plugin-sdk/python",
-        "to": "python-sdk"
+        "from": "scripts/integral",
+        "to": "python-sdk/integral"
       }
     ],
     "files": [

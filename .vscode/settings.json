@@ -14,5 +14,11 @@
   "files.exclude": {
     "**/.cache/**": true,
     "**/*.asar": true
-  }
+  },
+  "python.analysis.extraPaths": [
+    "./scripts"
+  ],
+  "python.autoComplete.extraPaths": [
+    "./scripts"
+  ]
 }

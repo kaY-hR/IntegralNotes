@@ -166,19 +166,18 @@ from integral import integral_block
 
 定義場所:
 
-- `plugin-sdk/python/integral/__init__.py`
+- `scripts/integral/__init__.py`
 
-app runner は実行時に SDK root を `sys.path` へ追加して import を成立させる。
+app は必要に応じてこの package を workspace の `scripts/integral/` へ同期し、runner は `scripts/` を `sys.path` へ追加して import を成立させる。
 
 開発時:
 
-- `plugin-sdk/python`
+- workspace の `scripts/`
+- app は必要に応じて `cwd/.vscode/settings.json` に `python.analysis.extraPaths = ["./scripts"]` を補助設定してよい
 
 packaged app:
 
-- `process.resourcesPath/python-sdk`
-
-SDK root path は必要なら `INTEGRALNOTES_PYTHON_SDK_ROOT` 環境変数で上書きしてよい。
+- `process.resourcesPath/python-sdk/integral` を template source として保持し、workspace の `scripts/integral/` へ同期する
 
 詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
 
@@ -187,3 +186,4 @@ SDK root path は必要なら `INTEGRALNOTES_PYTHON_SDK_ROOT` 環境変数で上
 - source of truth は workspace 上の `.py` file である
 - app は `.py` や helper file を専用ディレクトリへ copy しない
 - rename / move の追従が必要なら、後から workspace path tracking を足す
+- `from integral import ...` をそのまま使いたい callable は `scripts/` 配下に置くのを推奨する

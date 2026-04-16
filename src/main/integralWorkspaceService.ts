@@ -50,6 +50,9 @@ const STORE_DATASET_MANIFESTS_DIRECTORY = "datasets";
 const STORE_OBJECTS_DIRECTORY = "objects";
 const STORE_RUNTIME_DIRECTORY = "runtime";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
+const PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY = "scripts";
+const PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY = `${PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY}/integral`;
+const PYTHON_EDITOR_IMPORT_PATH = "./scripts";
 
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
@@ -150,12 +153,12 @@ import sys
 script_path = pathlib.Path(sys.argv[1])
 function_name = sys.argv[2]
 args_path = pathlib.Path(sys.argv[3])
-sdk_root = pathlib.Path(sys.argv[4])
+sdk_import_root = pathlib.Path(sys.argv[4])
 
-if not sdk_root.exists():
-    raise RuntimeError(f"Integral Python SDK was not found: {sdk_root}")
+if not sdk_import_root.exists():
+    raise RuntimeError(f"Integral Python SDK import root was not found: {sdk_import_root}")
 
-sys.path.insert(0, str(sdk_root))
+sys.path.insert(0, str(sdk_import_root))
 payload = json.loads(args_path.read_text(encoding="utf-8"))
 
 spec = importlib.util.spec_from_file_location("integral_user_module", script_path)
@@ -580,6 +583,8 @@ export class IntegralWorkspaceService {
 
   private async ensureIntegralWorkspaceReady(): Promise<void> {
     await this.workspaceService.ensureWorkspaceReady();
+    await this.ensureWorkspacePythonSdkReady();
+    await this.ensureWorkspacePythonEditorSettingsReady();
 
     if (await this.reconcileManagedDataMetadata()) {
       await this.workspaceService.syncManagedDataNotes();
@@ -619,6 +624,53 @@ export class IntegralWorkspaceService {
     return this.resolveWorkspacePath(
       `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/${STORE_RUNTIME_DIRECTORY}/${blockId}`
     );
+  }
+
+  private resolveWorkspacePythonSdkPackagePath(): string {
+    return this.resolveWorkspacePath(PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY);
+  }
+
+  private resolveWorkspacePythonSdkImportRootPath(): string {
+    return this.resolveWorkspacePath(PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY);
+  }
+
+  private async ensureWorkspacePythonSdkReady(): Promise<void> {
+    const sourcePackageRootPath = resolveBundledPythonSdkPackageTemplatePath();
+    const targetPackageRootPath = this.resolveWorkspacePythonSdkPackagePath();
+
+    if (areSameNormalizedPath(sourcePackageRootPath, targetPackageRootPath)) {
+      return;
+    }
+
+    await syncDirectoryContents(sourcePackageRootPath, targetPackageRootPath);
+  }
+
+  private async ensureWorkspacePythonEditorSettingsReady(): Promise<void> {
+    const settingsPath = this.resolveWorkspacePath(".vscode/settings.json");
+    const currentSettings = (await readJsonFile<unknown>(settingsPath)) ?? {};
+    const settingsRecord = isJsonRecord(currentSettings) ? { ...currentSettings } : {};
+
+    const analysisExtraPaths = appendUniqueStringSetting(
+      settingsRecord["python.analysis.extraPaths"],
+      PYTHON_EDITOR_IMPORT_PATH
+    );
+    const autoCompleteExtraPaths = appendUniqueStringSetting(
+      settingsRecord["python.autoComplete.extraPaths"],
+      PYTHON_EDITOR_IMPORT_PATH
+    );
+
+    const nextSettings = {
+      ...settingsRecord,
+      "python.analysis.extraPaths": analysisExtraPaths,
+      "python.autoComplete.extraPaths": autoCompleteExtraPaths
+    };
+
+    if (JSON.stringify(settingsRecord) === JSON.stringify(nextSettings)) {
+      return;
+    }
+
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    await fs.writeFile(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, "utf8");
   }
 
   private async executeGeneralAnalysisBlock(
@@ -748,7 +800,7 @@ export class IntegralWorkspaceService {
           callableAbsolutePath,
           callable.functionName,
           path.join(runtimeRootPath, "analysis-args.json"),
-          resolvePythonSdkRootPath()
+          this.resolveWorkspacePythonSdkImportRootPath()
         ],
         {
           cwd: this.getRootPath(),
@@ -2353,6 +2405,47 @@ async function resetDirectory(targetPath: string): Promise<void> {
   await fs.mkdir(targetPath, { recursive: true });
 }
 
+async function syncDirectoryContents(sourceRootPath: string, targetRootPath: string): Promise<void> {
+  const sourceEntries = await fs.readdir(sourceRootPath, { withFileTypes: true });
+  await fs.mkdir(targetRootPath, { recursive: true });
+
+  for (const entry of sourceEntries) {
+    if (entry.name === "__pycache__") {
+      continue;
+    }
+
+    const sourcePath = path.join(sourceRootPath, entry.name);
+    const targetPath = path.join(targetRootPath, entry.name);
+
+    if (entry.isDirectory()) {
+      await syncDirectoryContents(sourcePath, targetPath);
+      continue;
+    }
+
+    const sourceContent = await fs.readFile(sourcePath);
+    const targetContent = await fs.readFile(targetPath).catch(() => null);
+
+    if (targetContent !== null && Buffer.compare(sourceContent, targetContent) === 0) {
+      continue;
+    }
+
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, sourceContent);
+  }
+}
+
+function areSameNormalizedPath(leftPath: string, rightPath: string): boolean {
+  return path.resolve(leftPath) === path.resolve(rightPath);
+}
+
+function appendUniqueStringSetting(currentValue: unknown, nextValue: string): string[] {
+  const values = Array.isArray(currentValue)
+    ? currentValue.filter((value): value is string => typeof value === "string")
+    : [];
+
+  return values.includes(nextValue) ? values : [...values, nextValue];
+}
+
 async function computeFileHash(filePath: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(await fs.readFile(filePath));
@@ -2701,18 +2794,12 @@ function resolvePythonCommand(): string {
   return configured && configured.length > 0 ? configured : "python";
 }
 
-function resolvePythonSdkRootPath(): string {
-  const configured = process.env.INTEGRALNOTES_PYTHON_SDK_ROOT?.trim();
-
-  if (configured && configured.length > 0) {
-    return path.resolve(configured);
-  }
-
+function resolveBundledPythonSdkPackageTemplatePath(): string {
   if (process.env.VITE_DEV_SERVER_URL) {
-    return path.resolve(__dirname, "../../plugin-sdk/python");
+    return path.resolve(__dirname, "../../scripts/integral");
   }
 
-  return path.join(process.resourcesPath, "python-sdk");
+  return path.join(process.resourcesPath, "python-sdk", "integral");
 }
 
 function isRenderableExtension(

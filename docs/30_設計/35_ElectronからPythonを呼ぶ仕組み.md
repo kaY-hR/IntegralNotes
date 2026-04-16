@@ -111,12 +111,12 @@ main process は block 実行時に次を行う。
 
 ## 5. Python 起動
 
-main process は `python -c <runner> <scriptPath> <functionName> <argsPath> <sdkRoot>` の形で Python process を起動する。
+main process は `python -c <runner> <scriptPath> <functionName> <argsPath> <sdkImportRoot>` の形で Python process を起動する。
 
 runner の責務:
 
-1. `sdkRoot` を受け取る
-2. `sdkRoot` を `sys.path` の先頭へ追加する
+1. `sdkImportRoot` を受け取る
+2. `sdkImportRoot` を `sys.path` の先頭へ追加する
 3. `analysis-args.json` を読む
 4. target script を file path から import する
 5. target function を取得する
@@ -135,7 +135,7 @@ runner の責務:
 
 正式な Python SDK は次に置く。
 
-- `plugin-sdk/python/integral/__init__.py`
+- `scripts/integral/__init__.py`
 
 この package が提供する主 API:
 
@@ -145,24 +145,19 @@ runner の責務:
 
 ### 開発時
 
-runner は SDK root を次で解決する。
+app / runner は workspace の import root を次で解決する。
 
-- `plugin-sdk/python`
+- `scripts/`
+- app は authoring 補助として `cwd/.vscode/settings.json` に `python.analysis.extraPaths = ["./scripts"]` と `python.autoComplete.extraPaths = ["./scripts"]` を補助設定してよい
 
 ### packaged app
 
-packaging 時に `plugin-sdk/python` を app resource へ同梱する。  
-runner は SDK root を次で解決する。
+packaging 時に `scripts/integral` を app resource へ同梱する。  
+app はこれを template source として使い、workspace の `scripts/integral/` へ同期する。
 
-- `process.resourcesPath/python-sdk`
+- `process.resourcesPath/python-sdk/integral`
 
-このため `package.json` では `extraResources` に Python SDK を含める。
-
-### override
-
-必要なら次の環境変数で SDK root を上書きできる。
-
-- `INTEGRALNOTES_PYTHON_SDK_ROOT`
+runner 自体は同期後の workspace `scripts/` を `sys.path` へ追加する。
 
 Python executable 自体は次で上書きできる。
 
@@ -177,11 +172,11 @@ Python executable 自体は次で上書きできる。
 - user が手元 Python から import して試しづらい
 - app 内部実装と user-facing contract が分離していない
 
-SDK path 追加方式にすると:
+workspace package 同期方式にすると:
 
-- `integral` package の実体が repo 上に存在する
+- `integral` package の実体が workspace の `scripts/integral/` に見える
 - user script が app 実装詳細ではなく SDK を import できる
-- 将来、SDK の version 管理や配布がしやすい
+- app 実行時と authoring 時で同じ import 先を見られる
 
 ## 8. 現行制約
 
