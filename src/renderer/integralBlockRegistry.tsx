@@ -190,7 +190,7 @@ function buildIntegralYamlDocument(block: IntegralBlockDocument): SimpleYamlObje
   );
   document.params = block.params;
   document.out = Object.fromEntries(
-    Object.keys(block.outputs).map((slotName) => [slotName, "auto"])
+    Object.entries(block.outputs).map(([slotName, datasetRef]) => [slotName, datasetRef ?? "auto"])
   );
 
   return document;
@@ -247,7 +247,24 @@ function normalizeOutputMap(value: unknown): Record<string, string | null> {
     return {};
   }
 
-  return Object.fromEntries(Object.keys(value).map((key) => [key, null]));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, candidate]) => [
+      key,
+      typeof candidate === "string"
+        ? candidate.trim().toLowerCase() === "auto"
+          ? null
+          : candidate.trim().length > 0
+            ? candidate.trim()
+            : null
+        : candidate === null
+          ? null
+          : `${candidate}`.trim().toLowerCase() === "auto"
+            ? null
+            : `${candidate}`.trim().length > 0
+              ? `${candidate}`.trim()
+              : null
+    ])
+  );
 }
 
 function readOptionalString(value: unknown): string | null {

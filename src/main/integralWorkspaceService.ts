@@ -28,7 +28,10 @@ import {
   type InstalledPluginDefinition,
   type PluginViewerDataEncoding
 } from "../shared/plugins";
-import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
+import {
+  resolveWorkspaceMarkdownTarget,
+  toCanonicalWorkspaceTarget
+} from "../shared/workspaceLinks";
 import type {
   WorkspaceDatasetManifestMember,
   WorkspaceFileDocument
@@ -788,9 +791,25 @@ export class IntegralWorkspaceService {
         })
       )
     ).filter((dataset): dataset is IntegralDatasetSummary => dataset !== null);
+    const createdDatasetMap = new Map(
+      createdDatasets.map((dataset) => [dataset.datasetId, dataset] as const)
+    );
+    const outputReferences = Object.fromEntries(
+      definition.outputSlots.map((slot) => {
+        const datasetId = outputDatasetMap.get(slot.name)?.datasetId ?? null;
+        const dataset = datasetId ? createdDatasetMap.get(datasetId) ?? null : null;
+        return [slot.name, dataset ? toCanonicalWorkspaceTarget(dataset.path) : null];
+      })
+    );
 
     return {
-      block: sourceBlock,
+      block: {
+        ...sourceBlock,
+        outputs: {
+          ...sourceBlock.outputs,
+          ...outputReferences
+        }
+      },
       createdDatasets,
       finishedAt,
       logLines: [...splitLogLines(stdout), ...splitLogLines(stderr)],

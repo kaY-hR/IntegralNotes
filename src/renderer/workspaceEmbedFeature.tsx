@@ -94,6 +94,19 @@ type WorkspaceEmbedResolution =
       message: string;
     });
 
+type DatasetRenderableEmbedResolution =
+  | {
+      kind: "error";
+      message: string;
+    }
+  | {
+      datasetId: string;
+      kind: "ready";
+    }
+  | {
+      kind: "loading";
+    };
+
 export function installWorkspaceEmbedFeature(
   editor: Crepe,
   options: WorkspaceEmbedFeatureOptions
@@ -272,7 +285,20 @@ class WorkspaceEmbedNodeView implements NodeView {
 
     return Boolean(
       target.closest(
-        "button, input, textarea, label, iframe, .editor-workspace-embed__surface, .editor-workspace-embed__resize-handle, .editor-workspace-embed__empty"
+        [
+          "button",
+          "input",
+          "textarea",
+          "label",
+          "iframe",
+          ".editor-workspace-embed__surface",
+          ".editor-workspace-embed__resize-handle",
+          ".editor-workspace-embed__empty",
+          ".workspace-dataset-renderable-embed",
+          ".integral-renderable-layout",
+          ".integral-renderable-card",
+          ".flexlayout__layout"
+        ].join(", ")
       )
     );
   }
@@ -291,16 +317,22 @@ class WorkspaceEmbedNodeView implements NodeView {
       return;
     }
 
+    const source = readWorkspaceEmbedSource(this.node);
+
     this.root.render(
-      <WorkspaceEmbedPanel
-        mode={this.mode}
-        onChangeSource={(nextSource) => {
-          this.updateSource(nextSource);
-        }}
-        selected={this.selected}
-        source={readWorkspaceEmbedSource(this.node)}
-        uploadImage={this.options.uploadImage}
-      />
+      isDatasetRenderableWorkspaceTarget(source) ? (
+        <WorkspaceDatasetRenderableEmbed selected={this.selected} source={source} />
+      ) : (
+        <WorkspaceEmbedPanel
+          mode={this.mode}
+          onChangeSource={(nextSource) => {
+            this.updateSource(nextSource);
+          }}
+          selected={this.selected}
+          source={source}
+          uploadImage={this.options.uploadImage}
+        />
+      )
     );
   }
 
@@ -635,6 +667,67 @@ function WorkspaceEmbedPanel({
   );
 }
 
+function WorkspaceDatasetRenderableEmbed({
+  selected,
+  source
+}: {
+  selected: boolean;
+  source: string;
+}): JSX.Element {
+  const [resolution, setResolution] = useState<DatasetRenderableEmbedResolution>({
+    kind: "loading"
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setResolution({
+      kind: "loading"
+    });
+
+    void resolveDatasetRenderableEmbed(source).then((nextResolution) => {
+      if (!cancelled) {
+        setResolution(nextResolution);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  const className = [
+    "workspace-dataset-renderable-embed",
+    selected ? "workspace-dataset-renderable-embed--selected" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (resolution.kind === "loading") {
+    return (
+      <div className={className}>
+        <div className="workspace-dataset-renderable-embed__status">dataset を読み込み中...</div>
+      </div>
+    );
+  }
+
+  if (resolution.kind === "error") {
+    return (
+      <div className={className}>
+        <div className="workspace-dataset-renderable-embed__status workspace-dataset-renderable-embed__status--error">
+          {resolution.message}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={className}>
+      <DatasetRenderableView datasetId={resolution.datasetId} />
+    </div>
+  );
+}
+
 async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedResolution> {
   const trimmedSource = source.trim();
   const displaySource =
@@ -757,6 +850,40 @@ async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedReso
   }
 }
 
+async function resolveDatasetRenderableEmbed(
+  source: string
+): Promise<DatasetRenderableEmbedResolution> {
+  const relativePath = resolveWorkspaceMarkdownTarget(source.trim());
+
+  if (!relativePath || getLowercaseExtension(relativePath) !== ".idts") {
+    return {
+      kind: "error",
+      message: "`.idts` dataset を解決できません。"
+    };
+  }
+
+  try {
+    const file = await window.integralNotes.readWorkspaceFile(relativePath);
+
+    if (file.kind !== "dataset-json" || !file.datasetManifest?.datasetId) {
+      return {
+        kind: "error",
+        message: "`.idts` manifest を読み取れませんでした。"
+      };
+    }
+
+    return {
+      datasetId: file.datasetManifest.datasetId,
+      kind: "ready"
+    };
+  } catch (error) {
+    return {
+      kind: "error",
+      message: toErrorMessage(error)
+    };
+  }
+}
+
 async function resolveManagedDataNoteFallback(
   relativePath: string
 ): Promise<WorkspaceEmbedResolution | null> {
@@ -834,6 +961,11 @@ function shouldRenderWorkspaceEmbed(source: string): boolean {
   }
 
   return !STANDARD_IMAGE_EXTENSIONS.has(getLowercaseExtension(relativePath));
+}
+
+function isDatasetRenderableWorkspaceTarget(source: string): boolean {
+  const relativePath = resolveWorkspaceMarkdownTarget(source.trim());
+  return relativePath !== null && getLowercaseExtension(relativePath) === ".idts";
 }
 
 function getStandardImageNodeViewConstructor(mode: WorkspaceEmbedMode): NodeViewConstructor {

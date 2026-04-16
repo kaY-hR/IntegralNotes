@@ -56,7 +56,8 @@ out:
   - free-form object
 - `out`
   - output slot 宣言
-  - MVP では値は `auto` を canonical にする
+  - 未実行 slot は `auto`
+  - 実行後は生成された `.idts` path を保持してよい
 
 ## 3. internal normalized form
 
@@ -104,15 +105,17 @@ app 内部では次の JSON object に正規化する。
 
 ### `out`
 
-- slot 名だけを user-facing source に残す
-- `auto` は「dataset の具体 ID は hidden metadata に任せる」を意味する
-- internal normalized form では `null` にする
+- 未実行 slot は `auto`
+- 実行後は hidden output dataset の `.idts` path を書き戻してよい
+- internal normalized form では `auto` を `null` にする
+- `.idts` path が入っている場合はその文字列を保持する
 
 ## 5. 保存ルール
 
 - note source は「何を実行するか」を残す
-- 実行のたびに note source を書き換えない
-- 最新 output dataset 参照、run status、log 要約は hidden metadata に置く
+- 入力変更以外の source は極力安定に保つ
+- ただし `out:` には最新実行で生成された `.idts` path を書き戻してよい
+- run status と log 要約は hidden metadata ではなく UI state / runtime log で扱う
 
 ## 6. block card 表示
 

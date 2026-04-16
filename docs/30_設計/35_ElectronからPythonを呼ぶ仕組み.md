@@ -89,6 +89,7 @@ main process は block 実行時に次を行う。
 3. datasetId を executable path に解決する
 4. output slot ごとに output dataset と output directory を確保する
 5. `.store/.integral/runtime/BLK-.../analysis-args.json` を書く
+6. 実行成功後は output slot ごとの hidden `.idts` path を block source の `out:` に反映する
 
 `analysis-args.json` の責務は、Python callable へ渡す filesystem-oriented payload を固定形で表現することにある。
 

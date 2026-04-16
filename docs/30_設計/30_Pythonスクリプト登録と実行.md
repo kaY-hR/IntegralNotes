@@ -98,8 +98,8 @@ original data 複数選択の場合:
 ## 5. output 宣言
 
 - output slot 名は decorator から決まる
-- note source 上の value は `auto`
-- 実行結果としてできた最新 dataset ID は hidden metadata 側に持つ
+- 初期状態では note source 上の value は `auto`
+- 実行成功後は output slot ごとの hidden `.idts` path を note source の `out:` へ書き戻す
 
 ## 6. 実行準備
 
@@ -154,6 +154,7 @@ app は実行前に次を行う。
 
 - output dataset が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
+- 実行成功後、app は output slot ごとの hidden `.idts` path を block source の `out:` に反映してよい
 
 ## 9. decorator の import 契約
 

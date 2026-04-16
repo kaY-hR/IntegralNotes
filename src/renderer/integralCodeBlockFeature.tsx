@@ -344,6 +344,7 @@ class IntegralNotesBlockView implements NodeView {
       }
 
       this.runState = toRunState(result);
+      this.applyTextChange(serializeIntegralBlockContent(result.block));
     } catch (error) {
       if (this.destroyed) {
         return;
