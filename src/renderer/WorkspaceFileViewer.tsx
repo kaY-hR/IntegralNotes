@@ -91,6 +91,7 @@ export function WorkspaceFileViewer({
               pluginViewer: file.pluginViewer,
               relativePath: file.relativePath
             }}
+            presentation="full"
             source={{
               kind: "workspace-file"
             }}

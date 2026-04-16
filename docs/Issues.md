@@ -566,3 +566,22 @@
   - `src/renderer/DatasetManifestFileViewer.tsx` で `requestOpenManagedDataNote()` を飛ばす導線を追加した
   - `src/renderer/styles.css` で note preview card の hover / focus と pointer event 制御を追加した
   - `npm run build` が通ることを確認した
+
+## [x] 29. viewer plugin を `![]()` の embed preview にも適用したい
+- Status:completed
+- 優先重み:5
+- 記載日時:2026-04-16-10:59(UTC+9)
+
+* note 本文で workspace file を `![](/path)` 埋め込みしたときも、plugin viewer が解決できるなら app 内 preview を出したい
+* embed 導線でも file tab と同じ viewer registry を使い、`plugin viewer -> built-in viewer -> unsupported` を揃えたい
+* 初版の embed は preview-only でよく、詳細操作は surface click で通常の file tab を開く導線に寄せたい
+* plugin viewer 側が必要なら、embed と full viewer の文脈を区別できるようにしたい
+* 2026-04-16 実装:
+  - `src/shared/plugins.ts` に `presentation: "embed" | "full"` を追加し、viewer renderer message で表示文脈を渡せるようにした
+  - `src/renderer/ExternalPluginFileViewer.tsx` を更新し、full viewer と embed preview の両方で同じ iframe viewer を再利用できるようにした
+  - `src/renderer/workspaceEmbedFeature.tsx` で `kind === "plugin"` を embed preview として描画し、未対応扱いをやめた
+  - embed では `presentation="embed"` を viewer plugin へ渡しつつ、surface click / Enter / Space で通常の workspace file tab を開く構成を維持した
+  - `src/renderer/styles.css` に plugin embed 用 style を追加し、iframe 自体は pointer event を持たず preview-only で見せるようにした
+  - `src/renderer/WorkspaceFileViewer.tsx` と `src/renderer/IntegralAssetDialogs.tsx` では `presentation="full"` を渡すようにした
+  - `docs/30_設計/40_標準描画と結果閲覧.md` と `docs/30_設計/50_プラグイン定義.md` に embed 方針を追記した
+  - `npm run build` が通ることを確認した

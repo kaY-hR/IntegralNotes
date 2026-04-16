@@ -100,6 +100,7 @@ export interface PluginRenderSetBlockMessage {
 }
 
 export type PluginViewerDataEncoding = "data-url" | "text";
+export type PluginViewerPresentation = "embed" | "full";
 
 export type PluginViewerFileSource =
   | {
@@ -122,6 +123,7 @@ export interface PluginViewerFileModel {
 
 export interface PluginViewerRendererModel {
   file: PluginViewerFileModel;
+  presentation: PluginViewerPresentation;
   plugin: Pick<
     InstalledPluginDefinition,
     "description" | "displayName" | "id" | "namespace" | "origin" | "version"

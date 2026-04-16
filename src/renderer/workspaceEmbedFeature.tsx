@@ -19,11 +19,13 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } f
 import { createRoot, type Root } from "react-dom/client";
 
 import type { IntegralAssetCatalog } from "../shared/integral";
+import type { ResolvedPluginViewer } from "../shared/plugins";
 import {
   extractWorkspaceEmbedHeight,
   resolveWorkspaceMarkdownTarget,
   withWorkspaceEmbedHeight
 } from "../shared/workspaceLinks";
+import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
 import {
   requestOpenManagedDataNote,
   requestOpenWorkspaceFile
@@ -73,6 +75,13 @@ type WorkspaceEmbedResolution =
   | (WorkspaceEmbedResolutionBase & {
       kind: "markdown";
       markdown: string;
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      content: string;
+      kind: "plugin";
+      pluginViewer: ResolvedPluginViewer;
+      relativePath: string;
+      title: string;
     })
   | (WorkspaceEmbedResolutionBase & {
       kind: "unsupported";
@@ -577,6 +586,23 @@ function WorkspaceEmbedPanel({
           />
         ) : null}
 
+        {resolution.kind === "plugin" ? (
+          <div className="editor-workspace-embed__plugin">
+            <ExternalPluginFileViewer
+              file={{
+                content: resolution.content,
+                name: resolution.title,
+                pluginViewer: resolution.pluginViewer,
+                relativePath: resolution.relativePath
+              }}
+              presentation="embed"
+              source={{
+                kind: "workspace-file"
+              }}
+            />
+          </div>
+        ) : null}
+
         {resolution.kind === "unsupported" ? (
           <div className="editor-workspace-embed__status">{resolution.message}</div>
         ) : null}
@@ -669,11 +695,17 @@ async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedReso
       };
     }
 
-    if (file.kind === "plugin") {
+    if (file.kind === "plugin" && file.pluginViewer) {
       return {
-        kind: "unsupported",
-        message: "この file の専用 viewer は埋め込み preview では未対応です。",
-        openTarget: workspaceFileOpenTarget
+        content: file.content ?? "",
+        kind: "plugin",
+        openTarget: workspaceFileOpenTarget ?? {
+          kind: "workspace-file",
+          relativePath
+        },
+        pluginViewer: file.pluginViewer,
+        relativePath,
+        title: file.name
       };
     }
 
@@ -819,6 +851,7 @@ function getDefaultEmbedHeight(
     case "unsupported":
       return compact ? 140 : 180;
     case "frame":
+    case "plugin":
     case "markdown":
       return compact ? 220 : 320;
     default:

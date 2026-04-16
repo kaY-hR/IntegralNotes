@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE,
   type PluginViewerFileSource,
+  type PluginViewerPresentation,
   type PluginViewerRendererModel,
   type ResolvedPluginViewer
 } from "../shared/plugins";
@@ -14,11 +15,13 @@ interface ExternalPluginFileViewerProps {
     pluginViewer: ResolvedPluginViewer;
     relativePath: string;
   };
+  presentation?: PluginViewerPresentation;
   source: PluginViewerFileSource;
 }
 
 export function ExternalPluginFileViewer({
   file,
+  presentation = "full",
   source
 }: ExternalPluginFileViewerProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -64,12 +67,12 @@ export function ExternalPluginFileViewer({
 
     frameWindow.postMessage(
       {
-        payload: toPluginViewerRendererModel(file, source),
+        payload: toPluginViewerRendererModel(file, source, presentation),
         type: PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE
       },
       "*"
     );
-  }, [file, frameReadyToken, rendererDocument, source]);
+  }, [file, frameReadyToken, presentation, rendererDocument, source]);
 
   if (loadError) {
     return (
@@ -106,7 +109,8 @@ export function ExternalPluginFileViewer({
 
 function toPluginViewerRendererModel(
   file: ExternalPluginFileViewerProps["file"],
-  source: PluginViewerFileSource
+  source: PluginViewerFileSource,
+  presentation: PluginViewerPresentation
 ): PluginViewerRendererModel {
   return {
     file: {
@@ -117,6 +121,7 @@ function toPluginViewerRendererModel(
       relativePath: file.relativePath,
       source
     },
+    presentation,
     plugin: {
       description: file.pluginViewer.pluginDescription,
       displayName: file.pluginViewer.pluginDisplayName,

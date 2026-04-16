@@ -556,6 +556,7 @@ export function DatasetRenderableView({ datasetId }: { datasetId: string | null 
               pluginViewer: renderable.pluginViewer,
               relativePath: renderable.relativePath
             }}
+            presentation="full"
             source={{
               datasetId: inspection.datasetId,
               datasetName: inspection.name,
