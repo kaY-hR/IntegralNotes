@@ -228,6 +228,11 @@ function registerIpcHandlers(): void {
     getPluginRegistry().loadRendererDocument(pluginId)
   );
   ipcMain.handle(
+    "plugins:loadSidebarViewDocument",
+    async (_event, pluginId: string, sidebarViewId: string) =>
+      getPluginRegistry().loadSidebarViewDocument(pluginId, sidebarViewId)
+  );
+  ipcMain.handle(
     "plugins:loadViewerDocument",
     async (_event, pluginId: string, viewerId: string) =>
       getPluginRegistry().loadViewerDocument(pluginId, viewerId)

@@ -29,6 +29,7 @@ interface ResolvedInstalledPlugin {
   manifest: PluginManifest;
   rendererEntryPath: string | null;
   rootPath: string;
+  sidebarViewEntryPaths: Map<string, string>;
   viewerEntryPaths: Map<string, string>;
 }
 
@@ -76,6 +77,21 @@ export class PluginRegistry {
     return await prepareRendererDocument(
       await fs.readFile(viewerEntryPath, "utf8"),
       path.dirname(viewerEntryPath),
+      plugin.rootPath
+    );
+  }
+
+  async loadSidebarViewDocument(pluginId: string, sidebarViewId: string): Promise<string> {
+    const plugin = await this.findPluginById(pluginId);
+    const sidebarViewEntryPath = plugin?.sidebarViewEntryPaths.get(sidebarViewId);
+
+    if (!plugin || !sidebarViewEntryPath) {
+      throw new Error(`plugin sidebar view が見つかりません: ${pluginId}/${sidebarViewId}`);
+    }
+
+    return await prepareRendererDocument(
+      await fs.readFile(sidebarViewEntryPath, "utf8"),
+      path.dirname(sidebarViewEntryPath),
       plugin.rootPath
     );
   }
@@ -241,6 +257,12 @@ export class PluginRegistry {
         ? path.join(pluginRootPath, ...manifest.renderer.entry.split("/"))
         : null,
       rootPath: pluginRootPath,
+      sidebarViewEntryPaths: new Map(
+        (manifest.sidebarViews ?? []).map((sidebarView) => [
+          sidebarView.id,
+          path.join(pluginRootPath, ...sidebarView.renderer.entry.split("/"))
+        ])
+      ),
       viewerEntryPaths: new Map(
         (manifest.viewers ?? []).map((viewer) => [
           viewer.id,
@@ -266,8 +288,13 @@ export class PluginRegistry {
         (block) => !seenBlockTypes.has(block.type)
       );
       const filteredViewers = plugin.manifest.viewers ?? [];
+      const filteredSidebarViews = plugin.manifest.sidebarViews ?? [];
 
-      if (filteredBlocks.length === 0 && filteredViewers.length === 0) {
+      if (
+        filteredBlocks.length === 0 &&
+        filteredViewers.length === 0 &&
+        filteredSidebarViews.length === 0
+      ) {
         continue;
       }
 
@@ -279,6 +306,7 @@ export class PluginRegistry {
       const manifest: PluginManifest = {
         ...plugin.manifest,
         blocks: filteredBlocks,
+        sidebarViews: filteredSidebarViews,
         viewers: filteredViewers
       };
 

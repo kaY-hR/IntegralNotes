@@ -39,6 +39,8 @@ const api: IntegralNotesApi = {
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
+  loadPluginSidebarViewDocument: (pluginId, sidebarViewId) =>
+    ipcRenderer.invoke("plugins:loadSidebarViewDocument", pluginId, sidebarViewId),
   loadPluginViewerDocument: (pluginId, viewerId) =>
     ipcRenderer.invoke("plugins:loadViewerDocument", pluginId, viewerId),
   resolveManagedDataTrackingIssue: (request) =>

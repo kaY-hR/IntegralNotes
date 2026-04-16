@@ -1,4 +1,5 @@
 export const PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
+export const PLUGIN_RENDER_SET_SIDEBAR_VIEW_MESSAGE_TYPE = "integral:set-sidebar-view";
 export const PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
 export const PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE = "integral:request-action";
 export const PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
@@ -8,6 +9,13 @@ export function bindIntegralPluginRenderer(render, options = {}) {
   return bindIntegralPluginMessage(render, {
     ...options,
     messageType: options.messageType ?? PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE
+  });
+}
+
+export function bindIntegralPluginSidebarView(render, options = {}) {
+  return bindIntegralPluginMessage(render, {
+    ...options,
+    messageType: options.messageType ?? PLUGIN_RENDER_SET_SIDEBAR_VIEW_MESSAGE_TYPE
   });
 }
 

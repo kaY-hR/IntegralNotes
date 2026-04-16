@@ -8,6 +8,7 @@ export const PLUGIN_HOST_RUNTIME = "module";
 export const PLUGIN_MANIFEST_FILENAME = "integral-plugin.json";
 export const PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
 export const PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE = "integral:set-viewer";
+export const PLUGIN_RENDER_SET_SIDEBAR_VIEW_MESSAGE_TYPE = "integral:set-sidebar-view";
 export const PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
 export const PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE = "integral:request-action";
 export const PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
@@ -41,6 +42,14 @@ export interface PluginViewerContribution {
   renderer: PluginRendererContribution;
 }
 
+export interface PluginSidebarViewContribution {
+  description: string;
+  icon?: string;
+  id: string;
+  renderer: PluginRendererContribution;
+  title: string;
+}
+
 export interface PluginHostContribution {
   entry: string;
   runtime: typeof PLUGIN_HOST_RUNTIME;
@@ -55,6 +64,7 @@ export interface PluginManifest {
   id: string;
   namespace: string;
   renderer?: PluginRendererContribution;
+  sidebarViews?: PluginSidebarViewContribution[];
   version: string;
   viewers?: PluginViewerContribution[];
 }
@@ -66,6 +76,13 @@ export interface InstalledPluginViewerDefinition {
   id: string;
 }
 
+export interface InstalledPluginSidebarViewDefinition {
+  description: string;
+  icon: string | null;
+  id: string;
+  title: string;
+}
+
 export interface InstalledPluginDefinition {
   blocks: PluginBlockContribution[];
   description: string;
@@ -75,6 +92,7 @@ export interface InstalledPluginDefinition {
   id: string;
   namespace: string;
   origin: InstalledPluginOrigin;
+  sidebarViews: InstalledPluginSidebarViewDefinition[];
   sourcePath: string | null;
   version: string;
   viewers: InstalledPluginViewerDefinition[];
@@ -134,6 +152,19 @@ export interface PluginViewerRendererModel {
 export interface PluginRenderSetViewerMessage {
   payload: PluginViewerRendererModel;
   type: typeof PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE;
+}
+
+export interface PluginSidebarViewRendererModel {
+  plugin: Pick<
+    InstalledPluginDefinition,
+    "description" | "displayName" | "id" | "namespace" | "origin" | "version"
+  >;
+  sidebarView: Pick<InstalledPluginSidebarViewDefinition, "description" | "icon" | "id" | "title">;
+}
+
+export interface PluginRenderSetSidebarViewMessage {
+  payload: PluginSidebarViewRendererModel;
+  type: typeof PLUGIN_RENDER_SET_SIDEBAR_VIEW_MESSAGE_TYPE;
 }
 
 export interface PluginRenderUpdateParamsPayload {
@@ -287,15 +318,17 @@ export function parsePluginManifest(manifest: unknown): PluginManifest | null {
 
   const blocks = parsePluginBlocks(manifest.blocks, namespace);
   const viewers = parsePluginViewers(manifest.viewers);
+  const sidebarViews = parsePluginSidebarViews(manifest.sidebarViews);
   const renderer = parsePluginRendererContribution(manifest.renderer);
   const host = parsePluginHostContribution(manifest.host);
 
   if (
     blocks === null ||
     viewers === null ||
+    sidebarViews === null ||
     renderer === null ||
     host === null ||
-    (blocks.length === 0 && viewers.length === 0)
+    (blocks.length === 0 && viewers.length === 0 && sidebarViews.length === 0)
   ) {
     return null;
   }
@@ -309,6 +342,7 @@ export function parsePluginManifest(manifest: unknown): PluginManifest | null {
     id,
     namespace,
     renderer: renderer ?? undefined,
+    sidebarViews: sidebarViews.length > 0 ? sidebarViews : undefined,
     version,
     viewers: viewers.length > 0 ? viewers : undefined
   };
@@ -341,6 +375,12 @@ export function toInstalledPluginDefinition(
     id: manifest.id,
     namespace: manifest.namespace,
     origin,
+    sidebarViews: (manifest.sidebarViews ?? []).map((sidebarView) => ({
+      description: sidebarView.description,
+      icon: sidebarView.icon ?? null,
+      id: sidebarView.id,
+      title: sidebarView.title
+    })),
     sourcePath,
     version: manifest.version,
     viewers: (manifest.viewers ?? []).map((viewer) => ({
@@ -413,6 +453,32 @@ function parsePluginViewers(value: unknown): PluginViewerContribution[] | null {
   return viewers;
 }
 
+function parsePluginSidebarViews(value: unknown): PluginSidebarViewContribution[] | null {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const sidebarViews: PluginSidebarViewContribution[] = [];
+  const seenIds = new Set<string>();
+
+  for (const item of value) {
+    const sidebarView = parsePluginSidebarViewContribution(item);
+
+    if (sidebarView === null || seenIds.has(sidebarView.id)) {
+      return null;
+    }
+
+    seenIds.add(sidebarView.id);
+    sidebarViews.push(sidebarView);
+  }
+
+  return sidebarViews;
+}
+
 function parsePluginBlockContribution(value: unknown, namespace: string): PluginBlockContribution | null {
   if (!isJsonRecord(value)) {
     return null;
@@ -471,6 +537,38 @@ function parsePluginViewerContribution(value: unknown): PluginViewerContribution
     extensions,
     id,
     renderer
+  };
+}
+
+function parsePluginSidebarViewContribution(value: unknown): PluginSidebarViewContribution | null {
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  const id = readNonEmptyString(value.id);
+  const title = readNonEmptyString(value.title);
+  const description = readNonEmptyString(value.description);
+  const icon = readOptionalNonEmptyString(value.icon);
+  const renderer = parsePluginRendererContribution(value.renderer);
+
+  if (
+    id === null ||
+    title === null ||
+    description === null ||
+    icon === null ||
+    renderer === null ||
+    renderer === undefined ||
+    !isValidPluginViewerId(id)
+  ) {
+    return null;
+  }
+
+  return {
+    description,
+    icon: icon ?? undefined,
+    id,
+    renderer,
+    title
   };
 }
 
@@ -617,6 +715,14 @@ function readNonEmptyString(value: unknown): string | null {
   const trimmed = value.trim();
 
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function readOptionalNonEmptyString(value: unknown): string | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readNonEmptyString(value);
 }
 
 function normalizePluginViewerExtension(value: unknown): string | null {

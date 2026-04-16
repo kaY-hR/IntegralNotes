@@ -16,6 +16,22 @@ export interface PluginBlockContribution {
   type: string;
 }
 
+export interface PluginViewerContribution {
+  description: string;
+  displayName: string;
+  extensions: string[];
+  id: string;
+  renderer: PluginRendererContribution;
+}
+
+export interface PluginSidebarViewContribution {
+  description: string;
+  icon?: string;
+  id: string;
+  renderer: PluginRendererContribution;
+  title: string;
+}
+
 export interface PluginRendererContribution {
   entry: string;
   mode: typeof PLUGIN_RENDERER_MODE_IFRAME;
@@ -28,14 +44,16 @@ export interface PluginHostContribution {
 
 export interface PluginManifest {
   apiVersion: typeof PLUGIN_API_VERSION;
-  blocks: PluginBlockContribution[];
+  blocks?: PluginBlockContribution[];
   description: string;
   displayName: string;
   host?: PluginHostContribution;
   id: string;
   namespace: string;
   renderer?: PluginRendererContribution;
+  sidebarViews?: PluginSidebarViewContribution[];
   version: string;
+  viewers?: PluginViewerContribution[];
 }
 
 export declare function definePluginManifest<T extends PluginManifest>(manifest: T): T;

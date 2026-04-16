@@ -1,5 +1,12 @@
 import * as FlexLayout from "flexlayout-react";
-import { type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import {
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 
 import type {
   IntegralAssetCatalog,
@@ -26,13 +33,15 @@ import {
   type WorkspacePathChange,
   rewriteWorkspaceMarkdownReferences
 } from "../shared/workspaceLinks";
+import { ActivityBar, type ActivityBarItem } from "./ActivityBar";
 import { DataRegistrationDialog } from "./DataRegistrationDialog";
+import { ExternalPluginSidebarView } from "./ExternalPluginSidebarView";
 import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
-import { PluginManagerDialog } from "./PluginManagerDialog";
 import { RawMarkdownEditor } from "./RawMarkdownEditor";
+import { SidebarPluginManagerView } from "./SidebarPluginManagerView";
 import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import {
@@ -89,9 +98,18 @@ interface OpenWorkspaceFileOptions {
 }
 
 const MAIN_TABSET_ID = "editor-main";
+const BUILTIN_EXPLORER_SIDEBAR_VIEW_ID = "builtin:explorer";
+const BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID = "builtin:plugins";
 const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
 const TREE_DRAG_MIME = "application/x-integralnotes-workspace-selection";
+
+interface SidebarViewDefinition {
+  activityIcon: ReactNode;
+  id: string;
+  render: () => JSX.Element;
+  title: string;
+}
 
 function ExplorerVisibilityIcon({
   showHiddenEntries
@@ -109,6 +127,33 @@ function ExplorerVisibilityIcon({
       {!showHiddenEntries ? <path d="M3 14 15 2" /> : null}
     </svg>
   );
+}
+
+function ExplorerSidebarIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
+      <path d="M1.5 3.25h4.1l1.1 1.35h7.8v7.9H1.5z" />
+      <path d="M1.5 4.6h13v7.9H1.5z" />
+    </svg>
+  );
+}
+
+function PluginSidebarIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
+      <path d="M6.2 1.5h3.6v2.1h1.55a1.65 1.65 0 0 1 1.65 1.65V6.8h1.5v2.4H13v1.55a1.65 1.65 0 0 1-1.65 1.65H9.8v2.1H6.2v-2.1H4.65A1.65 1.65 0 0 1 3 10.75V9.2H1.5V6.8H3V5.25A1.65 1.65 0 0 1 4.65 3.6H6.2z" />
+      <circle cx="8" cy="8" r="1.45" />
+    </svg>
+  );
+}
+
+function SidebarTextIcon({ label }: { label: string }): JSX.Element {
+  return <span className="activity-bar__icon-label">{label}</span>;
+}
+
+function toSidebarIconLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, "").slice(0, 2).toUpperCase();
+  return normalized.length > 0 ? normalized : "?";
 }
 
 function createEmptyIntegralAssetCatalog(): IntegralAssetCatalog {
@@ -647,7 +692,7 @@ export function App(): JSX.Element {
   const [explorerClipboard, setExplorerClipboard] = useState<ExplorerClipboardState | null>(null);
   const [datasetCreationDialog, setDatasetCreationDialog] = useState<DatasetCreationDialogState | null>(null);
   const [datasetCreationPending, setDatasetCreationPending] = useState(false);
-  const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
+  const [activeSidebarViewId, setActiveSidebarViewId] = useState(BUILTIN_EXPLORER_SIDEBAR_VIEW_ID);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
@@ -656,7 +701,7 @@ export function App(): JSX.Element {
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
   const shouldAutoOpenInitialFileRef = useRef(false);
-  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarPanelRef = useRef<HTMLElement>(null);
 
   const visibleWorkspaceEntries = workspace
     ? filterWorkspaceEntries(workspace.entries, showHiddenEntries)
@@ -670,8 +715,7 @@ export function App(): JSX.Element {
     activeTrackingIssue !== null ||
     deleteDialog !== null ||
     datasetCreationDialog !== null ||
-    dataRegistrationDialogOpen ||
-    pluginDialogOpen;
+    dataRegistrationDialogOpen;
 
   useEffect(() => {
     openTabsRef.current = openTabs;
@@ -888,8 +932,19 @@ export function App(): JSX.Element {
     await refreshInstalledPluginState(nextStatusMessage);
   };
 
+  const selectSidebarView = (viewId: string): void => {
+    setContextMenu(null);
+    setDropTargetPath(null);
+
+    if (viewId !== BUILTIN_EXPLORER_SIDEBAR_VIEW_ID) {
+      setInlineEditor(null);
+    }
+
+    setActiveSidebarViewId(viewId);
+  };
+
   const openPluginManager = (): void => {
-    setPluginDialogOpen(true);
+    selectSidebarView(BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID);
     void refreshInstalledPluginState();
   };
 
@@ -1052,6 +1107,10 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    void refreshInstalledPluginState();
+  }, []);
+
+  useEffect(() => {
     const handleOpenWorkspaceFileEvent = (event: Event): void => {
       const customEvent = event as CustomEvent<string>;
       const relativePath = `${customEvent.detail ?? ""}`.trim();
@@ -1207,7 +1266,11 @@ export function App(): JSX.Element {
 
       const activeElement = document.activeElement as HTMLElement | null;
 
-      if (!sidebarRef.current?.contains(activeElement)) {
+      if (activeSidebarViewId !== BUILTIN_EXPLORER_SIDEBAR_VIEW_ID) {
+        return;
+      }
+
+      if (!sidebarPanelRef.current?.contains(activeElement)) {
         return;
       }
 
@@ -1247,6 +1310,7 @@ export function App(): JSX.Element {
     datasetCreationDialog,
     deleteDialog,
     explorerClipboard,
+    activeSidebarViewId,
     inlineEditor,
     selectedEntry,
     selectedEntryPaths
@@ -2354,6 +2418,288 @@ export function App(): JSX.Element {
     );
   };
 
+  const renderExplorerSidebarView = (): JSX.Element => (
+    <div className="sidebar__panel">
+      {workspace ? (
+        <div className="sidebar__panel-header">
+          <div className="sidebar__panel-actions">
+            <button
+              aria-label="New note"
+              className="button button--icon"
+              onClick={() => {
+                startCreateInline("file");
+              }}
+              title="New note"
+              type="button"
+            >
+              <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FILE_ICON_URL} />
+            </button>
+            <button
+              aria-label="New folder"
+              className="button button--icon"
+              onClick={() => {
+                startCreateInline("directory");
+              }}
+              title="New folder"
+              type="button"
+            >
+              <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FOLDER_ICON_URL} />
+            </button>
+            <button
+              aria-label={showHiddenEntries ? "hidden フォルダを非表示" : "hidden フォルダを表示"}
+              aria-pressed={showHiddenEntries}
+              className="button button--icon"
+              onClick={toggleHiddenEntriesVisibility}
+              title={showHiddenEntries ? "hidden フォルダを非表示にします" : "hidden フォルダを表示します"}
+              type="button"
+            >
+              <ExplorerVisibilityIcon showHiddenEntries={showHiddenEntries} />
+            </button>
+            <button
+              className="button button--ghost sidebar__action-text"
+              onClick={() => {
+                void refreshWorkspace("ワークスペースを更新しました");
+              }}
+              type="button"
+            >
+              Sync
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        className={`sidebar__tree${dropTargetPath === "" ? " is-drop-target" : ""}`}
+        onClick={(event) => {
+          if (!workspace) {
+            return;
+          }
+
+          const target = event.target as HTMLElement | null;
+
+          if (target?.closest(".tree-row")) {
+            return;
+          }
+
+          replaceSelection([], "");
+          setContextMenu(null);
+        }}
+        onContextMenu={(event) => {
+          if (!workspace) {
+            return;
+          }
+
+          const target = event.target as HTMLElement | null;
+
+          if (target?.closest(".tree-row")) {
+            return;
+          }
+
+          event.preventDefault();
+          openTreeRootContextMenu(event.clientX, event.clientY);
+        }}
+        onDragLeave={(event) => {
+          const relatedTarget = event.relatedTarget as Node | null;
+
+          if (relatedTarget && event.currentTarget.contains(relatedTarget)) {
+            return;
+          }
+
+          setDropTargetPath(null);
+        }}
+        onDragOver={(event) => {
+          const hasInternalPayload = event.dataTransfer.types.includes(TREE_DRAG_MIME);
+          const hasExternalFiles = event.dataTransfer.files.length > 0;
+
+          if (!hasInternalPayload && !hasExternalFiles) {
+            return;
+          }
+
+          if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
+            return;
+          }
+
+          event.preventDefault();
+          setDropTargetPath("");
+          event.dataTransfer.dropEffect =
+            hasInternalPayload && !(event.ctrlKey || event.metaKey) ? "move" : "copy";
+        }}
+        onDrop={(event) => {
+          if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
+            return;
+          }
+
+          event.preventDefault();
+          setDropTargetPath(null);
+
+          const internalPayload = event.dataTransfer.getData(TREE_DRAG_MIME);
+
+          if (internalPayload.length > 0) {
+            const sourcePaths = collapseNestedSelection(JSON.parse(internalPayload) as string[]);
+
+            if (event.ctrlKey || event.metaKey) {
+              void window.integralNotes
+                .copyEntries({
+                  destinationDirectoryPath: "",
+                  sourcePaths
+                })
+                .then((result) => {
+                  handleCopyEntriesResult(
+                    result,
+                    result.createdEntries.length === 1
+                      ? `${result.createdEntries[0]?.name ?? "項目"} をコピーしました`
+                      : `${result.createdEntries.length} 件をコピーしました`
+                  );
+                })
+                .catch((error) => {
+                  setStatusMessage(toErrorMessage(error));
+                });
+              return;
+            }
+
+            void window.integralNotes
+              .moveEntries({
+                destinationDirectoryPath: "",
+                sourcePaths
+              })
+              .then((result) => {
+                handleMoveEntriesResult(result);
+              })
+              .catch((error) => {
+                setStatusMessage(toErrorMessage(error));
+              });
+            return;
+          }
+
+          const sourceAbsolutePaths = Array.from(event.dataTransfer.files)
+            .map((file) => (file as File & { path?: string }).path?.trim() ?? "")
+            .filter((value) => value.length > 0);
+
+          if (sourceAbsolutePaths.length === 0) {
+            return;
+          }
+
+          void window.integralNotes
+            .copyExternalEntries({
+              destinationDirectoryPath: "",
+              sourceAbsolutePaths
+            })
+            .then((result) => {
+              handleCopyEntriesResult(
+                result,
+                result.createdEntries.length === 1
+                  ? `${result.createdEntries[0]?.name ?? "項目"} を取り込みました`
+                  : `${result.createdEntries.length} 件を取り込みました`
+              );
+            })
+            .catch((error) => {
+              setStatusMessage(toErrorMessage(error));
+            });
+        }}
+      >
+        {loadingWorkspace && !workspace ? (
+          <div className="sidebar__placeholder">Loading workspace...</div>
+        ) : workspace ? (
+          <FileTree
+            dropTargetPath={dropTargetPath}
+            editingPending={inlineEditorPending}
+            editingState={inlineEditor}
+            entries={visibleWorkspaceEntries}
+            expandedPaths={expandedPaths}
+            primarySelectedPath={selectedEntryPath}
+            selectedPaths={selectedEntryPaths}
+            onActivateEntry={handleActivateEntry}
+            onCancelEditing={() => {
+              if (!inlineEditorPending) {
+                setInlineEditor(null);
+              }
+            }}
+            onContextMenuEntry={openTreeContextMenu}
+            onDragEnd={handleDragEnd}
+            onDragOverEntry={handleDragOverEntry}
+            onDragStartEntry={handleDragStartEntry}
+            onDropEntry={(entry, event) => {
+              void handleDropOnEntry(entry, event);
+            }}
+            onSubmitEditing={(value) => {
+              void submitInlineEditor(value);
+            }}
+          />
+        ) : (
+          <div className="sidebar__empty-state">
+            <p className="sidebar__section-title">Workspace</p>
+            <h2>ワークスペースが未設定です</h2>
+            <p>ファイルを表示するフォルダを選ぶと、ここにエクスプローラーを表示します。</p>
+            <button
+              className="button button--primary"
+              onClick={() => {
+                void openWorkspaceFolder();
+              }}
+              type="button"
+            >
+              フォルダを開く
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderPluginManagerSidebarView = (): JSX.Element => (
+    <SidebarPluginManagerView
+      installRootPath={pluginInstallRootPath}
+      onInstall={() => {
+        void installPluginFromZip();
+      }}
+      onRefresh={() => {
+        void refreshPluginsFromDialog();
+      }}
+      onUninstall={(pluginId) => {
+        void uninstallPlugin(pluginId);
+      }}
+      pendingAction={pluginDialogPendingAction}
+      plugins={installedPlugins}
+    />
+  );
+
+  const sidebarViewDefinitions: SidebarViewDefinition[] = [
+    {
+      activityIcon: <ExplorerSidebarIcon />,
+      id: BUILTIN_EXPLORER_SIDEBAR_VIEW_ID,
+      render: renderExplorerSidebarView,
+      title: "Explorer"
+    },
+    {
+      activityIcon: <PluginSidebarIcon />,
+      id: BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID,
+      render: renderPluginManagerSidebarView,
+      title: "Plugins"
+    },
+    ...installedPlugins.flatMap((plugin) =>
+      plugin.sidebarViews.map((sidebarView) => ({
+        activityIcon: (
+          <SidebarTextIcon label={toSidebarIconLabel(sidebarView.icon ?? sidebarView.title)} />
+        ),
+        id: `plugin:${plugin.id}:${sidebarView.id}`,
+        render: () => <ExternalPluginSidebarView plugin={plugin} sidebarView={sidebarView} />,
+        title: `${plugin.displayName}: ${sidebarView.title}`
+      }))
+    )
+  ];
+  const activityBarItems: ActivityBarItem[] = sidebarViewDefinitions.map((view) => ({
+    icon: view.activityIcon,
+    id: view.id,
+    title: view.title
+  }));
+  const activeSidebarView =
+    sidebarViewDefinitions.find((view) => view.id === activeSidebarViewId) ?? sidebarViewDefinitions[0];
+
+  useEffect(() => {
+    if (!sidebarViewDefinitions.some((view) => view.id === activeSidebarViewId)) {
+      setActiveSidebarViewId(BUILTIN_EXPLORER_SIDEBAR_VIEW_ID);
+    }
+  }, [activeSidebarViewId, sidebarViewDefinitions]);
+
   return (
     <div className="app-shell" data-dialog-open={hasBlockingDialog ? "true" : "false"}>
       <header className="app-menubar">
@@ -2382,231 +2728,24 @@ export function App(): JSX.Element {
         </button>
       </header>
 
-      <aside className="sidebar" ref={sidebarRef}>
-        <div className="sidebar__panel">
-          {workspace ? (
-            <div className="sidebar__panel-header">
-              <div className="sidebar__panel-actions">
-                <button
-                  aria-label="New note"
-                  className="button button--icon"
-                  onClick={() => {
-                    startCreateInline("file");
-                  }}
-                  title="New note"
-                  type="button"
-                >
-                  <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FILE_ICON_URL} />
-                </button>
-                <button
-                  aria-label="New folder"
-                  className="button button--icon"
-                  onClick={() => {
-                    startCreateInline("directory");
-                  }}
-                  title="New folder"
-                  type="button"
-                >
-                  <img alt="" className="sidebar__action-icon" draggable={false} src={NEW_FOLDER_ICON_URL} />
-                </button>
-                <button
-                  aria-label={showHiddenEntries ? "hidden フォルダを非表示" : "hidden フォルダを表示"}
-                  aria-pressed={showHiddenEntries}
-                  className="button button--icon"
-                  onClick={toggleHiddenEntriesVisibility}
-                  title={showHiddenEntries ? "hidden フォルダを非表示にします" : "hidden フォルダを表示します"}
-                  type="button"
-                >
-                  <ExplorerVisibilityIcon showHiddenEntries={showHiddenEntries} />
-                </button>
-                <button
-                  className="button button--ghost sidebar__action-text"
-                  onClick={() => {
-                    void refreshWorkspace("ワークスペースを更新しました");
-                  }}
-                  type="button"
-                >
-                  Sync
-                </button>
-              </div>
-            </div>
-          ) : null}
+      <ActivityBar
+        activeItemId={activeSidebarView.id}
+        items={activityBarItems}
+        onSelect={(viewId) => {
+          selectSidebarView(viewId);
 
-          <div
-            className={`sidebar__tree${dropTargetPath === "" ? " is-drop-target" : ""}`}
-            onClick={(event) => {
-              if (!workspace) {
-                return;
-              }
+          if (viewId === BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID) {
+            void refreshInstalledPluginState();
+          }
+        }}
+      />
 
-              const target = event.target as HTMLElement | null;
-
-              if (target?.closest(".tree-row")) {
-                return;
-              }
-
-              replaceSelection([], "");
-              setContextMenu(null);
-            }}
-            onContextMenu={(event) => {
-              if (!workspace) {
-                return;
-              }
-
-              const target = event.target as HTMLElement | null;
-
-              if (target?.closest(".tree-row")) {
-                return;
-              }
-
-              event.preventDefault();
-              openTreeRootContextMenu(event.clientX, event.clientY);
-            }}
-            onDragLeave={(event) => {
-              const relatedTarget = event.relatedTarget as Node | null;
-
-              if (relatedTarget && event.currentTarget.contains(relatedTarget)) {
-                return;
-              }
-
-              setDropTargetPath(null);
-            }}
-            onDragOver={(event) => {
-              const hasInternalPayload = event.dataTransfer.types.includes(TREE_DRAG_MIME);
-              const hasExternalFiles = event.dataTransfer.files.length > 0;
-
-              if (!hasInternalPayload && !hasExternalFiles) {
-                return;
-              }
-
-              if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
-                return;
-              }
-
-              event.preventDefault();
-              setDropTargetPath("");
-              event.dataTransfer.dropEffect =
-                hasInternalPayload && !(event.ctrlKey || event.metaKey) ? "move" : "copy";
-            }}
-            onDrop={(event) => {
-              if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
-                return;
-              }
-
-              event.preventDefault();
-              setDropTargetPath(null);
-
-              const internalPayload = event.dataTransfer.getData(TREE_DRAG_MIME);
-
-              if (internalPayload.length > 0) {
-                const sourcePaths = collapseNestedSelection(JSON.parse(internalPayload) as string[]);
-
-                if (event.ctrlKey || event.metaKey) {
-                  void window.integralNotes
-                    .copyEntries({
-                      destinationDirectoryPath: "",
-                      sourcePaths
-                    })
-                    .then((result) => {
-                      handleCopyEntriesResult(
-                        result,
-                        result.createdEntries.length === 1
-                          ? `${result.createdEntries[0]?.name ?? "項目"} をコピーしました`
-                          : `${result.createdEntries.length} 件をコピーしました`
-                      );
-                    })
-                    .catch((error) => {
-                      setStatusMessage(toErrorMessage(error));
-                    });
-                  return;
-                }
-
-                void window.integralNotes
-                  .moveEntries({
-                    destinationDirectoryPath: "",
-                    sourcePaths
-                  })
-                  .then((result) => {
-                    handleMoveEntriesResult(result);
-                  })
-                  .catch((error) => {
-                    setStatusMessage(toErrorMessage(error));
-                  });
-                return;
-              }
-
-              const sourceAbsolutePaths = Array.from(event.dataTransfer.files)
-                .map((file) => (file as File & { path?: string }).path?.trim() ?? "")
-                .filter((value) => value.length > 0);
-
-              if (sourceAbsolutePaths.length === 0) {
-                return;
-              }
-
-              void window.integralNotes
-                .copyExternalEntries({
-                  destinationDirectoryPath: "",
-                  sourceAbsolutePaths
-                })
-                .then((result) => {
-                  handleCopyEntriesResult(
-                    result,
-                    result.createdEntries.length === 1
-                      ? `${result.createdEntries[0]?.name ?? "項目"} を取り込みました`
-                      : `${result.createdEntries.length} 件を取り込みました`
-                  );
-                })
-                .catch((error) => {
-                  setStatusMessage(toErrorMessage(error));
-                });
-            }}
-          >
-            {loadingWorkspace && !workspace ? (
-              <div className="sidebar__placeholder">Loading workspace...</div>
-            ) : workspace ? (
-              <FileTree
-                dropTargetPath={dropTargetPath}
-                editingPending={inlineEditorPending}
-                editingState={inlineEditor}
-                entries={visibleWorkspaceEntries}
-                expandedPaths={expandedPaths}
-                primarySelectedPath={selectedEntryPath}
-                selectedPaths={selectedEntryPaths}
-                onActivateEntry={handleActivateEntry}
-                onCancelEditing={() => {
-                  if (!inlineEditorPending) {
-                    setInlineEditor(null);
-                  }
-                }}
-                onContextMenuEntry={openTreeContextMenu}
-                onDragEnd={handleDragEnd}
-                onDragOverEntry={handleDragOverEntry}
-                onDragStartEntry={handleDragStartEntry}
-                onDropEntry={(entry, event) => {
-                  void handleDropOnEntry(entry, event);
-                }}
-                onSubmitEditing={(value) => {
-                  void submitInlineEditor(value);
-                }}
-              />
-            ) : (
-              <div className="sidebar__empty-state">
-                <p className="sidebar__section-title">Workspace</p>
-                <h2>ワークスペースが未設定です</h2>
-                <p>ファイルを表示するフォルダを選ぶと、ここにエクスプローラーを表示します。</p>
-                <button
-                  className="button button--primary"
-                  onClick={() => {
-                    void openWorkspaceFolder();
-                  }}
-                  type="button"
-                >
-                  フォルダを開く
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+      <aside
+        className="sidebar-panel"
+        data-sidebar-view={activeSidebarView.id}
+        ref={sidebarPanelRef}
+      >
+        {activeSidebarView.render()}
       </aside>
 
       <main className="workspace">
@@ -2819,27 +2958,6 @@ export function App(): JSX.Element {
         />
       ) : null}
 
-      {pluginDialogOpen ? (
-        <PluginManagerDialog
-          installRootPath={pluginInstallRootPath}
-          onClose={() => {
-            if (pluginDialogPendingAction === null) {
-              setPluginDialogOpen(false);
-            }
-          }}
-          onInstall={() => {
-            void installPluginFromZip();
-          }}
-          onRefresh={() => {
-            void refreshPluginsFromDialog();
-          }}
-          onUninstall={(pluginId) => {
-            void uninstallPlugin(pluginId);
-          }}
-          pendingAction={pluginDialogPendingAction}
-          plugins={installedPlugins}
-        />
-      ) : null}
     </div>
   );
 }

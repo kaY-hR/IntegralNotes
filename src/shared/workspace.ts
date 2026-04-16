@@ -213,6 +213,7 @@ export interface IntegralNotesApi {
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
   loadPluginRendererDocument: (pluginId: string) => Promise<string>;
+  loadPluginSidebarViewDocument: (pluginId: string, sidebarViewId: string) => Promise<string>;
   loadPluginViewerDocument: (pluginId: string, viewerId: string) => Promise<string>;
   resolveManagedDataTrackingIssue: (
     request: ResolveIntegralManagedDataTrackingIssueRequest
