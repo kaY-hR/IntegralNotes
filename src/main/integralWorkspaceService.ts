@@ -32,6 +32,10 @@ import {
   type InstalledPluginDefinition,
   type PluginViewerDataEncoding
 } from "../shared/plugins";
+import type {
+  WorkspaceDatasetManifestMember,
+  WorkspaceFileDocument
+} from "../shared/workspace";
 import { PluginRegistry } from "./pluginRegistry";
 import { WorkspaceService, type WorkspaceMutation } from "./workspaceService";
 
@@ -516,6 +520,53 @@ export class IntegralWorkspaceService {
       renderableCount: renderables.length,
       renderables,
       visibility: datasetMetadata.visibility
+    };
+  }
+
+  async readSpecialWorkspaceFileDocument(relativePath: string): Promise<WorkspaceFileDocument | null> {
+    await this.ensureIntegralWorkspaceReady();
+
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+    if (path.extname(normalizedRelativePath).toLowerCase() !== DATASET_JSON_EXTENSION) {
+      return null;
+    }
+
+    const absolutePath = this.resolveWorkspacePath(normalizedRelativePath);
+    const stats = await fs.stat(absolutePath);
+
+    if (!stats.isFile()) {
+      throw new Error("ファイルのみ開けます。");
+    }
+
+    const manifest = await this.readSourceDatasetManifest(normalizedRelativePath);
+
+    if (!manifest) {
+      return null;
+    }
+
+    const [rawContent, members, noteMarkdown] = await Promise.all([
+      fs.readFile(absolutePath, "utf8"),
+      Promise.all(
+        manifest.memberIds.map((memberId) => this.readDatasetManifestMember(memberId))
+      ),
+      this.readManagedDataNoteBody(manifest.datasetId)
+    ]);
+
+    return {
+      content: rawContent,
+      datasetManifest: {
+        datasetId: manifest.datasetId,
+        datasetKind: manifest.kind,
+        datasetName: normalizeDatasetName(manifest.name, manifest.datasetId),
+        members,
+        noteMarkdown,
+        noteTargetId: manifest.datasetId
+      },
+      kind: "dataset-json",
+      modifiedAt: stats.mtime.toISOString(),
+      name: path.basename(normalizedRelativePath),
+      relativePath: normalizedRelativePath
     };
   }
 
@@ -1309,6 +1360,42 @@ export class IntegralWorkspaceService {
     metadata.name = normalizeDatasetName(manifest.name, metadata.datasetId);
     metadata.displayName = metadata.name;
     metadata.kind = manifest.kind;
+  }
+
+  private async readDatasetManifestMember(
+    originalDataId: string
+  ): Promise<WorkspaceDatasetManifestMember> {
+    const normalizedOriginalDataId = originalDataId.trim();
+    const metadata =
+      normalizedOriginalDataId.length > 0
+        ? await this.readOriginalDataMetadata(normalizedOriginalDataId)
+        : null;
+
+    return {
+      displayName:
+        metadata?.displayName ??
+        (normalizedOriginalDataId.length > 0 ? normalizedOriginalDataId : "(unknown)"),
+      originalDataId: normalizedOriginalDataId,
+      relativePath: metadata?.path ?? null,
+      representation: metadata?.representation ?? null
+    };
+  }
+
+  private async readManagedDataNoteBody(targetId: string): Promise<string | null> {
+    const normalizedTargetId = targetId.trim();
+
+    if (normalizedTargetId.length === 0) {
+      return null;
+    }
+
+    try {
+      const note = await this.workspaceService.readNote(
+        `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/data-notes/${normalizedTargetId}.md`
+      );
+      return note.content;
+    } catch {
+      return null;
+    }
   }
 
   private async computeManagedDataHash(

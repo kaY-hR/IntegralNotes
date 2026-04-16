@@ -1,3 +1,4 @@
+import { DatasetManifestFileViewer } from "./DatasetManifestFileViewer";
 import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
 import type { WorkspaceFileDocument } from "../shared/workspace";
 
@@ -93,6 +94,11 @@ export function WorkspaceFileViewer({
             source={{
               kind: "workspace-file"
             }}
+          />
+        ) : file.kind === "dataset-json" && file.datasetManifest ? (
+          <DatasetManifestFileViewer
+            manifest={file.datasetManifest}
+            onOpenInExternalApp={onOpenInExternalApp}
           />
         ) : (
           <pre className="integral-renderable-card__text workspace-file-viewer__text">{file.content}</pre>

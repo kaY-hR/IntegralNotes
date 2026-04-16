@@ -542,3 +542,22 @@
   - `src/renderer/workspaceEmbedFeature.tsx` は plugin viewer file の embed を明示的に未対応扱いにした
   - `src/renderer/PluginManagerDialog.tsx` で viewer 数を表示し、`src/renderer/styles.css` で plugin iframe style を一般 viewer でも使えるようにした
   - `npm run build` が通ることを確認した
+
+## [x] 28. `.idts` source dataset manifest の built-in viewer を追加したい
+- Status:completed
+- 優先重み:5
+- 記載日時:2026-04-16-10:34(UTC+9)
+
+* `.idts` を単なる text ではなく source dataset manifest 専用 viewer で開きたい
+* 表示内容は少なくとも、データファイル名、開けるリンク、対応するノートの埋め込み表示を含めたい
+* plugin viewer system とは独立の built-in viewer とし、既存 plugin には影響させたくない
+* 実装対象は workspace file open 経路と read-only viewer のみでよい
+* 2026-04-16 実装:
+  - `src/shared/workspace.ts` に `.idts` 用の `dataset-json` viewer kind と manifest view model を追加した
+  - `src/main/integralWorkspaceService.ts` に `.idts` manifest を解決し、member metadata と dataset note 本文を束ねて返す special document reader を追加した
+  - `src/main/main.ts` の `workspace:readFile` で `.idts` を intercept し、special document が解決できる場合は built-in viewer model を返すようにした
+  - `src/renderer/DatasetManifestFileViewer.tsx` を追加し、member 一覧と note preview を表示する専用 viewer を実装した
+  - `src/renderer/ReadonlyMarkdownPreview.tsx` を追加し、read-only Markdown preview を共通化した
+  - `src/renderer/WorkspaceFileViewer.tsx`, `src/renderer/App.tsx`, `src/renderer/workspaceEmbedFeature.tsx`, `src/renderer/styles.css` を更新し、`.idts` 表示と readonly tab の extra model 保持に対応した
+  - `docs/30_設計/40_標準描画と結果閲覧.md` に `.idts` built-in viewer を追記した
+  - `npm run build` が通ることを確認した

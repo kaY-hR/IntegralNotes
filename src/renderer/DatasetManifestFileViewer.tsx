@@ -1,0 +1,144 @@
+import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
+import type { WorkspaceDatasetManifestView } from "../shared/workspace";
+import { requestOpenWorkspaceFile } from "./workspaceOpenEvents";
+import { ReadonlyMarkdownPreview } from "./ReadonlyMarkdownPreview";
+
+interface DatasetManifestFileViewerProps {
+  manifest: WorkspaceDatasetManifestView;
+  onOpenInExternalApp?: (relativePath: string) => void;
+}
+
+export function DatasetManifestFileViewer({
+  manifest,
+  onOpenInExternalApp
+}: DatasetManifestFileViewerProps): JSX.Element {
+  return (
+    <div className="workspace-dataset-viewer">
+      <section className="workspace-dataset-viewer__section">
+        <div className="workspace-dataset-viewer__header">
+          <div>
+            <p className="workspace-dataset-viewer__eyebrow">Source Dataset</p>
+            <h2 className="workspace-dataset-viewer__title">{manifest.datasetName}</h2>
+          </div>
+          <div className="workspace-dataset-viewer__summary">
+            <span className="workspace-dataset-viewer__summary-chip">
+              {manifest.members.length} items
+            </span>
+            <span className="workspace-dataset-viewer__summary-chip">
+              {manifest.datasetKind || "dataset"}
+            </span>
+            <span className="workspace-dataset-viewer__summary-chip">
+              {manifest.datasetId}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="workspace-dataset-viewer__section">
+        <div className="workspace-dataset-viewer__section-header">
+          <h3>データ</h3>
+          <span>{manifest.members.length} 件</span>
+        </div>
+        {manifest.members.length > 0 ? (
+          <ul className="workspace-dataset-viewer__member-list">
+            {manifest.members.map((member) => {
+              const canOpenInWorkspace =
+                member.relativePath !== null && member.representation === "file";
+              const canOpenExternally =
+                member.relativePath !== null &&
+                (member.representation !== "file" || onOpenInExternalApp !== undefined);
+
+              return (
+                <li
+                  className="workspace-dataset-viewer__member-card"
+                  key={`${member.originalDataId}:${member.relativePath ?? "missing"}`}
+                >
+                  <div className="workspace-dataset-viewer__member-main">
+                    <strong>{member.displayName}</strong>
+                    <span>{member.originalDataId}</span>
+                  </div>
+                  <div className="workspace-dataset-viewer__member-meta">
+                    <span>
+                      {member.representation === "directory"
+                        ? "directory"
+                        : member.representation === "file"
+                          ? "file"
+                          : "unresolved"}
+                    </span>
+                    {member.relativePath ? (
+                      canOpenInWorkspace ? (
+                        <button
+                          className="workspace-dataset-viewer__path-link"
+                          onClick={() => {
+                            requestOpenWorkspaceFile(member.relativePath ?? "");
+                          }}
+                          type="button"
+                        >
+                          {member.relativePath}
+                        </button>
+                      ) : canOpenExternally ? (
+                        <button
+                          className="workspace-dataset-viewer__path-link"
+                          onClick={() => {
+                            if (member.relativePath) {
+                              onOpenInExternalApp?.(member.relativePath);
+                            }
+                          }}
+                          type="button"
+                        >
+                          {member.relativePath}
+                        </button>
+                      ) : (
+                        <code>{member.relativePath}</code>
+                      )
+                    ) : (
+                      <span className="workspace-dataset-viewer__missing">
+                        path が未解決です
+                      </span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <div className="workspace-dataset-viewer__empty">
+            manifest に memberIds がありません。
+          </div>
+        )}
+      </section>
+
+      <section className="workspace-dataset-viewer__section workspace-dataset-viewer__section--note">
+        <div className="workspace-dataset-viewer__section-header">
+          <h3>ノート</h3>
+          <span>{manifest.noteTargetId}</span>
+        </div>
+        {manifest.noteMarkdown && manifest.noteMarkdown.trim().length > 0 ? (
+          <ReadonlyMarkdownPreview
+            className="workspace-dataset-viewer__note"
+            content={manifest.noteMarkdown}
+            proxyDomURL={proxyWorkspaceDatasetNoteImageUrl}
+          />
+        ) : (
+          <div className="workspace-dataset-viewer__empty">
+            紐づくノートはまだありません。
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+async function proxyWorkspaceDatasetNoteImageUrl(url: string): Promise<string> {
+  const relativePath = resolveWorkspaceMarkdownTarget(url);
+
+  if (!relativePath) {
+    return url;
+  }
+
+  try {
+    return await window.integralNotes.resolveWorkspaceFileUrl(relativePath);
+  } catch {
+    return url;
+  }
+}

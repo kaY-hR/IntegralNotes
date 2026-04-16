@@ -10,6 +10,7 @@ import type {
   ExecuteIntegralBlockResult,
   ImportOriginalDataResult,
   IntegralAssetCatalog,
+  IntegralOriginalDataRepresentation,
   IntegralDatasetInspection,
   IntegralManagedDataTrackingIssue,
   PythonEntrySelection,
@@ -42,12 +43,36 @@ export interface NoteDocument {
   modifiedAt: string;
 }
 
-export type WorkspaceFileViewKind = "markdown" | "html" | "image" | "plugin" | "text" | "unsupported";
+export interface WorkspaceDatasetManifestMember {
+  displayName: string;
+  originalDataId: string;
+  relativePath: string | null;
+  representation: IntegralOriginalDataRepresentation | null;
+}
+
+export interface WorkspaceDatasetManifestView {
+  datasetId: string;
+  datasetKind: string;
+  datasetName: string;
+  members: WorkspaceDatasetManifestMember[];
+  noteMarkdown: string | null;
+  noteTargetId: string;
+}
+
+export type WorkspaceFileViewKind =
+  | "dataset-json"
+  | "markdown"
+  | "html"
+  | "image"
+  | "plugin"
+  | "text"
+  | "unsupported";
 
 export interface WorkspaceFileDocument {
   relativePath: string;
   name: string;
   content: string | null;
+  datasetManifest?: WorkspaceDatasetManifestView;
   kind: WorkspaceFileViewKind;
   modifiedAt: string;
   pluginViewer?: ResolvedPluginViewer;

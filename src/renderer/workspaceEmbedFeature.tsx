@@ -14,7 +14,7 @@ import {
 } from "@milkdown/kit/component/image-block";
 import { inlineImageView } from "@milkdown/kit/component/image-inline";
 import { imageSchema } from "@milkdown/kit/preset/commonmark";
-import { replaceAll, $view } from "@milkdown/kit/utils";
+import { $view } from "@milkdown/kit/utils";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
@@ -28,6 +28,7 @@ import {
   requestOpenManagedDataNote,
   requestOpenWorkspaceFile
 } from "./workspaceOpenEvents";
+import { ReadonlyMarkdownPreview } from "./ReadonlyMarkdownPreview";
 
 type WorkspaceEmbedMode = "block" | "inline";
 
@@ -569,7 +570,11 @@ function WorkspaceEmbedPanel({
         ) : null}
 
         {resolution.kind === "markdown" ? (
-          <MarkdownEmbedPreview content={resolution.markdown} />
+          <ReadonlyMarkdownPreview
+            className="editor-workspace-embed__markdown"
+            content={resolution.markdown}
+            proxyDomURL={proxyWorkspaceEmbedImageUrl}
+          />
         ) : null}
 
         {resolution.kind === "unsupported" ? (
@@ -590,76 +595,6 @@ function WorkspaceEmbedPanel({
       </div>
     </div>
   );
-}
-
-function MarkdownEmbedPreview({
-  content
-}: {
-  content: string;
-}): JSX.Element {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<Crepe | null>(null);
-  const lastSyncedMarkdownRef = useRef(content);
-
-  useEffect(() => {
-    const rootElement = rootRef.current;
-
-    if (!rootElement) {
-      return;
-    }
-
-    let shouldDestroyAfterCreate = false;
-    let preview: Crepe | null = null;
-
-    void (async () => {
-      preview = new Crepe({
-        featureConfigs: {
-          [Crepe.Feature.ImageBlock]: {
-            proxyDomURL: proxyWorkspaceEmbedImageUrl
-          }
-        },
-        root: rootElement,
-        defaultValue: content
-      });
-      preview.setReadonly(true);
-      await preview.create();
-
-      if (shouldDestroyAfterCreate) {
-        void preview.destroy();
-        return;
-      }
-
-      editorRef.current = preview;
-      lastSyncedMarkdownRef.current = content;
-    })();
-
-    return () => {
-      shouldDestroyAfterCreate = true;
-
-      if (preview) {
-        if (editorRef.current === preview) {
-          editorRef.current = null;
-        }
-
-        void preview.destroy();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const preview = editorRef.current;
-
-    if (!preview || content === lastSyncedMarkdownRef.current) {
-      return;
-    }
-
-    preview.editor.action((ctx) => {
-      replaceAll(content)(ctx);
-    });
-    lastSyncedMarkdownRef.current = content;
-  }, [content]);
-
-  return <div className="editor-workspace-embed__markdown" ref={rootRef} />;
 }
 
 async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedResolution> {
@@ -738,6 +673,14 @@ async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedReso
       return {
         kind: "unsupported",
         message: "この file の専用 viewer は埋め込み preview では未対応です。",
+        openTarget: workspaceFileOpenTarget
+      };
+    }
+
+    if (file.kind === "dataset-json") {
+      return {
+        kind: "unsupported",
+        message: "`.idts` viewer の埋め込み preview は未対応です。",
         openTarget: workspaceFileOpenTarget
       };
     }

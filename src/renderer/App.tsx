@@ -495,11 +495,10 @@ function createOpenTab(document: WorkspaceFileDocument, nameOverride?: string): 
   }
 
   return {
+    ...document,
     content: document.content,
     kind: document.kind as ReadonlyWorkspaceFileKind,
-    modifiedAt: document.modifiedAt,
     name,
-    relativePath: document.relativePath
   };
 }
 
