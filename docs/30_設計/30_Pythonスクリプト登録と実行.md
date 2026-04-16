@@ -3,102 +3,67 @@
 ## 前提
 
 - plugin ID は `general-analysis`
-- block-type は `PYS-...`
-- `params` は常に `{}`
-- `inputs / outputs` は `Record<string, string | null>`
+- block-type は `relative/path.py:function`
+- `params` は free-form object
+- `inputs / outputs` は internal normalized form では `Record<string, string | null>`
 
-## 1. 新規 Python block 作成フロー
+## 1. discovery
 
-### 入力
+app は workspace 内の `.py` を走査し、decorator 付き関数を block 候補として収集する。
 
-ユーザーは次を指定する。
+### decorator 例
 
-- entry の `.py`
-- 同梱ファイル
-- input slot 名
-- output slot 名
-- displayName
-- description
+```python
+from integral import integral_block
 
-### 自動同梱
-
-- entry と同階層の `.py` は自動同梱する
-
-### 手動同梱
-
-- 非 `.py`
-- 別階層
-
-はユーザー選択で追加する。
-
-### 処理
-
-app は次を行う。
-
-1. `PYS-...` を採番
-2. `.py-scripts/PYS-.../` を作る
-3. entry と同梱ファイルをコピーする
-4. `script.json` を作る
-5. block をノートへ挿入する
-
-## 2. script.json
-
-最小形:
-
-```json
-{
-  "scriptId": "PYS-7K2M9Q4D",
-  "displayName": "PCA",
-  "description": "数値テーブルに対して主成分分析を行う",
-  "entry": "pca.py",
-  "inputSlots": [
-    {
-      "name": "samples"
-    }
-  ],
-  "outputSlots": [
-    {
-      "name": "result"
-    }
-  ]
-}
+@integral_block(
+    display_name="PCA",
+    description="数値テーブルに対して主成分分析を行う",
+    inputs=["samples", "labels"],
+    outputs=["score", "loading"],
+)
+def main(inputs, outputs, params):
+    ...
 ```
 
-### 補足
+### app が読むもの
 
-- `displayName` は任意
-- 未設定なら `entry` のファイル名を表示名に使う
-- `description` も任意
+- `display_name`
+- `description`
+- `inputs`
+- `outputs`
 
-## 3. 既存 script 再利用フロー
+## 2. slash menu
 
-1. `.py-scripts/` を走査して script 一覧を出す
-2. `displayName` と `description` を表示する
-3. ユーザーは 1 つ選ぶ
-4. app は `inputSlots / outputSlots` に従って block を作る
+候補一覧では次を表示する。
 
-このとき slot 定義は block ごとに変更しない。
+- 主表示: `display_name`
+- 補助表示: `relative/path.py:function`
 
-## 4. block 生成
+例:
 
-`script.json` から block を作るときの例:
+- `PCA`
+- `scripts/pca.py:main`
 
-```json
-{
-  "id": "BLK-1F8E2D0A",
-  "plugin": "general-analysis",
-  "block-type": "PYS-7K2M9Q4D",
-  "params": {},
-  "inputs": {
-    "samples": null
-  },
-  "outputs": {
-    "result": null
-  }
-}
+## 3. block 生成
+
+app は callable 定義から次の block source を作る。
+
+```itg-notes
+id: BLK-1F8E2D0A
+run: scripts/pca.py:main
+in:
+  samples: null
+  labels: null
+params: {}
+out:
+  score: auto
+  loading: auto
 ```
 
-## 5. input 割当
+`.idts` が既に決まっている場合は `in:` の値へその path を入れる。
+
+## 4. input 割当
 
 各 input slot には次を指定できる。
 
@@ -109,38 +74,42 @@ original data 複数選択の場合:
 
 1. ユーザーが source dataset 名を決める
 2. app が新しい source dataset を作る
-3. source dataset は `dataset-json` または `directory` として保存される
+3. source dataset は visible `.idts` として保存される
 4. app は source dataset に紐づく data-note を system-managed に作る
-5. block の input には source dataset の `DTS-...` を書く
+5. block source の `in:` には source dataset の `.idts` path を書く
 
-## 6. output 割当
+## 5. output 宣言
 
-- output slot 名は先に block に書く
-- value は最初 `null`
-- 実行時に app が output dataset を新規作成して `DTS-...` を書き戻す
+- output slot 名は decorator から決まる
+- note source 上の value は `auto`
+- 実行結果としてできた最新 dataset ID は hidden metadata 側に持つ
 
-## 7. 実行準備
+## 6. 実行準備
 
 app は実行前に次を行う。
 
-1. input dataset を確認する
+1. input `.idts` を `datasetId` に解決する
 2. input dataset を executable path に resolve する
-3. output slot ごとに新しい dataset path を確保する
-3. `analysis-args.json` を `.py-scripts/PYS-.../` に書く
+3. output slot ごとに hidden `.idts` manifest と実データ directory を確保する
+4. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
 
-## 8. analysis-args.json
+## 7. analysis-args.json
 
 最小例:
 
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D"
+    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D",
+    "labels": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-1A2B3C4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A"
+    "score": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A",
+    "loading": "C:\\Workspace\\.store\\objects\\DTS-1B2C3D4E"
   },
-  "params": {}
+  "params": {
+    "n_components": 2
+  }
 }
 ```
 
@@ -148,15 +117,14 @@ app は実行前に次を行う。
 
 - 値は絶対パスまたは `null`
 - input path は current path をそのまま使う場合も、staging path の場合もある
-- `blockId` は渡さない
-- `params` は常に `{}` とする
+- `params` は note source から読んだ object をそのまま渡す
 
-## 9. 実行
+## 8. 実行
 
 実行方法:
 
-1. `PYS-...` フォルダを current working directory にする
-2. entry を Python で起動する
+1. workspace root を current working directory にする
+2. callable を `relative/path.py:function` から解決する
 3. `analysis-args.json` を読ませる
 
 ### 成功判定
@@ -167,19 +135,10 @@ app は実行前に次を行う。
 ### 補足
 
 - output dataset が空でも成功なら空の結果として確定する
-- stdout / stderr は log に残す
+- stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
 
-## 10. script 更新
+## 9. source of truth
 
-### 同一 ID を維持するケース
-
-- `.py-scripts/PYS-.../` 内を直接編集した
-
-### 新しい ID を作るケース
-
-- 外部 `.py` を改めて登録した
-
-### 任意オプション
-
-- 外部登録時に「既存 `PYS-...` を上書き」があってよい
-
+- source of truth は workspace 上の `.py` file である
+- app は `.py` や helper file を専用ディレクトリへ copy しない
+- rename / move の追従が必要なら、後から workspace path tracking を足す

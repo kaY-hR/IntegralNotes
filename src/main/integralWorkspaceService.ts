@@ -46,6 +46,7 @@ const DATASET_JSON_EXTENSION = ".idts";
 const DATASETS_DIRECTORY = "datasets";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
+const STORE_DATASET_MANIFESTS_DIRECTORY = "datasets";
 const STORE_OBJECTS_DIRECTORY = "objects";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
 const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
@@ -85,6 +86,7 @@ interface OriginalDataMetadata extends ManagedMetadataBase {
 
 interface DatasetMetadata extends ManagedMetadataBase {
   createdByBlockId: string | null;
+  dataPath?: string;
   datasetId: string;
   entityType: "dataset";
   kind: string;
@@ -107,10 +109,11 @@ interface TrackableWorkspaceEntry {
   relativePath: string;
 }
 
-interface SourceDatasetManifest {
+interface DatasetManifest {
+  dataPath?: string;
   datasetId: string;
   kind: string;
-  memberIds: string[];
+  memberIds?: string[];
   name: string;
 }
 
@@ -334,7 +337,7 @@ export class IntegralWorkspaceService {
       memberIds.push(originalDataId);
     }
 
-    const manifest: SourceDatasetManifest = {
+    const manifest: DatasetManifest = {
       datasetId,
       kind: "source-bundle",
       memberIds,
@@ -539,7 +542,7 @@ export class IntegralWorkspaceService {
       throw new Error("ファイルのみ開けます。");
     }
 
-    const manifest = await this.readSourceDatasetManifest(normalizedRelativePath);
+    const manifest = await this.readDatasetManifest(normalizedRelativePath);
 
     if (!manifest) {
       return null;
@@ -548,7 +551,7 @@ export class IntegralWorkspaceService {
     const [rawContent, members, noteMarkdown] = await Promise.all([
       fs.readFile(absolutePath, "utf8"),
       Promise.all(
-        manifest.memberIds.map((memberId) => this.readDatasetManifestMember(memberId))
+        (manifest.memberIds ?? []).map((memberId) => this.readDatasetManifestMember(memberId))
       ),
       this.readManagedDataNoteBody(manifest.datasetId)
     ]);
@@ -556,6 +559,7 @@ export class IntegralWorkspaceService {
     return {
       content: rawContent,
       datasetManifest: {
+        dataPath: manifest.dataPath ?? null,
         datasetId: manifest.datasetId,
         datasetKind: manifest.kind,
         datasetName: normalizeDatasetName(manifest.name, manifest.datasetId),
@@ -652,6 +656,12 @@ export class IntegralWorkspaceService {
     );
   }
 
+  private createHiddenDatasetManifestRelativePath(datasetId: string): string {
+    return normalizeRelativePath(
+      `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/${STORE_DATASET_MANIFESTS_DIRECTORY}/${datasetId}${DATASET_JSON_EXTENSION}`
+    );
+  }
+
   private resolvePythonScriptRootPath(scriptId: string): string {
     return this.resolveWorkspacePath(`${PYTHON_SCRIPTS_DIRECTORY}/${scriptId}`);
   }
@@ -707,11 +717,14 @@ export class IntegralWorkspaceService {
 
     for (const outputSlot of definition.outputSlots) {
       const nextDatasetId = createOpaqueId("DTS");
-      const datasetPath = createDatasetObjectRelativePath(nextDatasetId);
-      const datasetAbsolutePath = this.resolveWorkspacePath(datasetPath);
+      const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
+      const datasetManifestPath = this.createHiddenDatasetManifestRelativePath(nextDatasetId);
+      const datasetAbsolutePath = this.resolveWorkspacePath(datasetDataPath);
+      const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
       const metadata: DatasetMetadata = {
         createdAt: new Date().toISOString(),
         createdByBlockId: block.id ?? null,
+        dataPath: datasetDataPath,
         datasetId: nextDatasetId,
         displayName: nextDatasetId,
         entityType: "dataset",
@@ -719,14 +732,25 @@ export class IntegralWorkspaceService {
         id: nextDatasetId,
         kind: outputSlot.producedKind?.trim() || `${block["block-type"]}.${outputSlot.name}`,
         name: nextDatasetId,
-        path: datasetPath,
+        path: datasetManifestPath,
         provenance: "derived",
-        representation: "directory",
+        representation: "dataset-json",
         visibility: "hidden"
+      };
+      const manifest: DatasetManifest = {
+        dataPath: datasetDataPath,
+        datasetId: nextDatasetId,
+        kind: metadata.kind,
+        name: nextDatasetId
       };
 
       await fs.mkdir(datasetAbsolutePath, { recursive: true });
-      metadata.hash = await this.computeManagedDataHash(datasetAbsolutePath, metadata.representation);
+      await fs.mkdir(path.dirname(datasetManifestAbsolutePath), { recursive: true });
+      await fs.writeFile(datasetManifestAbsolutePath, JSON.stringify(manifest, null, 2), "utf8");
+      metadata.hash = await this.computeManagedDataHash(
+        datasetManifestAbsolutePath,
+        metadata.representation
+      );
       await this.writeDatasetMetadata(nextDatasetId, metadata);
       await this.writeDatasetNote(metadata);
 
@@ -886,7 +910,7 @@ export class IntegralWorkspaceService {
     }
 
     if (metadata.representation === "dataset-json" && path.extname(selectedPath).toLowerCase() !== DATASET_JSON_EXTENSION) {
-      throw new Error("source dataset の manifest (`*.idts`) を選択してください。");
+      throw new Error("dataset manifest (`*.idts`) を選択してください。");
     }
 
     const nextPath = normalizeRelativePath(selectedPath);
@@ -1286,14 +1310,23 @@ export class IntegralWorkspaceService {
       return this.resolveWorkspacePath(metadata.path);
     }
 
-    return this.materializeSourceDataset(metadata);
+    const manifest = await this.readDatasetManifest(metadata.path);
+
+    if (manifest?.dataPath) {
+      return this.resolveWorkspacePath(manifest.dataPath);
+    }
+
+    return this.materializeSourceDataset(metadata, manifest);
   }
 
-  private async materializeSourceDataset(metadata: DatasetMetadata): Promise<string> {
+  private async materializeSourceDataset(
+    metadata: DatasetMetadata,
+    manifest?: DatasetManifest | null
+  ): Promise<string> {
     const stagingRootPath = this.resolveDatasetStagingRootPath(metadata.datasetId);
     await resetDirectory(stagingRootPath);
 
-    const memberIds = metadata.memberIds ?? (await this.readSourceDatasetManifest(metadata.path))?.memberIds ?? [];
+    const memberIds = metadata.memberIds ?? manifest?.memberIds ?? [];
     const usedEntryNames = new Set<string>();
 
     for (const memberId of memberIds) {
@@ -1319,10 +1352,10 @@ export class IntegralWorkspaceService {
     return stagingRootPath;
   }
 
-  private async readSourceDatasetManifest(
+  private async readDatasetManifest(
     relativePath: string
-  ): Promise<SourceDatasetManifest | null> {
-    const manifest = await readJsonFile<SourceDatasetManifest>(
+  ): Promise<DatasetManifest | null> {
+    const manifest = await readJsonFile<DatasetManifest>(
       this.resolveWorkspacePath(relativePath)
     );
 
@@ -1331,16 +1364,24 @@ export class IntegralWorkspaceService {
       typeof manifest.datasetId !== "string" ||
       typeof manifest.name !== "string" ||
       typeof manifest.kind !== "string" ||
-      !Array.isArray(manifest.memberIds) ||
-      !manifest.memberIds.every((item) => typeof item === "string")
+      (manifest.memberIds !== undefined &&
+        (!Array.isArray(manifest.memberIds) ||
+          !manifest.memberIds.every((item) => typeof item === "string"))) ||
+      (manifest.dataPath !== undefined && typeof manifest.dataPath !== "string")
     ) {
       return null;
     }
 
     return {
+      dataPath:
+        typeof manifest.dataPath === "string" && manifest.dataPath.trim().length > 0
+          ? normalizeRelativePath(manifest.dataPath)
+          : undefined,
       datasetId: manifest.datasetId.trim(),
       kind: manifest.kind,
-      memberIds: manifest.memberIds.map((item) => item.trim()).filter(Boolean),
+      memberIds: Array.isArray(manifest.memberIds)
+        ? manifest.memberIds.map((item) => item.trim()).filter(Boolean)
+        : undefined,
       name: manifest.name
     };
   }
@@ -1350,12 +1391,13 @@ export class IntegralWorkspaceService {
       return;
     }
 
-    const manifest = await this.readSourceDatasetManifest(metadata.path);
+    const manifest = await this.readDatasetManifest(metadata.path);
 
     if (!manifest) {
       return;
     }
 
+    metadata.dataPath = manifest.dataPath;
     metadata.memberIds = manifest.memberIds;
     metadata.name = normalizeDatasetName(manifest.name, metadata.datasetId);
     metadata.displayName = metadata.name;
@@ -2179,6 +2221,7 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
     (value.createdByBlockId === null ||
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
+    (value.dataPath === undefined || typeof value.dataPath === "string") &&
     (value.memberIds === undefined ||
       (Array.isArray(value.memberIds) && value.memberIds.every((item) => typeof item === "string")))
   ) {
@@ -2197,6 +2240,10 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
       hash: value.hash,
       id: datasetId,
       kind: value.kind,
+      dataPath:
+        typeof value.dataPath === "string" && value.dataPath.trim().length > 0
+          ? normalizeRelativePath(value.dataPath)
+          : undefined,
       memberIds: value.memberIds,
       name,
       path: normalizeRelativePath(value.path),
@@ -2231,6 +2278,10 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
+      dataPath:
+        typeof value.dataPath === "string" && value.dataPath.trim().length > 0
+          ? normalizeRelativePath(value.dataPath)
+          : undefined,
       datasetId,
       displayName: name,
       entityType: "dataset",

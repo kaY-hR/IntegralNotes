@@ -24,12 +24,12 @@ export function DatasetManifestFileViewer({
       <section className="workspace-dataset-viewer__section">
         <div className="workspace-dataset-viewer__header">
           <div>
-            <p className="workspace-dataset-viewer__eyebrow">Source Dataset</p>
+            <p className="workspace-dataset-viewer__eyebrow">Dataset</p>
             <h2 className="workspace-dataset-viewer__title">{manifest.datasetName}</h2>
           </div>
           <div className="workspace-dataset-viewer__summary">
             <span className="workspace-dataset-viewer__summary-chip">
-              {manifest.members.length} items
+              {manifest.members.length > 0 ? `${manifest.members.length} items` : "manifest"}
             </span>
             <span className="workspace-dataset-viewer__summary-chip">
               {manifest.datasetKind || "dataset"}
@@ -108,9 +108,32 @@ export function DatasetManifestFileViewer({
               );
             })}
           </ul>
+        ) : manifest.dataPath ? (
+          <div className="workspace-dataset-viewer__member-card">
+            <div className="workspace-dataset-viewer__member-main">
+              <strong>実データ</strong>
+              <span>{manifest.datasetId}</span>
+            </div>
+            <div className="workspace-dataset-viewer__member-meta">
+              <span>directory</span>
+              {onOpenInExternalApp ? (
+                <button
+                  className="workspace-dataset-viewer__path-link"
+                  onClick={() => {
+                    onOpenInExternalApp(manifest.dataPath ?? "");
+                  }}
+                  type="button"
+                >
+                  {manifest.dataPath}
+                </button>
+              ) : (
+                <code>{manifest.dataPath}</code>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="workspace-dataset-viewer__empty">
-            manifest に memberIds がありません。
+            manifest に表示可能な member 情報がありません。
           </div>
         )}
       </section>

@@ -9,6 +9,7 @@
 - `path` は current canonical workspace relative path とし、workspace 内のどこでもよい
 - `Data/` は visible path の default に過ぎず、固定の canonical location ではない
 - `file` は content hash、`directory` は tree hash、`dataset-json` は manifest content hash で追跡する
+- dataset metadata の `path` は `.idts` manifest の path を指す
 - 起動時には `path` / `hash` の差分から rename / move / content update を検知する
 - 検知規則は少なくとも次を満たす
   - `path same + hash same`: 変更なし
@@ -58,53 +59,57 @@
 - app は `id` がなければ自動補完する
 - `inputs / outputs` は slot 名を key に持つ
 - `inputs / outputs` の値は `datasetId` または `null`
+- user-facing な `itg-notes` block では `use:` または `run:` の簡易記法を許容する
+- `run: relative/path.py:function` は内部で `plugin = "general-analysis"` とその callable block-type へ正規化する
+- note source 上の input 参照は `.idts` path を優先し、app が内部で `datasetId` へ解決する
 
 ## 5. 処理入出力と dataset 解決
 
 - 内部契約は `1 input slot = 1 dataset`
 - 内部契約は `1 output slot = 1 dataset`
 - dataset は `name` を持つ
-- dataset の `representation` は少なくとも `directory` または `dataset-json` を表現できる
-- `dataset-json` には member となる `originalDataId[]` を保持できる
+- dataset の `representation` は `dataset-json` とする
+- source / derived を問わず dataset の canonical entrypoint は `.idts` manifest に統一する
+- `dataset-json` には `memberIds` や `dataPath` など、directory 解決に必要な情報を保持できる
 - GUI 上だけ、`1 input slot = N original data items` を許容する
 - `N original data items` を選んだ場合、app は source dataset を新規作成する
-- source dataset の current path は visible でも hidden でもよい
+- source dataset の current path は visible path を default にしてよい
+- derived dataset の current path は hidden `.store/.integral/datasets/{datasetId}.idts` を default にしてよい
 - block 内部の参照は常に `datasetId` で行う
 - 実行や表示で file system access が必要な場合、app は `datasetId` を「読める directory path」へ resolve する
-- `directory` dataset は current path をそのまま使ってよい
-- `dataset-json` は実行時に staging directory へ resolve してよい
+- app は `.idts` manifest を読んで source / derived の差を意識せず resolve できるようにする
 - output dataset 作成時は対応する data-note も自動生成または更新する
 - output dataset の system 既定名には ID を使ってよい
 
 ## 6. Python 汎用解析
 
 - `general-analysis` plugin を用意する
-- `general-analysis` plugin は `cwd/.py-scripts/` を走査して block-type を動的生成する
-- 各 script 資産は `PYS-...` ID を持つ
-- `block-type` はそのまま `PYS-...` を使う
-- Python block の `params` は MVP では常に `{}` とする
+- `general-analysis` plugin は `cwd` 配下の `.py` を走査し、decorator 付き関数を block-type 候補として動的生成する
+- Python callable の canonical ID は `relative/path.py:function` とする
+- `block-type` はその canonical callable string を使う
+- Python block の `params` は free-form object とし、schema enforcement はしない
 
-## 7. Python script 登録
+## 7. Python callable discovery
 
-- ユーザーは任意の `.py` を選んで script 資産として登録できる
-- 登録時に entry file を選ぶ
-- 登録時に同梱するファイルを選ぶ
-- 同階層の `.py` は自動同梱する
-- それ以外のファイルは手動で同梱する
-- 登録時に input slot 名を決める
-- 登録時に output slot 名を決める
-- 登録結果は `.py-scripts/PYS-.../` に保存する
+- ユーザー管理の `.py` file 自体を source of truth とする
+- app は decorator 付き関数から `displayName`, `description`, `inputSlots`, `outputSlots` を読む
+- slash menu では `displayName` を主表示し、`relative/path.py:function` を補助表示する
+- block 挿入時には `run:` を持つ `itg-notes` block を note へ挿入する
+- `.py` file や補助 file を app 側の専用ディレクトリへ copy しない
 
 ## 8. Python 実行
 
 - 実行時には `analysis-args.json` を生成する
 - `inputs / outputs` には datasetId を resolve した絶対パスを渡す
+- `params` は note source から読んだ object をそのまま渡す
 - output dataset フォルダは app 側で事前作成する
-- Python スクリプトは output dataset フォルダへ自由に書き込める
+- Python callable は output dataset フォルダへ自由に書き込める
 - 成功/失敗判定は exit code のみで行う
 - output dataset が空でも「空の結果」として扱う
-- output dataset の current path は hidden `.store/` 配下を default にしてよい
+- output dataset の current path は hidden `.store/.integral/datasets/{datasetId}.idts` を default にしてよい
 - output dataset 作成時は対応する data-note も自動生成または更新する
+- 実行時の current working directory は workspace root を基本とする
+- `analysis-args.json` や log は `.store/.integral/runtime/` 配下へ置いてよい
 
 ## 9. kind / format
 
@@ -143,7 +148,7 @@
 - dataset metadata には `name` を持たせる
 - derived dataset には `createdByBlockId` を持たせる
 - source dataset では `createdByBlockId` は `null` でよい
-- `dataset-json` では provenance 用に `memberIds` を metadata または manifest に持たせる
+- `dataset-json` では provenance / resolve 用に `memberIds` や `dataPath` を metadata または manifest に持たせる
 - path / hash tracking の基盤は original data / dataset の両方で共通にする
 
 ## 14. GC

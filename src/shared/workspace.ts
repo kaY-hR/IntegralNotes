@@ -51,6 +51,7 @@ export interface WorkspaceDatasetManifestMember {
 }
 
 export interface WorkspaceDatasetManifestView {
+  dataPath: string | null;
   datasetId: string;
   datasetKind: string;
   datasetName: string;

@@ -9,8 +9,8 @@
 `general-analysis` plugin は、
 
 - 共通 block schema を使う
-- `cwd/.py-scripts/` を走査する
-- 任意の Python スクリプトを処理 block として扱う
+- workspace の `.py` を走査する
+- decorator 付き関数を Python block として扱う
 
 ための汎用 plugin である。
 
@@ -33,129 +33,85 @@
 
 に分ける。
 
-## script 資産
+## Python callable
 
-`general-analysis` plugin が扱う解析は、`.py-scripts/PYS-.../` に保存される。
+`general-analysis` plugin が扱う解析は、workspace 内の `.py` file に定義された decorator 付き関数である。
 
-### script.json の最小形
+### canonical ID
 
-```json
-{
-  "scriptId": "PYS-7K2M9Q4D",
-  "displayName": "PCA",
-  "description": "数値テーブルに対して主成分分析を行う",
-  "entry": "pca.py",
-  "inputSlots": [
-    {
-      "name": "samples"
-    }
-  ],
-  "outputSlots": [
-    {
-      "name": "result"
-    }
-  ]
-}
+各 callable は
+
+- `relative/path.py:function`
+
+を canonical な block-type とする。
+
+例:
+
+- `scripts/pca.py:main`
+- `analysis/normalize.py:run`
+
+### decorator 例
+
+```python
+from integral import integral_block
+
+@integral_block(
+    display_name="PCA",
+    description="数値テーブルに対して主成分分析を行う",
+    inputs=["samples", "labels"],
+    outputs=["score", "loading"],
+)
+def main(inputs, outputs, params):
+    ...
 ```
 
-### slot 定義
+### decorator が持つ情報
 
-MVP では slot 定義は最小限にする。  
-ただし将来拡張のため、object 配列を採る。
+- `display_name`
+- `description`
+- `inputs`
+- `outputs`
 
-入力 slot 例:
+MVP ではここに params schema は持たせない。  
+`params` 自体は free-form object として note source から与える。
 
-```json
-{
-  "name": "samples",
-  "acceptedKinds": ["source-bundle"]
-}
-```
+## discovery
 
-出力 slot 例:
+app は workspace を scan して callable 一覧を作る。
 
-```json
-{
-  "name": "result",
-  "producedKind": "PYS-7K2M9Q4D.result"
-}
-```
+slash menu の表示例:
 
-補足:
+- 主表示: `PCA`
+- 補助表示: `scripts/pca.py:main`
 
-- `acceptedKinds` / `producedKind` は MVP では enforcement しない
-- ただし表現可能にしておく
-
-## script 登録
-
-新規登録時に app は次を聞く。
-
-- entry の `.py`
-- 同梱するファイル
-- input slot 名
-- output slot 名
-- displayName
-- description
-
-### 自動同梱
-
-- entry と同階層の `.py` は自動同梱する
-
-### 手動同梱
-
-- 非 `.py` ファイル
-- 別階層ファイル
-
-はユーザーが明示選択する。
-
-### フラットコピー
-
-同梱ファイルは MVP ではフラットにコピーする。  
-元の相対ディレクトリ構造は保持しない。
-
-## script の再利用
-
-`PYS-...` は block ごとに作るのではなく、再利用可能資産とする。
-
-### 再利用時
-
-- script.json に定義された slot 名をそのまま使う
-- block ごとには slot 定義を変えない
-
-### 更新時
-
-- `.py-scripts/PYS-.../` を直接編集した場合は同じ ID を使い続ける
-- 外部 `.py` を再登録した場合は、既定では新しい `PYS-...` を作る
-- 必要なら既存 `PYS-...` を上書き登録できる
+ユーザーが候補を選ぶと、app は `run:` を持つ `itg-notes` block を挿入する。
 
 ## block-type
 
 Python block では
 
 - `plugin = "general-analysis"`
-- `block-type = "PYS-..."`
+- `block-type = "relative/path.py:function"`
 
 とする。
 
-つまり `scriptId` がそのまま block-type になる。
+つまり callable 参照そのものが block-type になる。
 
 ## 実行
 
+### source of truth
+
+- workspace 上の `.py` file 自体を source of truth にする
+- `.py-scripts/` のような専用コピー領域は持たない
+- helper module や隣接 file も、通常の workspace file として扱う
+
 ### 実行場所
 
-MVP では `.py-scripts/PYS-.../` 自体を実行場所として使う。  
-別の sandbox は切らない。
+- current working directory は workspace root を基本とする
+- app は callable を file path と function 名から解決して起動する
+- 実行時の補助 file は `.store/.integral/runtime/BLK-.../` に置いてよい
 
-### 許容すること
-
-- 一時ファイルで多少汚れる
-- log が残る
-
-### なぜ許容するか
-
-MVP では複雑さを増やさず、まず Python 実行を成立させることを優先するため。
-
-## analysis-args.json
+### analysis-args.json
 
 Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
@@ -164,12 +120,16 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D"
+    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D",
+    "labels": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-1A2B3C4D"
   },
   "outputs": {
-    "result": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A"
+    "score": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A",
+    "loading": "C:\\Workspace\\.store\\objects\\DTS-1B2C3D4E"
   },
-  "params": {}
+  "params": {
+    "n_components": 2
+  }
 }
 ```
 
@@ -178,8 +138,8 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 - `inputs` は絶対パスまたは `null`
 - `outputs` は絶対パスまたは `null`
 - `inputs` は current path をそのまま指す場合も、dataset-json を staging resolve した path の場合もある
-- `params` は常に `{}` とする
-- `blockId` は渡さない
+- `params` は free-form object をそのまま渡す
+- `blockId` は Python へ必須ではない
 
 ## 成功判定
 
@@ -194,15 +154,14 @@ MVP では Python 環境を本体が管理しない。
 
 - `.venv` はユーザー管理
 - dependency install もユーザー管理
-- app は「この script を実行する」ことだけを担う
+- app は「この callable を実行する」ことだけを担う
 
 ## 将来拡張
 
 必要になれば、後から次を足せる。
 
-- `params schema`
+- params schema
 - kind 制約 enforcement
-- import/file access 解析による同梱候補サジェスト
-- Python 実行環境の per-script 指定
-- 別 sandbox 実行
-
+- import/file access 解析による依存候補サジェスト
+- Python 実行環境の callable 単位指定
+- sandbox 実行

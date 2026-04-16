@@ -1,141 +1,136 @@
-# block JSON 設計
+# block 記法設計
 
-## 共通 schema
+## 目的
 
-```json
-{
-  "id": "BLK-1F8E2D0A",
-  "plugin": "plugin-id",
-  "block-type": "type-id",
-  "params": {},
-  "inputs": {},
-  "outputs": {}
-}
+block の user-facing source と app 内部の正規化表現を定義する。
+
+## 1. user-facing canonical form
+
+note source 上の block は、`itg-notes` code block の中に YAML 風の簡易記法で保存する。
+
+### Python block
+
+```itg-notes
+id: BLK-1F8E2D0A
+run: scripts/pca.py:main
+in:
+  samples: /Data/samples.idts
+  labels: /Data/labels.idts
+params:
+  n_components: 2
+out:
+  score: auto
+  loading: auto
 ```
 
-## 各キーの意味
+### generic plugin block
+
+```itg-notes
+id: BLK-6D3C2B1A
+use: shimadzu-lc/run-sequence
+in:
+  method: /Data/method.idts
+params:
+  methodName: Gradient 01
+out:
+  raw-result: auto
+```
+
+## 2. 各キーの意味
 
 - `id`
   - block ID
   - `BLK-...`
   - 省略時は app が保存時に補完
-- `plugin`
-  - 担当 plugin ID
-- `block-type`
-  - plugin 内の stable type ID
+- `run`
+  - Python shorthand
+  - `relative/path.py:function`
+  - 内部では `plugin = "general-analysis"` に正規化する
+- `use`
+  - generic plugin shorthand
+  - `plugin-id/block-type`
+- `in`
+  - slot 名 -> `.idts path`
 - `params`
-  - plugin 固有設定
-- `inputs`
-  - slot 名 -> `datasetId | null`
-- `outputs`
-  - slot 名 -> `datasetId | null`
+  - free-form object
+- `out`
+  - output slot 宣言
+  - MVP では値は `auto` を canonical にする
 
-## 型
+## 3. internal normalized form
 
-MVP では次を正とする。
-
-- `params`: `Record<string, unknown>`
-- `inputs`: `Record<string, string | null>`
-- `outputs`: `Record<string, string | null>`
-
-補足:
-
-- `inputs / outputs` の value に配列は持たない
-- `1 slot = 1 dataset` を固定する
-- UI 上の original data 複数選択は source dataset 生成で吸収する
-- block 側は dataset の表現形式を意識せず、常に `datasetId` だけを持つ
-- 実行時には app が `datasetId` を executable path へ resolve する
-
-## Python block 例
+app 内部では次の JSON object に正規化する。
 
 ```json
 {
   "id": "BLK-1F8E2D0A",
   "plugin": "general-analysis",
-  "block-type": "PYS-7K2M9Q4D",
-  "params": {},
-  "inputs": {
-    "samples": "DTS-7K2M9Q4D"
-  },
-  "outputs": {
-    "result": null
-  }
-}
-```
-
-## 装置 block 例
-
-```json
-{
-  "id": "BLK-6D3C2B1A",
-  "plugin": "shimadzu-lc",
-  "block-type": "run-sequence",
+  "block-type": "scripts/pca.py:main",
   "params": {
-    "methodName": "Gradient 01"
+    "n_components": 2
   },
   "inputs": {
-    "method": "DTS-1A2B3C4D"
+    "samples": "DTS-7K2M9Q4D",
+    "labels": "DTS-1A2B3C4D"
   },
   "outputs": {
-    "raw-result": null
+    "score": null,
+    "loading": null
   }
 }
 ```
 
-## 標準表示 block 例
+## 4. 正規化ルール
 
-```json
-{
-  "id": "BLK-7A8B9C0D",
-  "plugin": "core-display",
-  "block-type": "dataset-view",
-  "params": {},
-  "inputs": {
-    "source": "DTS-9X4Q2M1A"
-  },
-  "outputs": {}
-}
-```
+### `run`
 
-## 保存ルール
+`run: scripts/pca.py:main` は次へ正規化する。
 
-- `outputs` の slot 名は block 作成時に先に書く
-- 未実行時の output 値は `null`
-- 未設定 input も `null` を許容する
+- `plugin = "general-analysis"`
+- `block-type = "scripts/pca.py:main"`
 
-## 実行後更新
+### `use`
 
-実行後は app が `outputs` の `null` を `DTS-...` に更新する。
+`use: shimadzu-lc/run-sequence` は次へ正規化する。
 
-例:
+- `plugin = "shimadzu-lc"`
+- `block-type = "run-sequence"`
 
-実行前
+### `in`
 
-```json
-{
-  "outputs": {
-    "result": null
-  }
-}
-```
+- `.idts` path を app が `datasetId` に解決する
+- 解決できない場合は validation error にする
 
-実行後
+### `out`
 
-```json
-{
-  "outputs": {
-    "result": "DTS-9X4Q2M1A"
-  }
-}
-```
+- slot 名だけを user-facing source に残す
+- `auto` は「dataset の具体 ID は hidden metadata に任せる」を意味する
+- internal normalized form では `null` にする
 
-## 非対応
+## 5. 保存ルール
 
-MVP では次を block JSON に入れない。
+- note source は「何を実行するか」を残す
+- 実行のたびに note source を書き換えない
+- 最新 output dataset 参照、run status、log 要約は hidden metadata に置く
+
+## 6. block card 表示
+
+block card では次を表示してよい。
+
+- display name
+- `run` または `use`
+- input slot と現在の `.idts`
+- param 要約
+- output slot 一覧
+- hidden metadata から読んだ最新実行状態
+
+## 7. 非対応
+
+MVP では次を block source に入れない。
 
 - 実行コマンド
 - Python の実行パス
 - 元ファイルの絶対パス
+- 一時ログ
 - run ID
 - kind 制約 enforcement 情報
-
