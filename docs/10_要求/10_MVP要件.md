@@ -59,7 +59,8 @@
 - app は `id` がなければ自動補完する
 - `inputs / outputs` は slot 名を key に持つ
 - `inputs / outputs` の値は `datasetId` または `null`
-- user-facing な `itg-notes` block では `use:` または `run:` の簡易記法を許容する
+- user-facing な `itg-notes` block source は YAML のみを受け付ける
+- `itg-notes` block では `use:` または `run:` の簡易記法を canonical form とする
 - `run: relative/path.py:function` は内部で `plugin = "general-analysis"` とその callable block-type へ正規化する
 - note source 上の input 参照は `.idts` path を優先し、app が内部で `datasetId` へ解決する
 
@@ -93,15 +94,18 @@
 
 - ユーザー管理の `.py` file 自体を source of truth とする
 - app は decorator 付き関数から `displayName`, `description`, `inputSlots`, `outputSlots` を読む
-- slash menu では `displayName` を主表示し、`relative/path.py:function` を補助表示する
-- block 挿入時には `run:` を持つ `itg-notes` block を note へ挿入する
+- editor 上で `>` を入力すると Python callable 候補 popup を表示できる
+- 候補一覧では `displayName` を主表示し、`relative/path.py:function` を補助表示する
+- 候補選択時には `run:` を持つ YAML `itg-notes` block を note へ挿入する
 - `.py` file や補助 file を app 側の専用ディレクトリへ copy しない
+- MVP の scan 契約は `@integral_block(...)` の直後に `def ...(` が続く形とする
 
 ## 8. Python 実行
 
 - 実行時には `analysis-args.json` を生成する
 - `inputs / outputs` には datasetId を resolve した絶対パスを渡す
 - `params` は note source から読んだ object をそのまま渡す
+- runner は `analysis-args.json` を読んで target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - output dataset フォルダは app 側で事前作成する
 - Python callable は output dataset フォルダへ自由に書き込める
 - 成功/失敗判定は exit code のみで行う

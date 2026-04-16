@@ -13,7 +13,16 @@ import { $nodeSchema, $view } from "@milkdown/kit/utils";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import type { ExecuteIntegralBlockResult, IntegralBlockDocument, IntegralDatasetSummary } from "../shared/integral";
+import type {
+  ExecuteIntegralBlockResult,
+  IntegralAssetCatalog,
+  IntegralBlockDocument,
+  IntegralDatasetSummary
+} from "../shared/integral";
+import {
+  resolveWorkspaceMarkdownTarget,
+  toCanonicalWorkspaceTarget
+} from "../shared/workspaceLinks";
 
 import {
   DatasetPickerDialog,
@@ -24,8 +33,9 @@ import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
   getIntegralBlockDefinition,
-  parseIntegralJsonBlock,
+  parseIntegralBlockSource,
   renderIntegralBlockBody,
+  serializeIntegralBlockContent,
   type IntegralJsonBlock
 } from "./integralBlockRegistry";
 
@@ -158,8 +168,8 @@ class IntegralNotesBlockView implements NodeView {
 
     const previousText = readIntegralNodeValue(this.node);
     const nextText = readIntegralNodeValue(node);
-    const previousBlock = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, previousText);
-    const nextBlock = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, nextText);
+    const previousBlock = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, previousText)?.block;
+    const nextBlock = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, nextText)?.block;
     this.node = node;
 
     if (
@@ -216,12 +226,12 @@ class IntegralNotesBlockView implements NodeView {
 
     this.root.render(
       <IntegralBlockPanel
-        onAssignDataset={(slotName, datasetId) => {
+        onAssignDataset={(slotName, datasetReference) => {
           const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
             ...currentBlock,
             inputs: {
               ...currentBlock.inputs,
-              [slotName]: datasetId
+              [slotName]: datasetReference
             }
           }));
 
@@ -334,7 +344,6 @@ class IntegralNotesBlockView implements NodeView {
       }
 
       this.runState = toRunState(result);
-      this.applyTextChange(JSON.stringify(result.block, null, 2));
     } catch (error) {
       if (this.destroyed) {
         return;
@@ -357,7 +366,7 @@ function IntegralBlockPanel({
   runState,
   selected
 }: {
-  onAssignDataset: (slotName: string, datasetId: string) => void;
+  onAssignDataset: (slotName: string, datasetReference: string | null) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
   onRun: () => void;
   parsed: ParsedIntegralDraft;
@@ -366,45 +375,98 @@ function IntegralBlockPanel({
 }): JSX.Element {
   const [slotDialogState, setSlotDialogState] = useState<SlotDialogState>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
-  const [datasetMap, setDatasetMap] = useState<Map<string, IntegralDatasetSummary>>(new Map());
-
-  const allDatasetIds = parsed.block
-    ? [
-        ...Object.values(parsed.block.inputs),
-        ...Object.values(parsed.block.outputs)
-      ].filter((id): id is string => typeof id === "string" && id.length > 0)
-    : [];
-  const datasetIdKey = allDatasetIds.sort().join("\0");
+  const [assetCatalog, setAssetCatalog] = useState<IntegralAssetCatalog>({
+    blockTypes: [],
+    datasets: [],
+    originalData: []
+  });
 
   useEffect(() => {
-    if (allDatasetIds.length === 0) {
+    if (!parsed.block) {
       return;
     }
 
-    void window.integralNotes.getIntegralAssetCatalog().then((catalog) => {
-      const map = new Map<string, IntegralDatasetSummary>();
-      for (const ds of catalog.datasets) {
-        map.set(ds.datasetId, ds);
-      }
-      setDatasetMap(map);
-    }).catch(() => {});
-  }, [datasetIdKey]);
+    void window.integralNotes
+      .getIntegralAssetCatalog()
+      .then((catalog) => {
+        setAssetCatalog(catalog);
+      })
+      .catch(() => {});
+  }, [parsed.block?.id, runState.finishedAt]);
 
-  const formatDatasetLabel = (datasetId: string | null): string => {
-    if (!datasetId) {
+  const datasetMap = new Map<string, IntegralDatasetSummary>();
+  const datasetPathMap = new Map<string, IntegralDatasetSummary>();
+
+  for (const dataset of assetCatalog.datasets) {
+    datasetMap.set(dataset.datasetId, dataset);
+    datasetPathMap.set(dataset.path, dataset);
+    datasetPathMap.set(toCanonicalWorkspaceTarget(dataset.path), dataset);
+  }
+
+  const resolveDataset = (datasetReference: string | null): IntegralDatasetSummary | null => {
+    if (!datasetReference) {
+      return null;
+    }
+
+    return (
+      datasetMap.get(datasetReference) ??
+      datasetPathMap.get(datasetReference) ??
+      datasetPathMap.get(resolveWorkspaceMarkdownTarget(datasetReference) ?? datasetReference) ??
+      null
+    );
+  };
+
+  const resolveDatasetId = (datasetReference: string | null): string | null => {
+    return resolveDataset(datasetReference)?.datasetId ?? null;
+  };
+
+  const toStoredDatasetReference = (datasetId: string): string => {
+    const dataset = datasetMap.get(datasetId);
+
+    if (!dataset) {
+      return datasetId;
+    }
+
+    return toCanonicalWorkspaceTarget(dataset.path);
+  };
+
+  const latestOutputMap = new Map<string, IntegralDatasetSummary>();
+  const blockDefinition = parsed.block
+    ? getIntegralBlockDefinition(parsed.block.plugin, parsed.block["block-type"])
+    : null;
+
+  if (parsed.block?.id && blockDefinition) {
+    for (const outputSlot of blockDefinition.outputSlots) {
+      const expectedKind =
+        outputSlot.producedKind?.trim() || `${parsed.block["block-type"]}.${outputSlot.name}`;
+      const latestDataset = assetCatalog.datasets
+        .filter(
+          (dataset) =>
+            dataset.createdByBlockId === parsed.block?.id && dataset.kind === expectedKind
+        )
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+      if (latestDataset) {
+        latestOutputMap.set(outputSlot.name, latestDataset);
+      }
+    }
+  }
+
+  const formatDatasetLabel = (datasetReference: string | null): string => {
+    if (!datasetReference) {
       return "未設定";
     }
 
-    const dataset = datasetMap.get(datasetId);
-    return dataset ? dataset.name : datasetId;
+    const dataset = resolveDataset(datasetReference);
+    return dataset ? dataset.name : datasetReference;
   };
 
-  const openDatasetNote = (datasetId: string | null): void => {
-    if (!datasetId) {
+  const openDatasetNote = (datasetReference: string | null): void => {
+    if (!datasetReference) {
       return;
     }
 
-    const dataset = datasetMap.get(datasetId);
+    const dataset = resolveDataset(datasetReference);
 
     if (!dataset) {
       return;
@@ -423,8 +485,6 @@ function IntegralBlockPanel({
       </div>
     );
   }
-
-  const blockDefinition = getIntegralBlockDefinition(parsed.block.plugin, parsed.block["block-type"]);
   const isDisplayBlock =
     blockDefinition?.pluginId === "core-display" &&
     blockDefinition.executionMode === "display";
@@ -452,8 +512,9 @@ function IntegralBlockPanel({
   }
 
   if (isDisplayBlock) {
-    const sourceDatasetId = parsed.block.inputs.source ?? null;
-    const hasSourceNote = sourceDatasetId !== null && datasetMap.has(sourceDatasetId);
+    const sourceDatasetRef = parsed.block.inputs.source ?? null;
+    const sourceDatasetId = resolveDatasetId(sourceDatasetRef);
+    const hasSourceNote = sourceDatasetId !== null;
 
     return (
       <div className={`integral-code-block integral-code-block--display${selected ? " integral-code-block--selected" : ""}`}>
@@ -467,13 +528,13 @@ function IntegralBlockPanel({
               }}
               type="button"
             >
-              {formatDatasetLabel(sourceDatasetId)}
+              {formatDatasetLabel(sourceDatasetRef)}
             </button>
             {hasSourceNote ? (
               <button
                 className="integral-slot-row__link integral-slot-row__link--note"
                 onClick={() => {
-                  openDatasetNote(sourceDatasetId);
+                  openDatasetNote(sourceDatasetRef);
                 }}
                 type="button"
               >
@@ -481,7 +542,6 @@ function IntegralBlockPanel({
               </button>
             ) : null}
           </div>
-
           <DatasetRenderableView datasetId={sourceDatasetId} />
         </div>
 
@@ -500,7 +560,7 @@ function IntegralBlockPanel({
             }}
             onError={setInlineError}
             onSelect={(datasetId) => {
-              onAssignDataset(slotDialogState.slotName, datasetId);
+              onAssignDataset(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
             }}
           />
@@ -513,24 +573,25 @@ function IntegralBlockPanel({
     blockDefinition.inputSlots.length > 0 || blockDefinition.outputSlots.length > 0 ? (
       <div className="integral-slot-list">
         {blockDefinition.inputSlots.map((slot) => {
-          const assignedId = parsed.block.inputs[slot.name] ?? null;
-          const isAssigned = assignedId !== null;
+          const assignedReference = parsed.block.inputs[slot.name] ?? null;
+          const assignedDataset = resolveDataset(assignedReference);
+          const isAssigned = assignedReference !== null;
 
           return (
             <div className="integral-slot-row" key={slot.name}>
               <div className="integral-slot-row__meta">
                 <strong>{slot.name}</strong>
                 <span className={isAssigned ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
-                  {formatDatasetLabel(assignedId)}
+                  {formatDatasetLabel(assignedReference)}
                 </span>
               </div>
               {blockDefinition.executionMode === "manual" ? (
                 <div className="integral-slot-row__actions">
-                  {isAssigned && assignedId !== null && datasetMap.has(assignedId) ? (
+                  {isAssigned && assignedDataset ? (
                     <button
                       className="integral-slot-row__link integral-slot-row__link--note"
                       onClick={() => {
-                        openDatasetNote(assignedId);
+                        openDatasetNote(assignedReference);
                       }}
                       type="button"
                     >
@@ -550,20 +611,22 @@ function IntegralBlockPanel({
         })}
 
         {blockDefinition.outputSlots.map((slot) => {
-          const outputId = parsed.block.outputs[slot.name] ?? null;
+          const outputDataset =
+            latestOutputMap.get(slot.name) ?? resolveDataset(parsed.block.outputs[slot.name] ?? null);
+          const outputReference = outputDataset?.datasetId ?? parsed.block.outputs[slot.name] ?? null;
 
           return (
             <div className="integral-slot-row integral-slot-row--output" key={slot.name}>
               <div className="integral-slot-row__meta">
                 <strong>{slot.name}</strong>
-                <span>{formatDatasetLabel(outputId)}</span>
+                <span>{formatDatasetLabel(outputReference)}</span>
               </div>
-              {outputId && datasetMap.has(outputId) ? (
+              {outputDataset ? (
                 <div className="integral-slot-row__actions">
                   <button
                     className="integral-slot-row__link integral-slot-row__link--note"
                     onClick={() => {
-                      openDatasetNote(outputId);
+                      openDatasetNote(outputReference);
                     }}
                     type="button"
                   >
@@ -616,7 +679,7 @@ function IntegralBlockPanel({
             }}
             onError={setInlineError}
             onSelect={(datasetId) => {
-              onAssignDataset(slotDialogState.slotName, datasetId);
+              onAssignDataset(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
             }}
           />
@@ -673,7 +736,7 @@ function IntegralBlockPanel({
           }}
           onError={setInlineError}
           onSelect={(datasetId) => {
-            onAssignDataset(slotDialogState.slotName, datasetId);
+            onAssignDataset(slotDialogState.slotName, toStoredDatasetReference(datasetId));
             setSlotDialogState(null);
           }}
         />
@@ -714,26 +777,17 @@ function readIntegralNodeValue(node: ProseNode): string {
 }
 
 function parseIntegralDraft(content: string): ParsedIntegralDraft {
-  const parsedRecord = parseIntegralRecord(content);
+  const source = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, content);
 
-  if (!parsedRecord.record) {
+  if (!source) {
     return {
       block: null,
-      error: parsedRecord.error ?? "Unknown error"
-    };
-  }
-
-  const block = parseIntegralJsonBlock(INTEGRAL_BLOCK_LANGUAGE, content);
-
-  if (!block) {
-    return {
-      block: null,
-      error: `\`${INTEGRAL_BLOCK_LANGUAGE}\` block として解釈できません。`
+      error: `\`${INTEGRAL_BLOCK_LANGUAGE}\` YAML block として解釈できません。`
     };
   }
 
   return {
-    block,
+    block: source.block,
     error: null
   };
 }
@@ -756,48 +810,8 @@ function applyIntegralBlockMutation(
 
   return {
     error: null,
-    nextText: JSON.stringify(mutator(parsedDraft.block), null, 2)
+    nextText: serializeIntegralBlockContent(mutator(parsedDraft.block))
   };
-}
-
-function parseIntegralRecord(content: string): {
-  error: string | null;
-  record: Record<string, unknown> | null;
-} {
-  try {
-    const parsed = JSON.parse(content);
-
-    if (!isJsonRecord(parsed)) {
-      return {
-        error: "トップレベルは JSON object である必要があります。",
-        record: null
-      };
-    }
-
-    if (typeof parsed.plugin !== "string" || parsed.plugin.trim().length === 0) {
-      return {
-        error: "`plugin` を持つ Integral block JSON が必要です。",
-        record: null
-      };
-    }
-
-    if (typeof parsed["block-type"] !== "string" || parsed["block-type"].trim().length === 0) {
-      return {
-        error: "`block-type` を持つ Integral block JSON が必要です。",
-        record: null
-      };
-    }
-
-    return {
-      error: null,
-      record: parsed
-    };
-  } catch (error) {
-    return {
-      error: formatErrorMessage(error),
-      record: null
-    };
-  }
 }
 
 function createIdleRunState(): RunState {
@@ -836,8 +850,4 @@ function formatErrorMessage(error: unknown): string {
   }
 
   return typeof error === "string" ? error : "Unknown error";
-}
-
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

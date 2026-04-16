@@ -1,4 +1,4 @@
-# Python スクリプト登録と実行
+# Python callable discovery と実行
 
 ## 前提
 
@@ -33,7 +33,24 @@ def main(inputs, outputs, params):
 - `inputs`
 - `outputs`
 
-## 2. slash menu
+### 現行 scan 条件
+
+現行実装では regex ベースで次の形を検出する。
+
+```python
+@integral_block(...)
+def main(...):
+    ...
+```
+
+つまり MVP では:
+
+- decorator 名は `integral_block`
+- `@integral_block(...)` の直後に `def ...(` が続く
+
+という構文を前提にする。
+
+## 2. `>` popup
 
 候補一覧では次を表示する。
 
@@ -125,7 +142,8 @@ app は実行前に次を行う。
 
 1. workspace root を current working directory にする
 2. callable を `relative/path.py:function` から解決する
-3. `analysis-args.json` を読ませる
+3. runner が `analysis-args.json` を読む
+4. runner が target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 
 ### 成功判定
 
@@ -137,7 +155,33 @@ app は実行前に次を行う。
 - output dataset が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
 
-## 9. source of truth
+## 9. decorator の import 契約
+
+user script は次の import を前提にしてよい。
+
+```python
+from integral import integral_block
+```
+
+定義場所:
+
+- `plugin-sdk/python/integral/__init__.py`
+
+app runner は実行時に SDK root を `sys.path` へ追加して import を成立させる。
+
+開発時:
+
+- `plugin-sdk/python`
+
+packaged app:
+
+- `process.resourcesPath/python-sdk`
+
+SDK root path は必要なら `INTEGRALNOTES_PYTHON_SDK_ROOT` 環境変数で上書きしてよい。
+
+詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
+
+## 10. source of truth
 
 - source of truth は workspace 上の `.py` file である
 - app は `.py` や helper file を専用ディレクトリへ copy しない

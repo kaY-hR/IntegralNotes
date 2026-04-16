@@ -357,6 +357,23 @@ export function parseDataNoteTargetInfo(markdown: string): DataNoteTargetInfo | 
   return null;
 }
 
+export function resolveManagedDataNoteTabName(markdown: string): string | null {
+  const normalizedMarkdown = normalizeNewlines(markdown);
+  const { frontmatter } = splitFrontmatterBlock(normalizedMarkdown);
+
+  if (!isDataNoteFrontmatter(frontmatter) || frontmatter === null) {
+    return null;
+  }
+
+  const displayName = parseFrontmatterValue(frontmatter, "displayName");
+
+  if (typeof displayName !== "string") {
+    return null;
+  }
+
+  return `${resolveManagedDataNoteName(displayName)} のノート`;
+}
+
 interface BuildDataNoteMarkdownOptions {
   defaultBody: string;
   existingContent?: string;

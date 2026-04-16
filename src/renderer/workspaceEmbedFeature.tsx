@@ -20,12 +20,14 @@ import { createRoot, type Root } from "react-dom/client";
 
 import type { IntegralAssetCatalog } from "../shared/integral";
 import type { ResolvedPluginViewer } from "../shared/plugins";
+import type { WorkspaceDatasetManifestView } from "../shared/workspace";
 import {
   extractWorkspaceEmbedHeight,
   resolveWorkspaceMarkdownTarget,
   withWorkspaceEmbedHeight
 } from "../shared/workspaceLinks";
 import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
+import { DatasetRenderableView } from "./IntegralAssetDialogs";
 import {
   requestOpenManagedDataNote,
   requestOpenWorkspaceFile
@@ -68,6 +70,10 @@ type WorkspaceEmbedResolution =
       alt: string;
       kind: "image";
       src: string;
+    })
+  | (WorkspaceEmbedResolutionBase & {
+      datasetId: string;
+      kind: "dataset-renderable";
     })
   | (WorkspaceEmbedResolutionBase & {
       kind: "loading";
@@ -586,6 +592,12 @@ function WorkspaceEmbedPanel({
           />
         ) : null}
 
+        {resolution.kind === "dataset-renderable" ? (
+          <div className="editor-workspace-embed__dataset">
+            <DatasetRenderableView datasetId={resolution.datasetId} />
+          </div>
+        ) : null}
+
         {resolution.kind === "plugin" ? (
           <div className="editor-workspace-embed__plugin">
             <ExternalPluginFileViewer
@@ -710,9 +722,17 @@ async function resolveWorkspaceEmbed(source: string): Promise<WorkspaceEmbedReso
     }
 
     if (file.kind === "dataset-json") {
+      if (file.datasetManifest?.datasetId) {
+        return {
+          datasetId: file.datasetManifest.datasetId,
+          kind: "dataset-renderable",
+          openTarget: workspaceFileOpenTarget
+        };
+      }
+
       return {
         kind: "unsupported",
-        message: "`.idts` viewer の埋め込み preview は未対応です。",
+        message: "`.idts` manifest を読み取れませんでした。",
         openTarget: workspaceFileOpenTarget
       };
     }
@@ -843,17 +863,18 @@ function getDefaultEmbedHeight(
 ): number {
   const compact = mode === "inline";
 
-  switch (resolutionKind) {
-    case "image":
-      return compact ? 220 : 280;
-    case "error":
-    case "loading":
-    case "unsupported":
-      return compact ? 140 : 180;
-    case "frame":
-    case "plugin":
-    case "markdown":
-      return compact ? 220 : 320;
+    switch (resolutionKind) {
+      case "image":
+        return compact ? 220 : 280;
+      case "error":
+      case "loading":
+      case "unsupported":
+        return compact ? 140 : 180;
+      case "frame":
+      case "dataset-renderable":
+      case "plugin":
+      case "markdown":
+        return compact ? 220 : 320;
     default:
       return compact ? 220 : 280;
   }

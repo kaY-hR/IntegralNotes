@@ -7,6 +7,7 @@ block の user-facing source と app 内部の正規化表現を定義する。
 ## 1. user-facing canonical form
 
 note source 上の block は、`itg-notes` code block の中に YAML 風の簡易記法で保存する。
+JSON 互換は持たず、user-facing source は YAML のみを受け付ける。
 
 ### Python block
 

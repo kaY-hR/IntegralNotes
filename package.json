@@ -27,6 +27,12 @@
     "directories": {
       "output": "out"
     },
+    "extraResources": [
+      {
+        "from": "plugin-sdk/python",
+        "to": "python-sdk"
+      }
+    ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",

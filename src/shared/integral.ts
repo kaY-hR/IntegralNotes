@@ -39,7 +39,7 @@ export interface IntegralBlockTypeDefinition {
   pluginDescription: string;
   pluginDisplayName: string;
   pluginId: string;
-  source: "builtin" | "external-plugin" | "python-script";
+  source: "builtin" | "external-plugin" | "python-callable";
   title: string;
 }
 
@@ -89,21 +89,10 @@ export interface IntegralDatasetInspection extends IntegralDatasetSummary {
   renderables: IntegralRenderableFile[];
 }
 
-export interface IntegralScriptAssetSummary {
-  createdAt: string;
-  description: string;
-  displayName: string;
-  entry: string;
-  inputSlots: IntegralSlotDefinition[];
-  outputSlots: IntegralSlotDefinition[];
-  scriptId: string;
-}
-
 export interface IntegralAssetCatalog {
   datasets: IntegralDatasetSummary[];
   blockTypes: IntegralBlockTypeDefinition[];
   originalData: IntegralOriginalDataSummary[];
-  scripts: IntegralScriptAssetSummary[];
 }
 
 export interface IntegralManagedDataTrackingIssue {
@@ -120,26 +109,6 @@ export interface ResolveIntegralManagedDataTrackingIssueRequest {
   entityType: IntegralManagedDataEntityType;
   selectedPath: string;
   targetId: string;
-}
-
-export interface PythonEntrySelection {
-  autoIncludedFilePaths: string[];
-  entryAbsolutePath: string;
-  suggestedDisplayName: string;
-}
-
-export interface RegisterPythonScriptRequest {
-  description: string;
-  displayName: string;
-  entryAbsolutePath: string;
-  includedFilePaths: string[];
-  inputSlotNames: string[];
-  outputSlotNames: string[];
-}
-
-export interface RegisterPythonScriptResult {
-  blockType: IntegralBlockTypeDefinition;
-  script: IntegralScriptAssetSummary;
 }
 
 export interface ImportOriginalDataResult {

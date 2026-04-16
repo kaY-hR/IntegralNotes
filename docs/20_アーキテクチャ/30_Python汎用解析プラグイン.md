@@ -79,12 +79,29 @@ MVP ではここに params schema は持たせない。
 
 app は workspace を scan して callable 一覧を作る。
 
-slash menu の表示例:
+`>` popup の表示例:
 
 - 主表示: `PCA`
 - 補助表示: `scripts/pca.py:main`
 
 ユーザーが候補を選ぶと、app は `run:` を持つ `itg-notes` block を挿入する。
+
+### 現行 scan 契約
+
+現行実装では、workspace 内 `.py` を再帰走査し、少なくとも次の形を regex ベースで検出する。
+
+```python
+@integral_block(...)
+def main(...):
+    ...
+```
+
+つまり MVP 時点では、
+
+- decorator 名は `integral_block`
+- `@integral_block(...)` の直後に `def name(` が続く
+
+という形を前提にしている。
 
 ## block-type
 
@@ -140,6 +157,28 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 - `inputs` は current path をそのまま指す場合も、dataset-json を staging resolve した path の場合もある
 - `params` は free-form object をそのまま渡す
 - `blockId` は Python へ必須ではない
+- user script 自体が `analysis-args.json` を読む前提ではない
+- runner が `analysis-args.json` を読んだ上で target callable を `inputs`, `outputs`, `params` 引数で呼び出す
+
+## decorator の所在
+
+`from integral import integral_block` の decorator は、repo 内の Python SDK として定義する。
+
+定義場所:
+
+- `plugin-sdk/python/integral/__init__.py`
+
+app runner は実行時にこの SDK root を `sys.path` の先頭へ追加し、user script の import を成立させる。
+
+開発時:
+
+- `plugin-sdk/python`
+
+packaged app:
+
+- `process.resourcesPath/python-sdk`
+
+詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
 
 ## 成功判定
 

@@ -41,7 +41,8 @@ import {
   buildDatasetDataNoteMarkdown,
   buildOriginalDataNoteMarkdown,
   normalizeDatasetDataNoteMetadata,
-  normalizeOriginalDataNoteMetadata
+  normalizeOriginalDataNoteMetadata,
+  resolveManagedDataNoteTabName
 } from "./dataNote";
 import {
   extractFrontmatterBody,
@@ -65,7 +66,6 @@ const DATA_DIRECTORY = "Data";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
 const DATA_NOTE_DIRECTORY = "data-notes";
-const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
 const HTML_EXTENSIONS = new Set([".htm", ".html"]);
 const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
 const TEXT_EXTENSIONS = new Set([
@@ -169,8 +169,7 @@ export class WorkspaceService {
       fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY, DATA_NOTE_DIRECTORY), {
         recursive: true
       }),
-      fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true }),
-      fs.mkdir(path.join(rootPath, PYTHON_SCRIPTS_DIRECTORY), { recursive: true })
+      fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true })
     ]);
     await this.syncManagedDataNotesInternal(rootPath);
   }
@@ -726,12 +725,13 @@ export class WorkspaceService {
 
     if (extension === ".md") {
       const markdownContent = await fs.readFile(absolutePath, "utf8");
+      const managedDataNoteTabName = resolveManagedDataNoteTabName(markdownContent);
 
       return {
         content: extractFrontmatterBody(markdownContent),
         kind: "markdown",
         modifiedAt: stats.mtime.toISOString(),
-        name: path.basename(absolutePath),
+        name: managedDataNoteTabName ?? path.basename(absolutePath),
         relativePath
       };
     }

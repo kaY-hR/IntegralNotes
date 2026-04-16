@@ -22,9 +22,6 @@ function adjustZoomLevel(direction: "in" | "out" | "reset"): void {
 }
 
 const api: IntegralNotesApi = {
-  browsePythonEntryFile: () => ipcRenderer.invoke("integral:browsePythonEntryFile"),
-  browsePythonSupportFiles: (entryAbsolutePath) =>
-    ipcRenderer.invoke("integral:browsePythonSupportFiles", entryAbsolutePath),
   createSourceDataset: (request) => ipcRenderer.invoke("integral:createSourceDataset", request),
   createSourceDatasetFromWorkspaceEntries: (request) =>
     ipcRenderer.invoke("integral:createSourceDatasetFromWorkspaceEntries", request),
@@ -44,7 +41,6 @@ const api: IntegralNotesApi = {
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
   loadPluginViewerDocument: (pluginId, viewerId) =>
     ipcRenderer.invoke("plugins:loadViewerDocument", pluginId, viewerId),
-  registerPythonScript: (request) => ipcRenderer.invoke("integral:registerPythonScript", request),
   resolveManagedDataTrackingIssue: (request) =>
     ipcRenderer.invoke("integral:resolveManagedDataTrackingIssue", request),
   readWorkspaceFile: (relativePath) => ipcRenderer.invoke("workspace:readFile", relativePath),

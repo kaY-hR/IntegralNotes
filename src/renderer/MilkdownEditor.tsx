@@ -7,17 +7,18 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import type { IntegralBlockTypeDefinition } from "../shared/integral";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
 } from "../shared/workspaceLinks";
 import { installIntegralCodeBlockFeature } from "./integralCodeBlockFeature";
-import { initializeIntegralPluginRuntime } from "./integralPluginRuntime";
 import {
-  createIntegralSnippetFeatureConfigs,
-  INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT
-} from "./integralSnippetMenu";
+  getAvailableIntegralBlockTypes,
+  initializeIntegralPluginRuntime
+} from "./integralPluginRuntime";
+import { createIntegralBlockMarkdown } from "./integralBlockRegistry";
 import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
@@ -47,6 +48,16 @@ interface LinkCompletionState {
   y: number;
 }
 
+interface AnalysisCompletionState {
+  maxHeight: number;
+  query: string;
+  replaceFrom: number;
+  replaceTo: number;
+  selectedIndex: number;
+  x: number;
+  y: number;
+}
+
 export function MilkdownEditor({
   initialValue,
   isActive,
@@ -66,11 +77,13 @@ export function MilkdownEditor({
   const isActiveRef = useRef(isActive);
   const lastSyncedMarkdownRef = useRef(initialValue);
   const linkCompletionRef = useRef<LinkCompletionState | null>(null);
+  const analysisCompletionRef = useRef<AnalysisCompletionState | null>(null);
   const completionPanelRef = useRef<HTMLDivElement | null>(null);
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
   const [linkCompletion, setLinkCompletion] = useState<LinkCompletionState | null>(null);
+  const [analysisCompletion, setAnalysisCompletion] = useState<AnalysisCompletionState | null>(null);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -93,6 +106,7 @@ export function MilkdownEditor({
 
     if (!isActive) {
       setLinkCompletion(null);
+      setAnalysisCompletion(null);
     }
   }, [isActive]);
 
@@ -106,9 +120,13 @@ export function MilkdownEditor({
   }, [linkCompletion]);
 
   useEffect(() => {
+    analysisCompletionRef.current = analysisCompletion;
+  }, [analysisCompletion]);
+
+  useEffect(() => {
     const completionPanel = completionPanelRef.current;
 
-    if (!completionPanel || !linkCompletion) {
+    if (!completionPanel || (!linkCompletion && !analysisCompletion)) {
       return;
     }
 
@@ -119,7 +137,7 @@ export function MilkdownEditor({
     selectedItem?.scrollIntoView({
       block: "nearest"
     });
-  }, [linkCompletion]);
+  }, [analysisCompletion, linkCompletion]);
 
   useEffect(() => {
     const rootElement = rootRef.current;
@@ -178,7 +196,6 @@ export function MilkdownEditor({
 
       editor = new Crepe({
         featureConfigs: {
-          ...createIntegralSnippetFeatureConfigs(),
           [Crepe.Feature.ImageBlock]: {
             onUpload: handleImageUpload,
             proxyDomURL: proxyImageUrl
@@ -208,14 +225,17 @@ export function MilkdownEditor({
         listener.selectionUpdated((ctx, selection) => {
           if (!isActiveRef.current) {
             setLinkCompletion(null);
+            setAnalysisCompletion(null);
             return;
           }
 
           const view = ctx.get(editorViewCtx);
           setLinkCompletion(computeLinkCompletionState(view, selection));
+          setAnalysisCompletion(computeAnalysisCompletionState(view, selection));
         });
         listener.blur(() => {
           setLinkCompletion(null);
+          setAnalysisCompletion(null);
         });
       });
 
@@ -254,6 +274,67 @@ export function MilkdownEditor({
 
     const handleEditorKeyDown = (event: KeyboardEvent): void => {
       if (!isActiveRef.current) {
+        return;
+      }
+
+      const analysisState = analysisCompletionRef.current;
+
+      if (analysisState) {
+        const suggestions = getVisibleIntegralBlockSuggestions(
+          getAvailableIntegralBlockTypes(),
+          analysisState.query
+        );
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setAnalysisCompletion(null);
+          return;
+        }
+
+        if (suggestions.length === 0) {
+          return;
+        }
+
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          event.stopPropagation();
+          setAnalysisCompletion((current) =>
+            current
+              ? {
+                  ...current,
+                  selectedIndex: (current.selectedIndex + 1) % suggestions.length
+                }
+              : current
+          );
+          return;
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          event.stopPropagation();
+          setAnalysisCompletion((current) =>
+            current
+              ? {
+                  ...current,
+                  selectedIndex: (current.selectedIndex - 1 + suggestions.length) % suggestions.length
+                }
+              : current
+          );
+          return;
+        }
+
+        if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault();
+          event.stopPropagation();
+          const selectedSuggestion =
+            suggestions[Math.min(analysisState.selectedIndex, suggestions.length - 1)];
+
+          if (selectedSuggestion) {
+            insertIntegralBlock(selectedSuggestion);
+          }
+        }
+
         return;
       }
 
@@ -363,41 +444,6 @@ export function MilkdownEditor({
     };
   }, []);
 
-  useEffect(() => {
-    const handleInsertBlockMarkdown = (event: Event): void => {
-      if (!isActiveRef.current) {
-        return;
-      }
-
-      const customEvent = event as CustomEvent<string>;
-      const markdown = customEvent.detail;
-
-      if (typeof markdown !== "string" || markdown.trim().length === 0) {
-        return;
-      }
-
-      const editor = editorRef.current;
-
-      if (!editor) {
-        return;
-      }
-
-      editor.editor.action(insert(markdown));
-    };
-
-    window.addEventListener(
-      INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT,
-      handleInsertBlockMarkdown as EventListener
-    );
-
-    return () => {
-      window.removeEventListener(
-        INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT,
-        handleInsertBlockMarkdown as EventListener
-      );
-    };
-  }, []);
-
   const visibleSuggestions = linkCompletion
     ? getVisibleWorkspaceFileSuggestions(workspaceFilesRef.current, linkCompletion.query)
     : [];
@@ -405,6 +451,16 @@ export function MilkdownEditor({
     visibleSuggestions.length === 0
       ? -1
       : Math.min(linkCompletion?.selectedIndex ?? 0, visibleSuggestions.length - 1);
+  const visibleIntegralBlockSuggestions = analysisCompletion
+    ? getVisibleIntegralBlockSuggestions(getAvailableIntegralBlockTypes(), analysisCompletion.query)
+    : [];
+  const selectedIntegralBlockSuggestionIndex =
+    visibleIntegralBlockSuggestions.length === 0
+      ? -1
+      : Math.min(
+          analysisCompletion?.selectedIndex ?? 0,
+          visibleIntegralBlockSuggestions.length - 1
+        );
 
   const insertWorkspaceLink = (suggestion: WorkspaceFileSuggestion): void => {
     const editor = editorRef.current;
@@ -481,6 +537,25 @@ export function MilkdownEditor({
     setLinkCompletion(null);
   };
 
+  const insertIntegralBlock = (definition: IntegralBlockTypeDefinition): void => {
+    const editor = editorRef.current;
+    const completionState = analysisCompletionRef.current;
+
+    if (!editor || !completionState) {
+      return;
+    }
+
+    editor.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const transaction = view.state.tr.delete(completionState.replaceFrom, completionState.replaceTo);
+      transaction.setSelection(TextSelection.create(transaction.doc, completionState.replaceFrom));
+      view.dispatch(transaction.scrollIntoView());
+      insert(createIntegralBlockMarkdown(definition))(ctx);
+    });
+
+    setAnalysisCompletion(null);
+  };
+
   return (
     <div className="editor-shell">
       {toolbar ? <div className="editor-toolbar">{toolbar}</div> : null}
@@ -488,7 +563,40 @@ export function MilkdownEditor({
         className="editor-surface"
         ref={rootRef}
       />
-      {linkCompletion ? (
+      {analysisCompletion ? (
+        <div
+          className="editor-link-completion"
+          ref={completionPanelRef}
+          style={{
+            left: `${analysisCompletion.x}px`,
+            maxHeight: `${analysisCompletion.maxHeight}px`,
+            top: `${analysisCompletion.y}px`
+          }}
+        >
+          {visibleIntegralBlockSuggestions.length > 0 ? (
+            visibleIntegralBlockSuggestions.map((definition, index) => (
+              <button
+                className={`editor-link-completion__item${
+                  index === selectedIntegralBlockSuggestionIndex
+                    ? " editor-link-completion__item--selected"
+                    : ""
+                }`}
+                key={`${definition.pluginId}:${definition.blockType}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  insertIntegralBlock(definition);
+                }}
+                type="button"
+              >
+                <span className="editor-link-completion__name">{definition.title}</span>
+                <span className="editor-link-completion__path">{definition.blockType}</span>
+              </button>
+            ))
+          ) : (
+            <div className="editor-link-completion__empty">一致する解析 block がありません。</div>
+          )}
+        </div>
+      ) : linkCompletion ? (
         <div
           className="editor-link-completion"
           ref={completionPanelRef}
@@ -647,6 +755,44 @@ function computeLinkCompletionState(
   }
 }
 
+function computeAnalysisCompletionState(
+  view: EditorView,
+  selection: Selection
+): AnalysisCompletionState | null {
+  if (!selection.empty) {
+    return null;
+  }
+
+  const { $from, from } = selection;
+  const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
+  const analysisMatch = /(?:^|[\s])>([^\n>]*)$/u.exec(textBefore);
+
+  if (!analysisMatch) {
+    return null;
+  }
+
+  const query = analysisMatch[1] ?? "";
+  const prefix = analysisMatch[0] ?? "";
+  const markerOffset = prefix.lastIndexOf(">");
+  const replaceFrom = from - (prefix.length - markerOffset);
+
+  try {
+    const coords = view.coordsAtPos(from);
+    const popupLayout = computePopupLayout(coords);
+    return {
+      maxHeight: popupLayout.maxHeight,
+      query,
+      replaceFrom,
+      replaceTo: from,
+      selectedIndex: 0,
+      x: clampPopupCoordinate(coords.left, 360, window.innerWidth),
+      y: popupLayout.y
+    };
+  } catch {
+    return null;
+  }
+}
+
 function getVisibleWorkspaceFileSuggestions(
   suggestions: WorkspaceFileSuggestion[],
   query: string
@@ -667,6 +813,32 @@ function getVisibleWorkspaceFileSuggestions(
     });
 
   return ranked.map((entry) => entry.suggestion);
+}
+
+function getVisibleIntegralBlockSuggestions(
+  definitions: readonly IntegralBlockTypeDefinition[],
+  query: string
+): IntegralBlockTypeDefinition[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase("ja");
+  const ranked = definitions
+    .filter((definition) => definition.source === "python-callable")
+    .map((definition) => ({
+      definition,
+      score: scoreIntegralBlockSuggestion(definition, normalizedQuery)
+    }))
+    .filter((entry) => entry.score < Number.POSITIVE_INFINITY)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return left.score - right.score;
+      }
+
+      return `${left.definition.title} ${left.definition.blockType}`.localeCompare(
+        `${right.definition.title} ${right.definition.blockType}`,
+        "ja"
+      );
+    });
+
+  return ranked.map((entry) => entry.definition);
 }
 
 function scoreWorkspaceSuggestion(
@@ -694,6 +866,37 @@ function scoreWorkspaceSuggestion(
   }
 
   if (lowerPath.includes(normalizedQuery)) {
+    return 3;
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+function scoreIntegralBlockSuggestion(
+  definition: IntegralBlockTypeDefinition,
+  normalizedQuery: string
+): number {
+  if (normalizedQuery.length === 0) {
+    return 0;
+  }
+
+  const lowerTitle = definition.title.toLocaleLowerCase("ja");
+  const lowerBlockType = definition.blockType.toLocaleLowerCase("ja");
+  const lowerDescription = definition.description.toLocaleLowerCase("ja");
+
+  if (lowerTitle.startsWith(normalizedQuery)) {
+    return 0;
+  }
+
+  if (lowerTitle.includes(normalizedQuery)) {
+    return 1;
+  }
+
+  if (lowerBlockType.startsWith(normalizedQuery)) {
+    return 2;
+  }
+
+  if (lowerBlockType.includes(normalizedQuery) || lowerDescription.includes(normalizedQuery)) {
     return 3;
   }
 

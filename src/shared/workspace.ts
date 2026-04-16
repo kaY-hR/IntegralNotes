@@ -13,10 +13,7 @@ import type {
   IntegralOriginalDataRepresentation,
   IntegralDatasetInspection,
   IntegralManagedDataTrackingIssue,
-  PythonEntrySelection,
-  ResolveIntegralManagedDataTrackingIssueRequest,
-  RegisterPythonScriptRequest,
-  RegisterPythonScriptResult
+  ResolveIntegralManagedDataTrackingIssueRequest
 } from "./integral";
 
 export type WorkspaceEntryKind = "directory" | "file";
@@ -198,8 +195,6 @@ export interface UninstallPluginResult {
 }
 
 export interface IntegralNotesApi {
-  browsePythonEntryFile: () => Promise<PythonEntrySelection | null>;
-  browsePythonSupportFiles: (entryAbsolutePath: string | null) => Promise<string[] | null>;
   createSourceDataset: (request: CreateSourceDatasetRequest) => Promise<CreateSourceDatasetResult>;
   createSourceDatasetFromWorkspaceEntries: (
     request: CreateSourceDatasetFromWorkspaceEntriesRequest
@@ -219,9 +214,6 @@ export interface IntegralNotesApi {
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
   loadPluginRendererDocument: (pluginId: string) => Promise<string>;
   loadPluginViewerDocument: (pluginId: string, viewerId: string) => Promise<string>;
-  registerPythonScript: (
-    request: RegisterPythonScriptRequest
-  ) => Promise<RegisterPythonScriptResult>;
   resolveManagedDataTrackingIssue: (
     request: ResolveIntegralManagedDataTrackingIssueRequest
   ) => Promise<IntegralManagedDataTrackingIssue[]>;

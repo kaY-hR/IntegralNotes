@@ -4,8 +4,7 @@ import { type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, u
 import type {
   IntegralAssetCatalog,
   IntegralManagedDataTrackingIssue,
-  IntegralOriginalDataSummary,
-  RegisterPythonScriptResult
+  IntegralOriginalDataSummary
 } from "../shared/integral";
 import type {
   CopyEntriesResult,
@@ -33,7 +32,6 @@ import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { PluginManagerDialog } from "./PluginManagerDialog";
-import { PythonScriptDialog } from "./PythonScriptDialog";
 import { RawMarkdownEditor } from "./RawMarkdownEditor";
 import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
@@ -41,10 +39,6 @@ import {
   OPEN_MANAGED_DATA_NOTE_EVENT,
   OPEN_WORKSPACE_FILE_EVENT
 } from "./workspaceOpenEvents";
-import {
-  INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT,
-  OPEN_PYTHON_SCRIPT_DIALOG_EVENT
-} from "./integralSnippetMenu";
 
 type ReadonlyWorkspaceFileKind = Exclude<WorkspaceFileViewKind, "markdown">;
 type MarkdownEditorMode = "wysiwyg" | "text";
@@ -121,8 +115,7 @@ function createEmptyIntegralAssetCatalog(): IntegralAssetCatalog {
   return {
     blockTypes: [],
     datasets: [],
-    originalData: [],
-    scripts: []
+    originalData: []
   };
 }
 
@@ -657,7 +650,6 @@ export function App(): JSX.Element {
   const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
-  const [pythonScriptDialogOpen, setPythonScriptDialogOpen] = useState(false);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
   const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
@@ -679,7 +671,6 @@ export function App(): JSX.Element {
     deleteDialog !== null ||
     datasetCreationDialog !== null ||
     dataRegistrationDialogOpen ||
-    pythonScriptDialogOpen ||
     pluginDialogOpen;
 
   useEffect(() => {
@@ -897,15 +888,6 @@ export function App(): JSX.Element {
     await refreshInstalledPluginState(nextStatusMessage);
   };
 
-  const refreshIntegralBlockCatalog = (nextStatusMessage?: string): void => {
-    resetIntegralPluginRuntime();
-    setPluginCatalogRevision((current) => current + 1);
-
-    if (nextStatusMessage) {
-      setStatusMessage(nextStatusMessage);
-    }
-  };
-
   const openPluginManager = (): void => {
     setPluginDialogOpen(true);
     void refreshInstalledPluginState();
@@ -913,10 +895,6 @@ export function App(): JSX.Element {
 
   const openDataRegistrationDialog = (): void => {
     setDataRegistrationDialogOpen(true);
-  };
-
-  const openPythonScriptDialog = (): void => {
-    setPythonScriptDialogOpen(true);
   };
 
   const toggleHiddenEntriesVisibility = (): void => {
@@ -1021,19 +999,6 @@ export function App(): JSX.Element {
     }
   };
 
-  const handlePythonScriptRegistered = (
-    result: RegisterPythonScriptResult,
-    blockMarkdown: string
-  ): void => {
-    setPythonScriptDialogOpen(false);
-    refreshIntegralBlockCatalog(`${result.script.displayName} を登録しました。`);
-    window.dispatchEvent(
-      new CustomEvent(INSERT_INTEGRAL_BLOCK_MARKDOWN_EVENT, {
-        detail: blockMarkdown
-      })
-    );
-  };
-
   const installPluginFromZip = async (): Promise<void> => {
     setPluginDialogPendingAction("install");
 
@@ -1084,24 +1049,6 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshWorkspace();
-  }, []);
-
-  useEffect(() => {
-    const handleOpenPythonScriptDialog = (): void => {
-      setPythonScriptDialogOpen(true);
-    };
-
-    window.addEventListener(
-      OPEN_PYTHON_SCRIPT_DIALOG_EVENT,
-      handleOpenPythonScriptDialog as EventListener
-    );
-
-    return () => {
-      window.removeEventListener(
-        OPEN_PYTHON_SCRIPT_DIALOG_EVENT,
-        handleOpenPythonScriptDialog as EventListener
-      );
-    };
   }, []);
 
   useEffect(() => {
@@ -2428,13 +2375,6 @@ export function App(): JSX.Element {
         </button>
         <button
           className="button button--ghost button--menu"
-          onClick={openPythonScriptDialog}
-          type="button"
-        >
-          Python Scripts
-        </button>
-        <button
-          className="button button--ghost button--menu"
           onClick={openPluginManager}
           type="button"
         >
@@ -2876,16 +2816,6 @@ export function App(): JSX.Element {
             setDataRegistrationDialogOpen(false);
             setStatusMessage(`${datasetId} の dataset を作成しました。`);
           }}
-        />
-      ) : null}
-
-      {pythonScriptDialogOpen ? (
-        <PythonScriptDialog
-          onClose={() => {
-            setPythonScriptDialogOpen(false);
-          }}
-          onError={setStatusMessage}
-          onRegistered={handlePythonScriptRegistered}
         />
       ) : null}
 

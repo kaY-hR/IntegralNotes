@@ -21,17 +21,14 @@ import type {
   IntegralOriginalDataSummary,
   IntegralRenderableFile,
   ResolveIntegralManagedDataTrackingIssueRequest,
-  IntegralScriptAssetSummary,
-  IntegralSlotDefinition,
-  PythonEntrySelection,
-  RegisterPythonScriptRequest,
-  RegisterPythonScriptResult
+  IntegralSlotDefinition
 } from "../shared/integral";
 import {
   findInstalledPluginViewerByExtension,
   type InstalledPluginDefinition,
   type PluginViewerDataEncoding
 } from "../shared/plugins";
+import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
 import type {
   WorkspaceDatasetManifestMember,
   WorkspaceFileDocument
@@ -48,8 +45,8 @@ const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
 const STORE_DATASET_MANIFESTS_DIRECTORY = "datasets";
 const STORE_OBJECTS_DIRECTORY = "objects";
+const STORE_RUNTIME_DIRECTORY = "runtime";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
-const PYTHON_SCRIPTS_DIRECTORY = ".py-scripts";
 
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
@@ -122,14 +119,14 @@ interface ReconcileMetadataResult<TMetadata> {
   metadata: TMetadata;
 }
 
-interface PythonScriptManifest {
-  createdAt: string;
+interface PythonCallableSummary {
+  blockType: string;
   description: string;
   displayName: string;
-  entry: string;
+  functionName: string;
   inputSlots: IntegralSlotDefinition[];
   outputSlots: IntegralSlotDefinition[];
-  scriptId: string;
+  relativePath: string;
 }
 
 interface ExecFileError extends Error {
@@ -137,6 +134,49 @@ interface ExecFileError extends Error {
   stderr?: string;
   stdout?: string;
 }
+
+const PYTHON_CALLABLE_PATTERN =
+  /@integral_block\s*\(([\s\S]*?)\)\s*(?:\r?\n)+\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gu;
+
+const PYTHON_CALLABLE_RUNNER = String.raw`
+import importlib.util
+import json
+import pathlib
+import sys
+
+script_path = pathlib.Path(sys.argv[1])
+function_name = sys.argv[2]
+args_path = pathlib.Path(sys.argv[3])
+sdk_root = pathlib.Path(sys.argv[4])
+
+if not sdk_root.exists():
+    raise RuntimeError(f"Integral Python SDK was not found: {sdk_root}")
+
+sys.path.insert(0, str(sdk_root))
+payload = json.loads(args_path.read_text(encoding="utf-8"))
+
+spec = importlib.util.spec_from_file_location("integral_user_module", script_path)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Failed to load module from {script_path}")
+
+loaded_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(loaded_module)
+
+target = getattr(loaded_module, function_name)
+
+try:
+    target(
+        inputs=payload.get("inputs"),
+        outputs=payload.get("outputs"),
+        params=payload.get("params"),
+    )
+except TypeError:
+    target(
+        payload.get("inputs"),
+        payload.get("outputs"),
+        payload.get("params"),
+    )
+`;
 
 export class IntegralWorkspaceService {
   private pendingTrackingIssues: IntegralManagedDataTrackingIssue[] = [];
@@ -146,38 +186,20 @@ export class IntegralWorkspaceService {
     private readonly pluginRegistry: PluginRegistry
   ) {}
 
-  async describePythonEntryFile(entryAbsolutePath: string): Promise<PythonEntrySelection> {
-    await this.ensureIntegralWorkspaceReady();
-
-    const resolvedEntryPath = path.resolve(entryAbsolutePath);
-    const entryStats = await fs.stat(resolvedEntryPath);
-
-    if (!entryStats.isFile() || path.extname(resolvedEntryPath).toLowerCase() !== ".py") {
-      throw new Error("entry には .py ファイルを指定してください。");
-    }
-
-    return {
-      autoIncludedFilePaths: await collectAutoIncludedPythonFiles(resolvedEntryPath),
-      entryAbsolutePath: resolvedEntryPath,
-      suggestedDisplayName: path.basename(resolvedEntryPath, ".py")
-    };
-  }
-
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
     await this.ensureIntegralWorkspaceReady();
 
-    const [originalData, datasets, scripts, externalPlugins] = await Promise.all([
+    const [originalData, datasets, pythonCallables, externalPlugins] = await Promise.all([
       this.readOriginalDataSummaries(),
       this.readDatasetSummaries(),
-      this.readPythonScriptSummaries(),
+      this.readPythonCallableSummaries(),
       this.pluginRegistry.listInstalledPlugins()
     ]);
 
     return {
       datasets,
-      blockTypes: buildBlockTypeCatalog(scripts, externalPlugins),
-      originalData,
-      scripts
+      blockTypes: buildBlockTypeCatalog(pythonCallables, externalPlugins),
+      originalData
     };
   }
 
@@ -409,79 +431,6 @@ export class IntegralWorkspaceService {
     });
   }
 
-  async registerPythonScript(
-    request: RegisterPythonScriptRequest
-  ): Promise<RegisterPythonScriptResult> {
-    await this.ensureIntegralWorkspaceReady();
-
-    const resolvedEntryPath = path.resolve(request.entryAbsolutePath);
-    const entryStats = await fs.stat(resolvedEntryPath);
-
-    if (!entryStats.isFile() || path.extname(resolvedEntryPath).toLowerCase() !== ".py") {
-      throw new Error("entry には .py ファイルを指定してください。");
-    }
-
-    const autoIncludedFilePaths = await collectAutoIncludedPythonFiles(resolvedEntryPath);
-    const filePaths = Array.from(
-      new Set([
-        resolvedEntryPath,
-        ...autoIncludedFilePaths,
-        ...request.includedFilePaths.map((value) => path.resolve(value))
-      ])
-    );
-    const normalizedInputSlots = normalizeSlotNames(request.inputSlotNames, "input slot");
-    const normalizedOutputSlots = normalizeSlotNames(request.outputSlotNames, "output slot");
-    const scriptId = createOpaqueId("PYS");
-    const scriptRootPath = this.resolvePythonScriptRootPath(scriptId);
-    const copiedBasenames = new Set<string>();
-
-    await fs.mkdir(scriptRootPath, { recursive: true });
-
-    for (const sourcePath of filePaths) {
-      const sourceStats = await fs.stat(sourcePath);
-
-      if (!sourceStats.isFile()) {
-        throw new Error(`同梱対象はファイルのみ対応しています: ${sourcePath}`);
-      }
-
-      const basename = path.basename(sourcePath);
-      const normalizedBasename = basename.toLowerCase();
-
-      if (copiedBasenames.has(normalizedBasename)) {
-        throw new Error(`フラット配置ではファイル名が衝突します: ${basename}`);
-      }
-
-      copiedBasenames.add(normalizedBasename);
-      await fs.copyFile(sourcePath, path.join(scriptRootPath, basename));
-    }
-
-    const manifest: PythonScriptManifest = {
-      createdAt: new Date().toISOString(),
-      description: request.description.trim(),
-      displayName:
-        request.displayName.trim().length > 0
-          ? request.displayName.trim()
-          : path.basename(resolvedEntryPath, ".py"),
-      entry: path.basename(resolvedEntryPath),
-      inputSlots: normalizedInputSlots.map((name) => ({ name })),
-      outputSlots: normalizedOutputSlots.map((name) => ({ name })),
-      scriptId
-    };
-
-    await fs.writeFile(
-      path.join(scriptRootPath, "script.json"),
-      JSON.stringify(manifest, null, 2),
-      "utf8"
-    );
-
-    const script = this.toScriptSummary(manifest);
-
-    return {
-      blockType: buildPythonBlockType(script),
-      script
-    };
-  }
-
   async inspectDataset(datasetId: string): Promise<IntegralDatasetInspection> {
     await this.ensureIntegralWorkspaceReady();
 
@@ -593,6 +542,7 @@ export class IntegralWorkspaceService {
     }
 
     const normalizedBlock = normalizeBlockDocument(request.block, definition);
+    const resolvedBlock = await this.resolveBlockInputReferences(normalizedBlock, definition);
 
     if (definition.executionMode === "display") {
       const now = new Date().toISOString();
@@ -609,10 +559,10 @@ export class IntegralWorkspaceService {
     }
 
     if (definition.source === "external-plugin") {
-      return this.executeExternalPluginBlock(normalizedBlock, definition);
+      return this.executeExternalPluginBlock(resolvedBlock, definition);
     }
 
-    return this.executeGeneralAnalysisBlock(normalizedBlock, definition, catalog.scripts);
+    return this.executeGeneralAnalysisBlock(normalizedBlock, resolvedBlock, definition);
   }
 
   private getRootPath(): string {
@@ -662,21 +612,23 @@ export class IntegralWorkspaceService {
     );
   }
 
-  private resolvePythonScriptRootPath(scriptId: string): string {
-    return this.resolveWorkspacePath(`${PYTHON_SCRIPTS_DIRECTORY}/${scriptId}`);
+  private resolvePythonRuntimeRootPath(blockId: string): string {
+    return this.resolveWorkspacePath(
+      `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/${STORE_RUNTIME_DIRECTORY}/${blockId}`
+    );
   }
 
   private async executeGeneralAnalysisBlock(
-    block: IntegralBlockDocument,
-    definition: IntegralBlockTypeDefinition,
-    scripts: readonly IntegralScriptAssetSummary[]
+    sourceBlock: IntegralBlockDocument,
+    resolvedBlock: IntegralBlockDocument,
+    definition: IntegralBlockTypeDefinition
   ): Promise<ExecuteIntegralBlockResult> {
     if (definition.pluginId !== GENERAL_ANALYSIS_PLUGIN_ID) {
       throw new Error(`未対応の plugin 実行です: ${definition.pluginId}`);
     }
 
     for (const inputSlot of definition.inputSlots) {
-      const datasetId = block.inputs[inputSlot.name];
+      const datasetId = resolvedBlock.inputs[inputSlot.name];
 
       if (!datasetId) {
         throw new Error(`input slot が未設定です: ${inputSlot.name}`);
@@ -687,19 +639,27 @@ export class IntegralWorkspaceService {
       }
     }
 
-    const script = scripts.find((candidate) => candidate.scriptId === definition.blockType);
+    const callable = parsePythonCallableBlockType(definition.blockType);
 
-    if (!script) {
-      throw new Error(`Python script 資産が見つかりません: ${definition.blockType}`);
+    if (!callable) {
+      throw new Error(`Python callable を解決できません: ${definition.blockType}`);
     }
 
-    const scriptRootPath = this.resolvePythonScriptRootPath(script.scriptId);
+    const callableAbsolutePath = this.resolveWorkspacePath(callable.relativePath);
+    const callableStats = await fs.stat(callableAbsolutePath).catch(() => null);
+
+    if (!callableStats?.isFile()) {
+      throw new Error(`Python file が見つかりません: ${callable.relativePath}`);
+    }
+
+    const runtimeRootPath = this.resolvePythonRuntimeRootPath(sourceBlock.id ?? resolvedBlock.id ?? createOpaqueId("BLK"));
+    await resetDirectory(runtimeRootPath);
     const outputDatasetMap = new Map<string, IntegralDatasetSummary>();
     const outputPaths: Record<string, string | null> = {};
     const inputPaths: Record<string, string | null> = {};
 
     for (const inputSlot of definition.inputSlots) {
-      const datasetId = block.inputs[inputSlot.name];
+      const datasetId = resolvedBlock.inputs[inputSlot.name];
 
       if (!datasetId) {
         inputPaths[inputSlot.name] = null;
@@ -723,14 +683,14 @@ export class IntegralWorkspaceService {
       const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
       const metadata: DatasetMetadata = {
         createdAt: new Date().toISOString(),
-        createdByBlockId: block.id ?? null,
+        createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
         dataPath: datasetDataPath,
         datasetId: nextDatasetId,
         displayName: nextDatasetId,
         entityType: "dataset",
         hash: "",
         id: nextDatasetId,
-        kind: outputSlot.producedKind?.trim() || `${block["block-type"]}.${outputSlot.name}`,
+        kind: outputSlot.producedKind?.trim() || `${resolvedBlock["block-type"]}.${outputSlot.name}`,
         name: nextDatasetId,
         path: datasetManifestPath,
         provenance: "derived",
@@ -763,11 +723,11 @@ export class IntegralWorkspaceService {
     const analysisArgs = {
       inputs: inputPaths,
       outputs: outputPaths,
-      params: {}
+      params: isJsonRecord(resolvedBlock.params) ? resolvedBlock.params : {}
     };
 
     await fs.writeFile(
-      path.join(scriptRootPath, "analysis-args.json"),
+      path.join(runtimeRootPath, "analysis-args.json"),
       JSON.stringify(analysisArgs, null, 2),
       "utf8"
     );
@@ -777,11 +737,22 @@ export class IntegralWorkspaceService {
     let stderr = "";
 
     try {
-      const execution = await execFileAsync(pythonCommand, [script.entry], {
-        cwd: scriptRootPath,
-        maxBuffer: 10 * 1024 * 1024,
-        windowsHide: true
-      });
+      const execution = await execFileAsync(
+        pythonCommand,
+        [
+          "-c",
+          PYTHON_CALLABLE_RUNNER,
+          callableAbsolutePath,
+          callable.functionName,
+          path.join(runtimeRootPath, "analysis-args.json"),
+          resolvePythonSdkRootPath()
+        ],
+        {
+          cwd: this.getRootPath(),
+          maxBuffer: 10 * 1024 * 1024,
+          windowsHide: true
+        }
+      );
 
       stdout = execution.stdout ?? "";
       stderr = execution.stderr ?? "";
@@ -790,13 +761,13 @@ export class IntegralWorkspaceService {
       stdout = executionError.stdout ?? "";
       stderr = executionError.stderr ?? "";
 
-      await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
+      await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
       await this.refreshOutputDatasetMetadata(outputDatasetMap);
       await this.workspaceService.syncManagedDataNotes();
 
       throw new Error(
         [
-          `${script.displayName} の実行に失敗しました。`,
+          `${definition.title} の実行に失敗しました。`,
           stderr.trim() || stdout.trim() || executionError.message
         ]
           .filter(Boolean)
@@ -804,7 +775,7 @@ export class IntegralWorkspaceService {
       );
     }
 
-    await this.writePythonExecutionLogs(scriptRootPath, stdout, stderr);
+    await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
     await this.refreshOutputDatasetMetadata(outputDatasetMap);
     await this.workspaceService.syncManagedDataNotes();
 
@@ -817,24 +788,83 @@ export class IntegralWorkspaceService {
         })
       )
     ).filter((dataset): dataset is IntegralDatasetSummary => dataset !== null);
-    const nextOutputs = { ...block.outputs };
-
-    for (const outputSlot of definition.outputSlots) {
-      nextOutputs[outputSlot.name] = outputDatasetMap.get(outputSlot.name)?.datasetId ?? null;
-    }
 
     return {
-      block: {
-        ...block,
-        outputs: nextOutputs
-      },
+      block: sourceBlock,
       createdDatasets,
       finishedAt,
       logLines: [...splitLogLines(stdout), ...splitLogLines(stderr)],
       startedAt,
       status: "success",
-      summary: `${script.displayName} を実行しました。`
+      summary: `${definition.title} を実行しました。`
     };
+  }
+
+  private async resolveBlockInputReferences(
+    block: IntegralBlockDocument,
+    definition: IntegralBlockTypeDefinition
+  ): Promise<IntegralBlockDocument> {
+    const resolvedInputs: Record<string, string | null> = {};
+
+    for (const inputSlot of definition.inputSlots) {
+      const inputReference = block.inputs[inputSlot.name];
+
+      if (!inputReference) {
+        resolvedInputs[inputSlot.name] = null;
+        continue;
+      }
+
+      const metadata = await this.resolveDatasetReferenceMetadata(inputReference);
+
+      if (!metadata) {
+        throw new Error(`input dataset が見つかりません: ${inputReference}`);
+      }
+
+      resolvedInputs[inputSlot.name] = metadata.datasetId;
+    }
+
+    return {
+      ...block,
+      inputs: {
+        ...block.inputs,
+        ...resolvedInputs
+      }
+    };
+  }
+
+  private async resolveDatasetReferenceMetadata(reference: string): Promise<DatasetMetadata | null> {
+    const normalizedReference = reference.trim();
+
+    if (normalizedReference.length === 0) {
+      return null;
+    }
+
+    const datasetById = await this.readDatasetMetadata(normalizedReference);
+
+    if (datasetById) {
+      return datasetById;
+    }
+
+    const workspacePath =
+      resolveWorkspaceMarkdownTarget(normalizedReference) ?? normalizeRelativePath(normalizedReference);
+
+    if (workspacePath.length === 0) {
+      return null;
+    }
+
+    return this.findDatasetMetadataByPath(workspacePath);
+  }
+
+  private async findDatasetMetadataByPath(relativePath: string): Promise<DatasetMetadata | null> {
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
+    const metadataList = await this.readManagedDataMetadataList();
+
+    return (
+      metadataList.find(
+        (metadata): metadata is DatasetMetadata =>
+          metadata.entityType === "dataset" && metadata.path === normalizedRelativePath
+      ) ?? null
+    );
   }
 
   private async executeExternalPluginBlock(
@@ -1098,33 +1128,25 @@ export class IntegralWorkspaceService {
     };
   }
 
-  private async readPythonScriptSummaries(): Promise<IntegralScriptAssetSummary[]> {
-    const scriptsRootPath = this.resolveWorkspacePath(PYTHON_SCRIPTS_DIRECTORY);
-    const entries = await fs.readdir(scriptsRootPath, { withFileTypes: true });
-    const scripts = await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map(async (entry) => {
-          const manifest = await readJsonFile<PythonScriptManifest>(
-            path.join(scriptsRootPath, entry.name, "script.json")
-          );
-
-          if (
-            !manifest ||
-            manifest.scriptId.trim().length === 0 ||
-            manifest.entry.trim().length === 0 ||
-            !(await pathExists(path.join(scriptsRootPath, entry.name, manifest.entry)))
-          ) {
-            return null;
-          }
-
-          return this.toScriptSummary(manifest);
+  private async readPythonCallableSummaries(): Promise<PythonCallableSummary[]> {
+    const rootPath = this.getRootPath();
+    const pythonRelativePaths = await collectWorkspacePythonRelativePaths(rootPath);
+    const callables = (
+      await Promise.all(
+        pythonRelativePaths.map(async (relativePath) => {
+          const absolutePath = this.resolveWorkspacePath(relativePath);
+          const content = await fs.readFile(absolutePath, "utf8");
+          return parsePythonCallableSource(relativePath, content);
         })
-    );
+      )
+    ).flat();
 
-    return scripts
-      .filter((script): script is IntegralScriptAssetSummary => script !== null)
-      .sort((left, right) => left.displayName.localeCompare(right.displayName, "ja"));
+    return callables.sort((left, right) =>
+      `${left.displayName} ${left.blockType}`.localeCompare(
+        `${right.displayName} ${right.blockType}`,
+        "ja"
+      )
+    );
   }
 
   private async readRenderableFile(
@@ -1225,7 +1247,7 @@ export class IntegralWorkspaceService {
 
     const topLevelSegment = normalizedRelative.split(path.sep).filter(Boolean)[0] ?? "";
 
-    if ([PYTHON_SCRIPTS_DIRECTORY, STORE_DIRECTORY].includes(topLevelSegment)) {
+    if (topLevelSegment === STORE_DIRECTORY) {
       throw new Error("system 管理ディレクトリ配下は元データ登録できません。");
     }
   }
@@ -1689,27 +1711,15 @@ export class IntegralWorkspaceService {
       return null;
     }
   }
-
-  private toScriptSummary(manifest: PythonScriptManifest): IntegralScriptAssetSummary {
-    return {
-      createdAt: manifest.createdAt,
-      description: manifest.description,
-      displayName: manifest.displayName,
-      entry: manifest.entry,
-      inputSlots: manifest.inputSlots,
-      outputSlots: manifest.outputSlots,
-      scriptId: manifest.scriptId
-    };
-  }
 }
 
 function buildBlockTypeCatalog(
-  scripts: readonly IntegralScriptAssetSummary[],
+  pythonCallables: readonly PythonCallableSummary[],
   externalPlugins: readonly InstalledPluginDefinition[]
 ): IntegralBlockTypeDefinition[] {
   return [
     buildDisplayBlockType(),
-    ...scripts.map((script) => buildPythonBlockType(script)),
+    ...pythonCallables.map((callable) => buildPythonCallableBlockType(callable)),
     ...buildExternalPluginBlockTypes(externalPlugins)
   ];
 }
@@ -1831,23 +1841,23 @@ function buildDisplayBlockType(): IntegralBlockTypeDefinition {
   };
 }
 
-function buildPythonBlockType(
-  script: IntegralScriptAssetSummary
+function buildPythonCallableBlockType(
+  callable: PythonCallableSummary
 ): IntegralBlockTypeDefinition {
   return {
-    blockType: script.scriptId,
+    blockType: callable.blockType,
     description:
-      script.description.trim().length > 0
-        ? script.description
-        : `${script.entry} を実行する Python block`,
+      callable.description.trim().length > 0
+        ? callable.description
+        : `${callable.relativePath}:${callable.functionName} を実行する Python block`,
     executionMode: "manual",
-    inputSlots: script.inputSlots,
-    outputSlots: script.outputSlots,
-    pluginDescription: "workspace の .py-scripts を走査する汎用 Python 解析 plugin",
+    inputSlots: callable.inputSlots,
+    outputSlots: callable.outputSlots,
+    pluginDescription: "workspace の .py を走査する汎用 Python 解析 plugin",
     pluginDisplayName: "General Analysis",
     pluginId: GENERAL_ANALYSIS_PLUGIN_ID,
-    source: "python-script",
-    title: script.displayName
+    source: "python-callable",
+    title: callable.displayName
   };
 }
 
@@ -1885,40 +1895,6 @@ function normalizeSlotMap(
   return normalized;
 }
 
-async function collectAutoIncludedPythonFiles(entryAbsolutePath: string): Promise<string[]> {
-  const entryDirectoryPath = path.dirname(entryAbsolutePath);
-  const entries = await fs.readdir(entryDirectoryPath, { withFileTypes: true });
-
-  return entries
-    .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".py")
-    .map((entry) => path.join(entryDirectoryPath, entry.name))
-    .sort((left, right) => left.localeCompare(right, "ja"));
-}
-
-function normalizeSlotNames(slotNames: string[], label: string): string[] {
-  const normalized = slotNames
-    .map((slotName) => slotName.trim())
-    .filter((slotName) => slotName.length > 0);
-
-  if (normalized.some((slotName) => /[\\/]/u.test(slotName))) {
-    throw new Error(`${label} に使用できない文字が含まれています。`);
-  }
-
-  const seen = new Set<string>();
-
-  for (const slotName of normalized) {
-    const lowered = slotName.toLowerCase();
-
-    if (seen.has(lowered)) {
-      throw new Error(`${label} が重複しています: ${slotName}`);
-    }
-
-    seen.add(lowered);
-  }
-
-  return normalized;
-}
-
 function normalizeDatasetName(name: string | undefined, datasetId: string): string {
   const normalizedName = name?.trim();
 
@@ -1930,8 +1906,262 @@ function normalizeDatasetName(name: string | undefined, datasetId: string): stri
   return normalizedDatasetId.length > 0 ? normalizedDatasetId : "dataset";
 }
 
-function createOpaqueId(prefix: "ORD" | "BLK" | "DTS" | "PYS"): string {
+function createOpaqueId(prefix: "ORD" | "BLK" | "DTS"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+async function collectWorkspacePythonRelativePaths(
+  rootPath: string,
+  currentRelativePath = ""
+): Promise<string[]> {
+  const currentAbsolutePath =
+    currentRelativePath.length === 0
+      ? rootPath
+      : path.join(rootPath, ...currentRelativePath.split("/"));
+  const entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
+  const pythonPaths: string[] = [];
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "ja"))) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const nextRelativePath =
+      currentRelativePath.length === 0 ? entry.name : `${currentRelativePath}/${entry.name}`;
+
+    if (entry.isDirectory()) {
+      pythonPaths.push(...(await collectWorkspacePythonRelativePaths(rootPath, nextRelativePath)));
+      continue;
+    }
+
+    if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".py") {
+      pythonPaths.push(nextRelativePath);
+    }
+  }
+
+  return pythonPaths;
+}
+
+function parsePythonCallableSource(relativePath: string, content: string): PythonCallableSummary[] {
+  const summaries: PythonCallableSummary[] = [];
+
+  for (const match of content.matchAll(PYTHON_CALLABLE_PATTERN)) {
+    const decoratorSource = match[1] ?? "";
+    const functionName = match[2]?.trim() ?? "";
+
+    if (functionName.length === 0) {
+      continue;
+    }
+
+    const displayName =
+      parsePythonStringLiteral(extractPythonKeywordSource(decoratorSource, "display_name")) ??
+      functionName;
+    const description =
+      parsePythonStringLiteral(extractPythonKeywordSource(decoratorSource, "description")) ?? "";
+    const inputSlots = normalizeDiscoveredSlotNames(
+      parsePythonStringArrayLiteral(extractPythonKeywordSource(decoratorSource, "inputs"))
+    ).map((name) => ({ name }));
+    const outputSlots = normalizeDiscoveredSlotNames(
+      parsePythonStringArrayLiteral(extractPythonKeywordSource(decoratorSource, "outputs"))
+    ).map((name) => ({ name }));
+
+    summaries.push({
+      blockType: `${relativePath}:${functionName}`,
+      description,
+      displayName,
+      functionName,
+      inputSlots,
+      outputSlots,
+      relativePath
+    });
+  }
+
+  return summaries;
+}
+
+function extractPythonKeywordSource(source: string, key: string): string | null {
+  const match = new RegExp(`${escapeRegExp(key)}\\s*=`, "u").exec(source);
+
+  if (!match || match.index === undefined) {
+    return null;
+  }
+
+  let index = match.index + match[0].length;
+
+  while (index < source.length && /\s/u.test(source.charAt(index))) {
+    index += 1;
+  }
+
+  const startIndex = index;
+  let quote: '"' | "'" | null = null;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let escaped = false;
+
+  for (; index < source.length; index += 1) {
+    const character = source.charAt(index);
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (character === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (character === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+
+    if (character === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        return source.slice(startIndex, index).trim().replace(/,$/u, "");
+      }
+
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+
+    if (character === "," && bracketDepth === 0 && braceDepth === 0 && parenDepth === 0) {
+      return source.slice(startIndex, index).trim();
+    }
+  }
+
+  return source.slice(startIndex).trim().replace(/,$/u, "");
+}
+
+function parsePythonStringLiteral(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length < 2) {
+    return null;
+  }
+
+  const quote = trimmed.charAt(0);
+
+  if ((quote !== '"' && quote !== "'") || trimmed.charAt(trimmed.length - 1) !== quote) {
+    return null;
+  }
+
+  const body = trimmed.slice(1, -1);
+  return body
+    .replace(/\\\\/gu, "\\")
+    .replace(/\\n/gu, "\n")
+    .replace(quote === '"' ? /\\"/gu : /\\'/gu, quote);
+}
+
+function parsePythonStringArrayLiteral(value: string | null): string[] {
+  if (!value) {
+    return [];
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed === "[]") {
+    return [];
+  }
+
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    return [];
+  }
+
+  const items = trimmed.slice(1, -1).match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/gu) ?? [];
+
+  return items
+    .map((item) => parsePythonStringLiteral(item))
+    .filter((item): item is string => item !== null);
+}
+
+function normalizeDiscoveredSlotNames(slotNames: string[]): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const slotName of slotNames.map((item) => item.trim()).filter((item) => item.length > 0)) {
+    if (/[\\/]/u.test(slotName)) {
+      continue;
+    }
+
+    const lowered = slotName.toLowerCase();
+
+    if (seen.has(lowered)) {
+      continue;
+    }
+
+    seen.add(lowered);
+    normalized.push(slotName);
+  }
+
+  return normalized;
+}
+
+function parsePythonCallableBlockType(
+  blockType: string
+): {
+  functionName: string;
+  relativePath: string;
+} | null {
+  const separatorIndex = blockType.lastIndexOf(":");
+
+  if (separatorIndex <= 0 || separatorIndex >= blockType.length - 1) {
+    return null;
+  }
+
+  const relativePath = normalizeRelativePath(blockType.slice(0, separatorIndex));
+  const functionName = blockType.slice(separatorIndex + 1).trim();
+
+  if (
+    relativePath.length === 0 ||
+    path.extname(relativePath).toLowerCase() !== ".py" ||
+    !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(functionName)
+  ) {
+    return null;
+  }
+
+  return {
+    functionName,
+    relativePath
+  };
 }
 
 function createDatasetObjectRelativePath(datasetId: string): string {
@@ -1986,6 +2216,10 @@ function normalizeRelativePath(relativePath: string): string {
     .split(/[\\/]+/u)
     .filter(Boolean)
     .join("/");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function collapseNestedRelativePaths(relativePaths: string[]): string[] {
@@ -2446,6 +2680,20 @@ function splitLogLines(value: string): string[] {
 function resolvePythonCommand(): string {
   const configured = process.env.INTEGRALNOTES_PYTHON?.trim();
   return configured && configured.length > 0 ? configured : "python";
+}
+
+function resolvePythonSdkRootPath(): string {
+  const configured = process.env.INTEGRALNOTES_PYTHON_SDK_ROOT?.trim();
+
+  if (configured && configured.length > 0) {
+    return path.resolve(configured);
+  }
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    return path.resolve(__dirname, "../../plugin-sdk/python");
+  }
+
+  return path.join(process.resourcesPath, "python-sdk");
 }
 
 function isRenderableExtension(

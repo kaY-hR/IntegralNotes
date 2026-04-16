@@ -5,8 +5,7 @@ import type {
   CreateSourceDatasetRequest,
   CreateSourceDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
-  ResolveIntegralManagedDataTrackingIssueRequest,
-  RegisterPythonScriptRequest
+  ResolveIntegralManagedDataTrackingIssueRequest
 } from "../shared/integral";
 import type {
   CopyEntriesRequest,
@@ -192,54 +191,6 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("integral:inspectDataset", async (_event, datasetId: string) =>
     getIntegralWorkspaceService().inspectDataset(datasetId)
-  );
-  ipcMain.handle("integral:browsePythonEntryFile", async () => {
-    if (!mainWindow) {
-      throw new Error("main window is not available.");
-    }
-
-    const result = await dialog.showOpenDialog(mainWindow, {
-      defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
-      filters: [
-        {
-          extensions: ["py"],
-          name: "Python"
-        }
-      ],
-      properties: ["openFile"],
-      title: "Select Python Entry"
-    });
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-
-    return getIntegralWorkspaceService().describePythonEntryFile(result.filePaths[0]);
-  });
-  ipcMain.handle("integral:browsePythonSupportFiles", async (_event, entryAbsolutePath: string | null) => {
-    if (!mainWindow) {
-      throw new Error("main window is not available.");
-    }
-
-    const result = await dialog.showOpenDialog(mainWindow, {
-      defaultPath:
-        entryAbsolutePath && entryAbsolutePath.trim().length > 0
-          ? path.dirname(entryAbsolutePath)
-          : workspaceService.currentRootPath ?? app.getPath("documents"),
-      properties: ["openFile", "multiSelections"],
-      title: "Select Additional Bundled Files"
-    });
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-
-    return result.filePaths;
-  });
-  ipcMain.handle(
-    "integral:registerPythonScript",
-    async (_event, request: RegisterPythonScriptRequest) =>
-      getIntegralWorkspaceService().registerPythonScript(request)
   );
   ipcMain.handle(
     "integral:resolveManagedDataTrackingIssue",

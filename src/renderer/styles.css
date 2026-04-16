@@ -1108,6 +1108,15 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
+.editor-surface .milkdown .editor-workspace-embed__dataset {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #d6e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: auto;
+}
+
 .editor-surface .milkdown .editor-workspace-embed__plugin .integral-plugin-frame-shell,
 .editor-surface .milkdown .editor-workspace-embed__plugin .integral-plugin-frame {
   width: 100%;
@@ -1156,6 +1165,8 @@ textarea:focus-visible {
 .editor-surface .milkdown .editor-workspace-embed__frame,
 .editor-surface .milkdown .editor-workspace-embed__image,
 .editor-surface .milkdown .editor-workspace-embed__markdown,
+.editor-surface .milkdown .editor-workspace-embed__dataset,
+.editor-surface .milkdown .editor-workspace-embed__dataset * ,
 .editor-surface .milkdown .editor-workspace-embed__plugin {
   pointer-events: none;
 }
@@ -1688,7 +1699,6 @@ textarea:focus-visible {
   max-height: min(760px, calc(100vh - 40px));
 }
 
-.dialog-card--python-script,
 .dialog-card--asset-picker,
 .dialog-card--data-registration {
   width: min(760px, 100%);
@@ -1761,7 +1771,6 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   gap: 14px;
 }
 
-.dialog-card__body--python-script,
 .dialog-card__body--asset-picker,
 .dialog-card__body--data-registration {
   display: grid;
@@ -2119,8 +2128,6 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   text-align: right;
 }
 
-.python-script-dialog__actions,
-.python-script-dialog__bundle-header,
 .asset-picker__toolbar,
 .asset-picker__meta,
 .integral-slot-row,
@@ -2132,7 +2139,6 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   gap: 8px;
 }
 
-.python-script-dialog__actions,
 .integral-renderable-card__header {
   justify-content: space-between;
 }
@@ -2162,13 +2168,11 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   border-radius: 0 0 3px 3px;
 }
 
-.python-script-dialog__bundle,
 .asset-picker__list {
   display: grid;
   gap: 10px;
 }
 
-.python-slot-editor,
 .integral-display-toolbar {
   display: grid;
   gap: 4px;
@@ -2178,105 +2182,6 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   background: #f4f7fa;
 }
 
-.python-slot-editor__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #3a4f62;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding-bottom: 2px;
-}
-
-.python-slot-editor__rows {
-  display: grid;
-  gap: 4px;
-}
-
-.python-slot-editor__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto;
-  gap: 4px;
-  align-items: center;
-}
-
-.python-slot-editor__row--output {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.python-slot-editor__input {
-  width: 100%;
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid #c0cad5;
-  border-radius: 3px;
-  background: #ffffff;
-  color: var(--text-0);
-  font-size: 0.82rem;
-}
-
-.python-slot-editor__dataset-button {
-  justify-content: flex-start;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.python-slot-editor__add {
-  justify-self: start;
-}
-
-.python-script-dialog__bundle {
-  padding: 8px 10px;
-  border: 1px solid #c8d3de;
-  border-radius: 3px;
-  background: #f4f7fa;
-}
-
-.python-script-dialog__file-list {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.python-script-dialog__file-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 4px 8px;
-  border: 1px solid #d4dde6;
-  border-radius: 3px;
-  background: #ffffff;
-}
-
-.python-script-dialog__file-list code {
-  overflow-wrap: anywhere;
-  font-size: 0.76rem;
-}
-
-.python-script-dialog__file-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 3px;
-  background: rgba(15, 108, 189, 0.1);
-  color: #1a6aaa;
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.python-script-dialog__file-list-empty,
 .asset-picker__empty,
 .integral-renderable__empty {
   color: #7a8a9a;
@@ -2657,7 +2562,6 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   }
 
   .dialog-card--tracking,
-  .dialog-card--python-script,
   .dialog-card--asset-picker,
   .dialog-card--data-registration {
     width: min(100%, 100%);
@@ -2667,20 +2571,13 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   .plugin-manager__toolbar,
   .plugin-card__header,
   .plugin-card__blocks li,
-  .python-script-dialog__actions,
   .asset-picker__toolbar,
   .data-registration-card__actions,
   .integral-slot-row,
   .integral-renderable-card__header,
-  .python-script-dialog__file-list li,
-  .python-slot-editor__row {
+  .asset-picker__list button {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .python-slot-editor__row,
-  .python-slot-editor__row--output {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .plugin-card__blocks code {
