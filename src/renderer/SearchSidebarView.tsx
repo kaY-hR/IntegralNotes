@@ -27,6 +27,47 @@ interface SearchSidebarViewProps {
   state: SearchSidebarState;
 }
 
+function SearchRefreshIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="sidebar-search__icon-svg" viewBox="0 0 16 16">
+      <path d="M13 4.6V1.9m0 0H10.3m2.7 0A5.6 5.6 0 1 0 13.8 11" />
+    </svg>
+  );
+}
+
+function SearchReplaceIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="sidebar-search__icon-svg" viewBox="0 0 16 16">
+      <path d="M2.1 4.4h8.5" />
+      <path d="m8 1.8 2.6 2.6L8 7" />
+      <path d="M13.9 11.6H5.4" />
+      <path d="M8 9l-2.6 2.6L8 14.2" />
+    </svg>
+  );
+}
+
+function SearchFilterIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="sidebar-search__icon-svg" viewBox="0 0 16 16">
+      <path d="M2.3 4.2h11.4" />
+      <path d="M4.2 8h7.6" />
+      <path d="M6.1 11.8h3.8" />
+    </svg>
+  );
+}
+
+function SearchCollapseIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="sidebar-search__icon-svg" viewBox="0 0 16 16">
+      <path d="M3 5.1h10" />
+      <path d="M3 8h10" />
+      <path d="M3 10.9h10" />
+      <path d="m6.2 3.5 1.8 1.6 1.8-1.6" />
+      <path d="m6.2 12.5 1.8-1.6 1.8 1.6" />
+    </svg>
+  );
+}
+
 function highlightSearchLine(lineText: string, match: WorkspaceSearchMatch): JSX.Element {
   const startIndex = Math.max(0, match.startColumn - 1);
   const endIndex = Math.max(startIndex, match.endColumn - 1);
@@ -56,30 +97,83 @@ export function SearchSidebarView({
 }: SearchSidebarViewProps): JSX.Element {
   const queryIsEmpty = state.query.trim().length === 0;
   const hasResults = (result?.totalMatchCount ?? 0) > 0;
-  const summaryText = queryIsEmpty
-    ? "検索語を入力すると workspace 全体を検索します。"
+  const hasExpandedPanels = state.showReplace || state.showFileFilters;
+  const statusText = queryIsEmpty
+    ? ""
     : searchPending
       ? "検索中..."
       : result
-        ? `${result.searchedFileCount} files / ${result.totalMatchCount} matches${
-            result.truncated ? " (truncated)" : ""
+        ? `${result.totalMatchCount} 件の一致 / ${result.searchedFileCount} files${
+            result.truncated ? " / truncated" : ""
           }`
-        : "一致はまだありません。";
+        : "一致なし";
 
   return (
     <div className="sidebar-search">
-      <div className="sidebar-search__header">
-        <div>
-          <p className="sidebar__eyebrow">Workspace Search</p>
-          <h2 className="sidebar-search__title">Search</h2>
-          <p className="sidebar-search__description">
-            text file を横断検索し、必要なら一括置換します。
-          </p>
+      <div className="sidebar-search__topbar">
+        <h2 className="sidebar-search__heading">検索</h2>
+
+        <div className="sidebar-search__topbar-actions">
+          <button
+            className="button button--ghost sidebar-search__icon-button"
+            onClick={onSearchNow}
+            title="再検索"
+            type="button"
+          >
+            <SearchRefreshIcon />
+          </button>
+          <button
+            aria-pressed={state.showReplace}
+            className={`button button--ghost sidebar-search__icon-button${
+              state.showReplace ? " is-active" : ""
+            }`}
+            onClick={() => {
+              onChange({
+                ...state,
+                showReplace: !state.showReplace
+              });
+            }}
+            title="置換を表示"
+            type="button"
+          >
+            <SearchReplaceIcon />
+          </button>
+          <button
+            aria-pressed={state.showFileFilters}
+            className={`button button--ghost sidebar-search__icon-button${
+              state.showFileFilters ? " is-active" : ""
+            }`}
+            onClick={() => {
+              onChange({
+                ...state,
+                showFileFilters: !state.showFileFilters
+              });
+            }}
+            title="ファイル条件を表示"
+            type="button"
+          >
+            <SearchFilterIcon />
+          </button>
+          <button
+            className="button button--ghost sidebar-search__icon-button"
+            disabled={!hasExpandedPanels}
+            onClick={() => {
+              onChange({
+                ...state,
+                showFileFilters: false,
+                showReplace: false
+              });
+            }}
+            title="補助パネルを閉じる"
+            type="button"
+          >
+            <SearchCollapseIcon />
+          </button>
         </div>
       </div>
 
-      <div className="sidebar-search__toolbar">
-        <div className="sidebar-search__query-box">
+      <div className="sidebar-search__fields">
+        <div className="sidebar-search__input-row">
           <input
             className="sidebar-search__input"
             onChange={(event) => {
@@ -98,172 +192,138 @@ export function SearchSidebarView({
             type="search"
             value={state.query}
           />
-          <button
-            className="button button--ghost sidebar-search__submit"
-            onClick={onSearchNow}
-            type="button"
-          >
-            Search
-          </button>
+
+          <div className="sidebar-search__inline-options">
+            <button
+              aria-pressed={state.caseSensitive}
+              className={`button button--ghost sidebar-search__option-button${
+                state.caseSensitive ? " is-active" : ""
+              }`}
+              onClick={() => {
+                onChange({
+                  ...state,
+                  caseSensitive: !state.caseSensitive
+                });
+              }}
+              title="Case Sensitive"
+              type="button"
+            >
+              Aa
+            </button>
+            <button
+              aria-pressed={state.wholeWord}
+              className={`button button--ghost sidebar-search__option-button${
+                state.wholeWord ? " is-active" : ""
+              }`}
+              onClick={() => {
+                onChange({
+                  ...state,
+                  wholeWord: !state.wholeWord
+                });
+              }}
+              title="Whole Word"
+              type="button"
+            >
+              ab
+            </button>
+            <button
+              aria-pressed={state.regex}
+              className={`button button--ghost sidebar-search__option-button${
+                state.regex ? " is-active" : ""
+              }`}
+              onClick={() => {
+                onChange({
+                  ...state,
+                  regex: !state.regex
+                });
+              }}
+              title="Use Regular Expression"
+              type="button"
+            >
+              *
+            </button>
+          </div>
         </div>
 
-        <div className="sidebar-search__controls">
-          <button
-            className={`button button--ghost sidebar-search__chip${
-              state.showReplace ? " is-active" : ""
-            }`}
-            onClick={() => {
-              onChange({
-                ...state,
-                showReplace: !state.showReplace
-              });
-            }}
-            type="button"
-          >
-            置換
-          </button>
-          <button
-            className={`button button--ghost sidebar-search__chip${
-              state.showFileFilters ? " is-active" : ""
-            }`}
-            onClick={() => {
-              onChange({
-                ...state,
-                showFileFilters: !state.showFileFilters
-              });
-            }}
-            type="button"
-          >
-            ファイル条件
-          </button>
-          <button
-            aria-pressed={state.caseSensitive}
-            className={`button button--ghost sidebar-search__chip${
-              state.caseSensitive ? " is-active" : ""
-            }`}
-            onClick={() => {
-              onChange({
-                ...state,
-                caseSensitive: !state.caseSensitive
-              });
-            }}
-            title="Case Sensitive"
-            type="button"
-          >
-            Aa
-          </button>
-          <button
-            aria-pressed={state.wholeWord}
-            className={`button button--ghost sidebar-search__chip${
-              state.wholeWord ? " is-active" : ""
-            }`}
-            onClick={() => {
-              onChange({
-                ...state,
-                wholeWord: !state.wholeWord
-              });
-            }}
-            title="Whole Word"
-            type="button"
-          >
-            Ab
-          </button>
-          <button
-            aria-pressed={state.regex}
-            className={`button button--ghost sidebar-search__chip${
-              state.regex ? " is-active" : ""
-            }`}
-            onClick={() => {
-              onChange({
-                ...state,
-                regex: !state.regex
-              });
-            }}
-            title="Use Regular Expression"
-            type="button"
-          >
-            .*
-          </button>
-        </div>
-      </div>
-
-      {state.showReplace ? (
-        <div className="sidebar-search__advanced">
-          <input
-            className="sidebar-search__input"
-            onChange={(event) => {
-              onChange({
-                ...state,
-                replacement: event.target.value
-              });
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                onReplaceAll();
-              }
-            }}
-            placeholder="置換"
-            type="text"
-            value={state.replacement}
-          />
-          <button
-            className="button button--primary"
-            disabled={queryIsEmpty || !hasResults || replacePending || searchPending}
-            onClick={onReplaceAll}
-            type="button"
-          >
-            {replacePending ? "置換中..." : "Replace All"}
-          </button>
-        </div>
-      ) : null}
-
-      {state.showFileFilters ? (
-        <div className="sidebar-search__advanced sidebar-search__advanced--filters">
-          <label className="sidebar-search__field">
-            <span>含めるファイル</span>
+        {state.showReplace ? (
+          <div className="sidebar-search__input-row sidebar-search__input-row--replace">
             <input
               className="sidebar-search__input"
               onChange={(event) => {
                 onChange({
                   ...state,
-                  includePattern: event.target.value
+                  replacement: event.target.value
                 });
               }}
-              placeholder="例: src/**/*.ts, docs/**/*.md"
-              type="text"
-              value={state.includePattern}
-            />
-          </label>
-          <label className="sidebar-search__field">
-            <span>除外するファイル</span>
-            <input
-              className="sidebar-search__input"
-              onChange={(event) => {
-                onChange({
-                  ...state,
-                  excludePattern: event.target.value
-                });
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  onReplaceAll();
+                }
               }}
-              placeholder="例: node_modules/**, dist/**"
+              placeholder="置換"
               type="text"
-              value={state.excludePattern}
+              value={state.replacement}
             />
-          </label>
+
+            <button
+              className="button button--ghost sidebar-search__replace-action"
+              disabled={queryIsEmpty || !hasResults || replacePending || searchPending}
+              onClick={onReplaceAll}
+              type="button"
+            >
+              {replacePending ? "..." : "AB"}
+            </button>
+          </div>
+        ) : null}
+
+        {state.showFileFilters ? (
+          <div className="sidebar-search__filters">
+            <label className="sidebar-search__field">
+              <span>含めるファイル</span>
+              <input
+                className="sidebar-search__input"
+                onChange={(event) => {
+                  onChange({
+                    ...state,
+                    includePattern: event.target.value
+                  });
+                }}
+                placeholder="例: *.ts, src/**/*.md"
+                type="text"
+                value={state.includePattern}
+              />
+            </label>
+
+            <label className="sidebar-search__field">
+              <span>除外するファイル</span>
+              <input
+                className="sidebar-search__input"
+                onChange={(event) => {
+                  onChange({
+                    ...state,
+                    excludePattern: event.target.value
+                  });
+                }}
+                placeholder="例: node_modules/**"
+                type="text"
+                value={state.excludePattern}
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+
+      {statusText.length > 0 || errorMessage ? (
+        <div className="sidebar-search__meta">
+          {statusText.length > 0 ? <span>{statusText}</span> : <span />}
+          {errorMessage ? <strong className="sidebar-search__error">{errorMessage}</strong> : null}
         </div>
       ) : null}
-
-      <div className="sidebar-search__summary">
-        <span>{summaryText}</span>
-        {errorMessage ? <strong className="sidebar-search__error">{errorMessage}</strong> : null}
-      </div>
 
       <div className="sidebar-search__results">
         {queryIsEmpty ? (
-          <div className="sidebar-search__empty">
-            <strong>検索語を入力してください。</strong>
-            <span>query は入力ごとに自動検索されます。</span>
-          </div>
+          <div className="sidebar-search__empty">検索語を入力してください。</div>
         ) : hasResults && result ? (
           result.files.map((file) => (
             <section className="sidebar-search__file" key={file.relativePath}>
@@ -300,15 +360,9 @@ export function SearchSidebarView({
             </section>
           ))
         ) : searchPending ? (
-          <div className="sidebar-search__empty">
-            <strong>検索中...</strong>
-            <span>workspace file を走査しています。</span>
-          </div>
+          <div className="sidebar-search__empty">検索中...</div>
         ) : (
-          <div className="sidebar-search__empty">
-            <strong>一致は見つかりませんでした。</strong>
-            <span>query や file filter を見直してください。</span>
-          </div>
+          <div className="sidebar-search__empty">一致は見つかりませんでした。</div>
         )}
       </div>
     </div>
