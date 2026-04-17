@@ -661,69 +661,69 @@ function IntegralBlockPanel({
 
               return (
                 <div className="integral-slot-row integral-slot-row--output integral-output-slot-row" key={slot.name}>
-                  <div className="integral-output-slot-row__header">
-                    <strong>{slot.name}</strong>
-                    <span className={outputDataset ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
-                      {outputDataset ? `最新: ${outputDataset.name}` : "未実行"}
-                    </span>
-                  </div>
+                  <div className="integral-output-slot-row__main">
+                    <div className="integral-output-slot-row__slot">
+                      <strong>{slot.name}</strong>
+                    </div>
 
-                  <button
-                    className="integral-output-slot-row__directory"
-                    onClick={() => {
-                      void window.integralNotes
-                        .selectWorkspaceDirectory(resolveOutputDirectoryRelativePath(outputConfig.directory))
-                        .then((selectedDirectory) => {
-                          if (selectedDirectory === null) {
-                            return;
-                          }
+                    <button
+                      className="integral-output-slot-row__directory"
+                      onClick={() => {
+                        void window.integralNotes
+                          .selectWorkspaceDirectory(resolveOutputDirectoryRelativePath(outputConfig.directory))
+                          .then((selectedDirectory) => {
+                            if (selectedDirectory === null) {
+                              return;
+                            }
 
+                            setInlineError(null);
+                            onUpdateOutputConfig(slot.name, {
+                              ...outputConfig,
+                              directory: selectedDirectory.length > 0 ? toCanonicalWorkspaceTarget(selectedDirectory) : "/"
+                            });
+                          })
+                          .catch((error) => {
+                            setInlineError(formatErrorMessage(error));
+                          });
+                      }}
+                      type="button"
+                    >
+                      <FolderBadgeIcon />
+                      <span>{formatOutputDirectoryLabel(outputConfig.directory)}</span>
+                    </button>
+
+                    <div className="integral-output-slot-row__name">
+                      <input
+                        className="integral-output-slot-row__name-input"
+                        onChange={(event) => {
                           setInlineError(null);
                           onUpdateOutputConfig(slot.name, {
                             ...outputConfig,
-                            directory: selectedDirectory.length > 0 ? toCanonicalWorkspaceTarget(selectedDirectory) : "/"
+                            name: event.target.value
                           });
-                        })
-                        .catch((error) => {
-                          setInlineError(formatErrorMessage(error));
-                        });
-                    }}
-                    type="button"
-                  >
-                    <FolderBadgeIcon />
-                    <span>{formatOutputDirectoryLabel(outputConfig.directory)}</span>
-                  </button>
-
-                  <div className="integral-output-slot-row__name">
-                    <textarea
-                      className="integral-output-slot-row__name-input"
-                      onChange={(event) => {
-                        setInlineError(null);
-                        onUpdateOutputConfig(slot.name, {
-                          ...outputConfig,
-                          name: event.target.value
-                        });
-                      }}
-                      rows={1}
-                      spellCheck={false}
-                      value={outputConfig.name}
-                    />
-                    <span className="integral-output-slot-row__suffix">.idts</span>
-                  </div>
-
-                  {outputDataset ? (
-                    <div className="integral-slot-row__actions">
-                      <button
-                        className="integral-slot-row__link integral-slot-row__link--note"
-                        onClick={() => {
-                          openDatasetNote(outputReference);
                         }}
-                        type="button"
-                      >
-                        ノート
-                      </button>
+                        spellCheck={false}
+                        type="text"
+                        value={outputConfig.name}
+                      />
+                      <span className="integral-output-slot-row__suffix">.idts</span>
                     </div>
-                  ) : null}
+
+                    {outputDataset ? (
+                      <div className="integral-slot-row__actions">
+                        <button
+                          className="integral-slot-row__link integral-slot-row__link--note"
+                          onClick={() => {
+                            openDatasetNote(outputReference);
+                          }}
+                          title={outputDataset ? `最新: ${outputDataset.name}` : undefined}
+                          type="button"
+                        >
+                          ノート
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
