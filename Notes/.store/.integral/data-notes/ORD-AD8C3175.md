@@ -1,0 +1,15 @@
+---
+integralNoteType: "data-note"
+dataTargetType: "original-data"
+managedDataId: "ORD-AD8C3175"
+originalDataId: "ORD-AD8C3175"
+entityType: "original-data"
+displayName: "20260417-2012-871.png"
+representation: "file"
+path: "Data/20260417-2012-871.png"
+hash: "sha256:2F58FE842D4FEC2F872AE1BA27093A1DE86F27FDE4092545EC1E94F012CB2930"
+visibility: "visible"
+provenance: "source"
+createdAt: "2026-04-17T11:13:41.054Z"
+---
+# 20260417-2012-871.png
