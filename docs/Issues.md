@@ -737,3 +737,28 @@
   - internal canonical ID と `.store/objects/{datasetId}` は維持し、`.idts path -> datasetId` 解決契約はそのまま再利用した
   - `src/renderer/DatasetManifestFileViewer.tsx`, `src/renderer/App.tsx`, `src/renderer/DataRegistrationDialog.tsx`, `src/renderer/IntegralAssetDialogs.tsx` を更新し、主要な user-facing UI から dataset ID 表示を外した
   - `npm run build` が通ることを確認した
+
+## [x] 36. Python 実行 block の output slot で保存先 folder と dataset 名を編集したい
+- Status:completed
+- 優先重み:7
+- 記載日時:2026-04-18-16:10(UTC+9)
+
+* Issue 35 で入れた `{解析名}_{slot名}_yyyyMMddHHmm` の自動 naming は廃止し、output slot ごとの明示設定に置き換えたい
+* Python 実行 block の slot UI は `Inputs` / `Outputs` の section に分け、output 側を読みやすくしたい
+* output slot には、slot 名の下に `保存先 folder` と `dataset 名` を設定できる UI を置きたい
+* folder UI は folder icon と current relative path を表示し、default は `/Data/` にしたい
+* dataset 名 UI は textarea とし、default では slot 名を入れておきたい
+* 実行成功後は、設定された folder / dataset 名を使って visible `.idts` manifest を作り、`out:` に最新 path を反映したい
+* 同名 manifest が既にある場合も、既存 dataset を壊さず新規 file として保存したい
+* 2026-04-18 調査:
+  - 現行の block source は `out:` を scalar で持っていたが、renderer / main process 側ともに object form へ拡張しても互換維持が可能
+  - `.idts path -> datasetId` 解決は既存のまま使えるため、user-facing path と internal ID を分離したまま進められる
+  - 実行 block の renderer には slot section の追加と folder picker IPC 追加で対応できる見込みだった
+* 2026-04-18 実装:
+  - `src/shared/integral.ts` に `outputConfigs` と output directory 正規化 helper を追加し、slot ごとの `directory / name` 設定を保持できるようにした
+  - `src/renderer/integralBlockRegistry.tsx` を更新し、`out.{dir,name,latest}` の新形式と旧 `auto` / scalar 形式の両方を読めるようにした
+  - `src/main/main.ts`, `src/main/preload.ts`, `src/shared/workspace.ts` に workspace 内 folder picker IPC を追加した
+  - `src/main/integralWorkspaceService.ts` で output slot ごとの folder / dataset 名を使って visible manifest path を生成し、衝突時は `_1`, `_2`, ... を付けて保存するようにした
+  - `src/renderer/integralCodeBlockFeature.tsx`, `src/renderer/styles.css` を更新し、Python 実行 block の `Inputs` / `Outputs` section 分離、folder picker、dataset 名 textarea、`.idts` suffix 表示を追加した
+  - `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` の関連文書を新仕様へ更新した
+  - `npm run build` が通ることを確認した

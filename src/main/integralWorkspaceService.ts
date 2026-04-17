@@ -14,6 +14,7 @@ import type {
   ImportOriginalDataResult,
   IntegralAssetCatalog,
   IntegralBlockDocument,
+  IntegralBlockOutputConfig,
   IntegralBlockTypeDefinition,
   IntegralDatasetInspection,
   IntegralDatasetSummary,
@@ -22,6 +23,10 @@ import type {
   IntegralRenderableFile,
   ResolveIntegralManagedDataTrackingIssueRequest,
   IntegralSlotDefinition
+} from "../shared/integral";
+import {
+  normalizeIntegralBlockOutputConfig,
+  toIntegralOutputDirectoryRelativePath
 } from "../shared/integral";
 import {
   findInstalledPluginViewerByExtension,
@@ -376,6 +381,7 @@ export class IntegralWorkspaceService {
     const datasetId = createOpaqueId("DTS");
     const datasetName = normalizeDatasetName(request.name, datasetId);
     const manifestRelativePath = await this.createVisibleDatasetManifestRelativePath(
+      DATA_DIRECTORY,
       datasetName,
       datasetId
     );
@@ -754,14 +760,17 @@ export class IntegralWorkspaceService {
     for (const outputSlot of definition.outputSlots) {
       const createdAt = new Date();
       const nextDatasetId = createOpaqueId("DTS");
-      const datasetName = createDerivedDatasetName(
-        definition.title,
+      const outputConfig = normalizeOutputConfigForSlot(
+        resolvedBlock.outputConfigs?.[outputSlot.name],
         outputSlot.name,
-        createdAt,
-        resolvedBlock["block-type"]
+        resolvedBlock.outputs[outputSlot.name] ?? null
       );
+      const manifestDirectoryRelativePath =
+        toIntegralOutputDirectoryRelativePath(outputConfig.directory) ?? DATA_DIRECTORY;
+      const datasetName = outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name;
       const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
       const datasetManifestPath = await this.createVisibleDatasetManifestRelativePath(
+        manifestDirectoryRelativePath,
         datasetName,
         nextDatasetId
       );
@@ -888,6 +897,7 @@ export class IntegralWorkspaceService {
     return {
       block: {
         ...sourceBlock,
+        outputConfigs: resolvedBlock.outputConfigs,
         outputs: {
           ...sourceBlock.outputs,
           ...outputReferences
@@ -1564,10 +1574,14 @@ export class IntegralWorkspaceService {
   }
 
   private async createVisibleDatasetManifestRelativePath(
+    directoryRelativePath: string,
     datasetName: string,
     datasetId: string
   ): Promise<string> {
-    const datasetsRootPath = this.resolveWorkspacePath(DATA_DIRECTORY);
+    const normalizedDirectoryRelativePath = normalizeRelativePath(directoryRelativePath);
+    const datasetsRootPath = this.resolveWorkspacePath(
+      normalizedDirectoryRelativePath.length > 0 ? normalizedDirectoryRelativePath : "."
+    );
     await fs.mkdir(datasetsRootPath, { recursive: true });
 
     const preferredStem = sanitizeFileStem(datasetName) || datasetId;
@@ -1575,7 +1589,9 @@ export class IntegralWorkspaceService {
 
     while (true) {
       const suffix = serial === 0 ? "" : `_${serial}`;
-      const relativePath = `${DATA_DIRECTORY}/${preferredStem}${suffix}${DATASET_JSON_EXTENSION}`;
+      const relativePath = normalizeRelativePath(
+        `${normalizedDirectoryRelativePath}/${preferredStem}${suffix}${DATASET_JSON_EXTENSION}`
+      );
 
       if (!(await pathExists(this.resolveWorkspacePath(relativePath)))) {
         return relativePath;
@@ -2172,6 +2188,11 @@ function normalizeBlockDocument(
     id: blockId,
     inputs: normalizeSlotMap(block.inputs, definition.inputSlots),
     outputs: normalizeSlotMap(block.outputs, definition.outputSlots),
+    outputConfigs: normalizeOutputConfigMap(
+      block.outputConfigs,
+      block.outputs,
+      definition.outputSlots
+    ),
     params: isJsonRecord(block.params) ? block.params : {},
     plugin: definition.pluginId
   };
@@ -2192,6 +2213,24 @@ function normalizeSlotMap(
   return normalized;
 }
 
+function normalizeOutputConfigMap(
+  currentValue: Record<string, IntegralBlockOutputConfig | null> | undefined,
+  currentOutputs: Record<string, string | null> | undefined,
+  slotDefinitions: readonly IntegralSlotDefinition[]
+): Record<string, IntegralBlockOutputConfig | null> {
+  const normalized: Record<string, IntegralBlockOutputConfig | null> = {};
+
+  for (const slot of slotDefinitions) {
+    normalized[slot.name] = normalizeOutputConfigForSlot(
+      currentValue?.[slot.name],
+      slot.name,
+      currentOutputs?.[slot.name] ?? null
+    );
+  }
+
+  return normalized;
+}
+
 function normalizeDatasetName(name: string | undefined, datasetId: string): string {
   const normalizedName = name?.trim();
 
@@ -2201,6 +2240,14 @@ function normalizeDatasetName(name: string | undefined, datasetId: string): stri
 
   const normalizedDatasetId = datasetId.trim();
   return normalizedDatasetId.length > 0 ? normalizedDatasetId : "dataset";
+}
+
+function normalizeOutputConfigForSlot(
+  value: IntegralBlockOutputConfig | null | undefined,
+  slotName: string,
+  latestOutputReference?: string | null
+): IntegralBlockOutputConfig {
+  return normalizeIntegralBlockOutputConfig(value, slotName, latestOutputReference);
 }
 
 function createOpaqueId(prefix: "ORD" | "BLK" | "DTS"): string {
@@ -2506,29 +2553,6 @@ function sanitizeFileStem(value: string): string {
     .trim()
     .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
     .replace(/[. ]+$/gu, "");
-}
-
-function createDerivedDatasetName(
-  analysisName: string,
-  slotName: string,
-  createdAt: Date,
-  fallbackAnalysisName?: string
-): string {
-  const normalizedAnalysisName =
-    sanitizeFileStem(analysisName) ||
-    sanitizeFileStem(fallbackAnalysisName ?? "") ||
-    "analysis";
-  const normalizedSlotName = sanitizeFileStem(slotName) || "output";
-  return `${normalizedAnalysisName}_${normalizedSlotName}_${formatDatasetTimestamp(createdAt)}`;
-}
-
-function formatDatasetTimestamp(value: Date): string {
-  const year = value.getFullYear().toString().padStart(4, "0");
-  const month = `${value.getMonth() + 1}`.padStart(2, "0");
-  const day = `${value.getDate()}`.padStart(2, "0");
-  const hours = `${value.getHours()}`.padStart(2, "0");
-  const minutes = `${value.getMinutes()}`.padStart(2, "0");
-  return `${year}${month}${day}${hours}${minutes}`;
 }
 
 function normalizeRelativePath(relativePath: string): string {

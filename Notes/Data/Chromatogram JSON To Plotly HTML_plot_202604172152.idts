@@ -1,6 +1,0 @@
-{
-  "dataPath": ".store/objects/DTS-B79347B8",
-  "datasetId": "DTS-B79347B8",
-  "kind": "src/chromatogram_json_to_plotly_html.py:main.plot",
-  "name": "Chromatogram JSON To Plotly HTML_plot_202604172152"
-}

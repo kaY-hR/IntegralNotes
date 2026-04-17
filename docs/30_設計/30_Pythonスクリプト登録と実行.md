@@ -74,8 +74,12 @@ in:
   labels: null
 params: {}
 out:
-  score: auto
-  loading: auto
+  score:
+    dir: /Data
+    name: score
+  loading:
+    dir: /Data
+    name: loading
 ```
 
 `.idts` が既に決まっている場合は `in:` の値へその path を入れる。
@@ -98,9 +102,10 @@ original data 複数選択の場合:
 ## 5. output 宣言
 
 - output slot 名は decorator から決まる
-- 初期状態では note source 上の value は `auto`
-- 実行成功後は output slot ごとの visible `.idts` path を note source の `out:` へ書き戻す
-- output dataset の system 既定名は `{解析名}_{slot名}_yyyyMMddHHmm` とする
+- 初期状態では各 slot に `dir: /Data` と `name: {slot名}` を入れる
+- block card 上では `Inputs` / `Outputs` を section 分離して表示する
+- output slot には folder picker と dataset 名 textarea を表示する
+- 実行成功後は output slot ごとの visible `.idts` path を `latest` として note source の `out:` へ書き戻す
 
 ## 6. 実行準備
 
@@ -108,8 +113,10 @@ app は実行前に次を行う。
 
 1. input `.idts` を `datasetId` に解決する
 2. input dataset を executable path に resolve する
-3. output slot ごとに visible `Data/{dataset-name}.idts` manifest と実データ directory を確保する
-4. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
+3. output slot ごとに `dir` と `name` から visible `{dir}/{dataset-name}.idts` manifest 候補を決める
+4. 同名 manifest が存在する場合は `_1`, `_2`, ... を付与して新規 path を選ぶ
+5. 実データ directory を確保する
+6. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
 
 ## 7. analysis-args.json
 

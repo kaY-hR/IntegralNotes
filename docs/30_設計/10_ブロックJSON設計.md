@@ -56,8 +56,9 @@ out:
   - free-form object
 - `out`
   - output slot 宣言
-  - 未実行 slot は `auto`
-  - 実行後は生成された `.idts` path を保持してよい
+  - 旧形式では未実行 slot は `auto`
+  - 新形式では slot ごとに `dir`, `name`, `latest` を保持できる
+  - `latest` には直近実行で生成された `.idts` path を保持してよい
 
 ## 3. internal normalized form
 
@@ -78,6 +79,16 @@ app 内部では次の JSON object に正規化する。
   "outputs": {
     "score": null,
     "loading": null
+  },
+  "outputConfigs": {
+    "score": {
+      "directory": "/Data",
+      "name": "score"
+    },
+    "loading": {
+      "directory": "/Data",
+      "name": "loading"
+    }
   }
 }
 ```
@@ -105,16 +116,27 @@ app 内部では次の JSON object に正規化する。
 
 ### `out`
 
-- 未実行 slot は `auto`
-- 実行後は visible output dataset の `.idts` path を書き戻してよい
-- internal normalized form では `auto` を `null` にする
-- `.idts` path が入っている場合はその文字列を保持する
+- 旧形式の `auto` / `.idts path` は引き続き読める
+- 新形式では次の YAML object を許容する
+
+```yaml
+out:
+  score:
+    dir: /Data
+    name: score
+    latest: /Data/score.idts
+```
+
+- `dir` は次回実行時の visible manifest 保存先
+- `name` は次回実行時の dataset 名および file stem の候補
+- `latest` は直近実行で生成された visible output dataset の `.idts` path
+- internal normalized form では `outputs[slot]` に `latest` を、`outputConfigs[slot]` に `dir` と `name` を分離して持つ
 
 ## 5. 保存ルール
 
 - note source は「何を実行するか」を残す
 - 入力変更以外の source は極力安定に保つ
-- ただし `out:` には最新実行で生成された `.idts` path を書き戻してよい
+- ただし `out:` には output slot ごとの `dir`, `name`, `latest` を書き戻してよい
 - run status と log 要約は hidden metadata ではなく UI state / runtime log で扱う
 
 ## 6. block card 表示

@@ -84,11 +84,16 @@
 - `N original data items` を選んだ場合、app は source dataset を新規作成する
 - source dataset の current path は visible path を default にしてよい
 - derived dataset の current path も visible `Data/{dataset-name}.idts` を default にしてよい
+- Python 実行 block の slot UI は `Inputs` / `Outputs` の section に分ける
+- output slot ごとに、保存先 folder と dataset 名を事前指定できる
+- output slot の folder 指定 UI は relative path 表示つきの folder picker とする
+- output slot の dataset 名入力は textarea とし、既定値は slot 名にする
+- output slot の既定保存先 folder は `/Data/` とする
 - block 内部の参照は常に `datasetId` で行う
 - 実行や表示で file system access が必要な場合、app は `datasetId` を「読める directory path」へ resolve する
 - app は `.idts` manifest を読んで source / derived の差を意識せず resolve できるようにする
 - output dataset 作成時は対応する data-note も自動生成または更新する
-- output dataset の system 既定名は `{解析名}_{slot名}_yyyyMMddHHmm` とする
+- output dataset の file 名は user 指定の dataset 名を優先し、衝突時のみ `_1`, `_2`, ... を付与する
 
 ## 6. Python 汎用解析
 

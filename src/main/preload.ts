@@ -35,6 +35,8 @@ const api: IntegralNotesApi = {
   importOriginalDataDirectories: () => ipcRenderer.invoke("integral:importOriginalDataDirectories"),
   importOriginalDataFiles: () => ipcRenderer.invoke("integral:importOriginalDataFiles"),
   inspectDataset: (datasetId) => ipcRenderer.invoke("integral:inspectDataset", datasetId),
+  selectWorkspaceDirectory: (initialRelativePath) =>
+    ipcRenderer.invoke("workspace:selectDirectory", initialRelativePath),
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),

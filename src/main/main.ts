@@ -265,6 +265,47 @@ function registerIpcHandlers(): void {
 
     return snapshot;
   });
+  ipcMain.handle("workspace:selectDirectory", async (_event, initialRelativePath?: string | null) => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const rootPath = workspaceService.currentRootPath;
+
+    if (!rootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const normalizedInitialRelativePath =
+      typeof initialRelativePath === "string"
+        ? initialRelativePath
+            .trim()
+            .split(/[\\/]+/u)
+            .filter(Boolean)
+        : [];
+    const defaultPath =
+      normalizedInitialRelativePath.length > 0
+        ? path.resolve(rootPath, ...normalizedInitialRelativePath)
+        : rootPath;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "保存先フォルダを選択",
+      defaultPath,
+      properties: ["openDirectory"]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const selectedPath = path.resolve(result.filePaths[0]);
+    const relativePath = path.relative(rootPath, selectedPath);
+
+    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      throw new Error("workspace 内のフォルダを選択してください。");
+    }
+
+    return relativePath.split(path.sep).join("/");
+  });
   ipcMain.handle("integral:getAssetCatalog", async () => getIntegralWorkspaceService().listAssetCatalog());
   ipcMain.handle("integral:listManagedDataTrackingIssues", async () =>
     getIntegralWorkspaceService().listManagedDataTrackingIssues()

@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-17T15:34:25.220Z",
+  "createdByBlockId": "BLK-07ED0143",
+  "datasetId": "DTS-6553E89E",
+  "displayName": "PCA結果",
+  "entityType": "dataset",
+  "hash": "sha256:A287DDEE9B1194C311137AACB183DA6C590ACBACB64F3C5306BA8E89AE74A093",
+  "id": "DTS-6553E89E",
+  "kind": "src/chromatogram_pca.py:main.report",
+  "dataPath": ".store/objects/DTS-6553E89E",
+  "name": "PCA結果",
+  "path": "Data/PCA結果.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

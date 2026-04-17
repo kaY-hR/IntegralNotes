@@ -255,6 +255,7 @@ export interface IntegralNotesApi {
   importOriginalDataDirectories: () => Promise<ImportOriginalDataResult | null>;
   importOriginalDataFiles: () => Promise<ImportOriginalDataResult | null>;
   inspectDataset: (datasetId: string) => Promise<IntegralDatasetInspection>;
+  selectWorkspaceDirectory: (initialRelativePath?: string | null) => Promise<string | null>;
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;

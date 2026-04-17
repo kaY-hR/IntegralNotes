@@ -17,7 +17,12 @@ import type {
   ExecuteIntegralBlockResult,
   IntegralAssetCatalog,
   IntegralBlockDocument,
+  IntegralBlockOutputConfig,
   IntegralDatasetSummary
+} from "../shared/integral";
+import {
+  normalizeIntegralBlockOutputConfig,
+  toIntegralOutputDirectoryRelativePath
 } from "../shared/integral";
 import {
   resolveWorkspaceMarkdownTarget,
@@ -243,6 +248,23 @@ class IntegralNotesBlockView implements NodeView {
 
           this.applyTextChange(result.nextText);
         }}
+        onUpdateOutputConfig={(slotName, nextOutputConfig) => {
+          const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
+            ...currentBlock,
+            outputConfigs: {
+              ...(currentBlock.outputConfigs ?? {}),
+              [slotName]: nextOutputConfig
+            }
+          }));
+
+          if (result.error) {
+            this.runState = createErrorRunState(result.error);
+            this.render();
+            return;
+          }
+
+          this.applyTextChange(result.nextText);
+        }}
         onUpdateParams={(nextParams) => {
           const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
             ...currentBlock,
@@ -361,6 +383,7 @@ class IntegralNotesBlockView implements NodeView {
 
 function IntegralBlockPanel({
   onAssignDataset,
+  onUpdateOutputConfig,
   onUpdateParams,
   onRun,
   parsed,
@@ -368,6 +391,7 @@ function IntegralBlockPanel({
   selected
 }: {
   onAssignDataset: (slotName: string, datasetReference: string | null) => void;
+  onUpdateOutputConfig: (slotName: string, nextOutputConfig: IntegralBlockOutputConfig) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
   onRun: () => void;
   parsed: ParsedIntegralDraft;
@@ -573,71 +597,138 @@ function IntegralBlockPanel({
   const slotAssignments =
     blockDefinition.inputSlots.length > 0 || blockDefinition.outputSlots.length > 0 ? (
       <div className="integral-slot-list">
-        {blockDefinition.inputSlots.map((slot) => {
-          const assignedReference = parsed.block.inputs[slot.name] ?? null;
-          const assignedDataset = resolveDataset(assignedReference);
-          const isAssigned = assignedReference !== null;
-
-          return (
-            <div className="integral-slot-row" key={slot.name}>
-              <div className="integral-slot-row__meta">
-                <strong>{slot.name}</strong>
-                <span className={isAssigned ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
-                  {formatDatasetLabel(assignedReference)}
-                </span>
-              </div>
-              {blockDefinition.executionMode === "manual" ? (
-                <div className="integral-slot-row__actions">
-                  {isAssigned && assignedDataset ? (
-                    <button
-                      className="integral-slot-row__link integral-slot-row__link--note"
-                      onClick={() => {
-                        openDatasetNote(assignedReference);
-                      }}
-                      type="button"
-                    >
-                      ノート
-                    </button>
-                  ) : null}
-                  <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
-                    setInlineError(null);
-                    setSlotDialogState({ slotName: slot.name });
-                  }} type="button">
-                    {isAssigned ? "変更" : "データを割り当て"}
-                  </button>
-                </div>
-              ) : null}
+        {blockDefinition.inputSlots.length > 0 ? (
+          <section className="integral-slot-section">
+            <div className="integral-slot-section__header">
+              <strong>Inputs</strong>
+              <span>{blockDefinition.inputSlots.length} slots</span>
             </div>
-          );
-        })}
+            {blockDefinition.inputSlots.map((slot) => {
+              const assignedReference = parsed.block.inputs[slot.name] ?? null;
+              const assignedDataset = resolveDataset(assignedReference);
+              const isAssigned = assignedReference !== null;
 
-        {blockDefinition.outputSlots.map((slot) => {
-          const outputDataset =
-            latestOutputMap.get(slot.name) ?? resolveDataset(parsed.block.outputs[slot.name] ?? null);
-          const outputReference = outputDataset?.datasetId ?? parsed.block.outputs[slot.name] ?? null;
+              return (
+                <div className="integral-slot-row" key={slot.name}>
+                  <div className="integral-slot-row__meta">
+                    <strong>{slot.name}</strong>
+                    <span className={isAssigned ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
+                      {formatDatasetLabel(assignedReference)}
+                    </span>
+                  </div>
+                  {blockDefinition.executionMode === "manual" ? (
+                    <div className="integral-slot-row__actions">
+                      {isAssigned && assignedDataset ? (
+                        <button
+                          className="integral-slot-row__link integral-slot-row__link--note"
+                          onClick={() => {
+                            openDatasetNote(assignedReference);
+                          }}
+                          type="button"
+                        >
+                          ノート
+                        </button>
+                      ) : null}
+                      <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
+                        setInlineError(null);
+                        setSlotDialogState({ slotName: slot.name });
+                      }} type="button">
+                        {isAssigned ? "変更" : "データを割り当て"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
 
-          return (
-            <div className="integral-slot-row integral-slot-row--output" key={slot.name}>
-              <div className="integral-slot-row__meta">
-                <strong>{slot.name}</strong>
-                <span>{formatDatasetLabel(outputReference)}</span>
-              </div>
-              {outputDataset ? (
-                <div className="integral-slot-row__actions">
+        {blockDefinition.outputSlots.length > 0 ? (
+          <section className="integral-slot-section">
+            <div className="integral-slot-section__header">
+              <strong>Outputs</strong>
+              <span>{blockDefinition.outputSlots.length} slots</span>
+            </div>
+            {blockDefinition.outputSlots.map((slot) => {
+              const outputDataset =
+                latestOutputMap.get(slot.name) ?? resolveDataset(parsed.block.outputs[slot.name] ?? null);
+              const outputReference = outputDataset?.datasetId ?? parsed.block.outputs[slot.name] ?? null;
+              const outputConfig = resolveOutputConfig(
+                parsed.block,
+                slot.name,
+                parsed.block.outputs[slot.name] ?? null
+              );
+
+              return (
+                <div className="integral-slot-row integral-slot-row--output integral-output-slot-row" key={slot.name}>
+                  <div className="integral-output-slot-row__header">
+                    <strong>{slot.name}</strong>
+                    <span className={outputDataset ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
+                      {outputDataset ? `最新: ${outputDataset.name}` : "未実行"}
+                    </span>
+                  </div>
+
                   <button
-                    className="integral-slot-row__link integral-slot-row__link--note"
+                    className="integral-output-slot-row__directory"
                     onClick={() => {
-                      openDatasetNote(outputReference);
+                      void window.integralNotes
+                        .selectWorkspaceDirectory(resolveOutputDirectoryRelativePath(outputConfig.directory))
+                        .then((selectedDirectory) => {
+                          if (selectedDirectory === null) {
+                            return;
+                          }
+
+                          setInlineError(null);
+                          onUpdateOutputConfig(slot.name, {
+                            ...outputConfig,
+                            directory: selectedDirectory.length > 0 ? toCanonicalWorkspaceTarget(selectedDirectory) : "/"
+                          });
+                        })
+                        .catch((error) => {
+                          setInlineError(formatErrorMessage(error));
+                        });
                     }}
                     type="button"
                   >
-                    ノート
+                    <FolderBadgeIcon />
+                    <span>{formatOutputDirectoryLabel(outputConfig.directory)}</span>
                   </button>
+
+                  <div className="integral-output-slot-row__name">
+                    <textarea
+                      className="integral-output-slot-row__name-input"
+                      onChange={(event) => {
+                        setInlineError(null);
+                        onUpdateOutputConfig(slot.name, {
+                          ...outputConfig,
+                          name: event.target.value
+                        });
+                      }}
+                      rows={1}
+                      spellCheck={false}
+                      value={outputConfig.name}
+                    />
+                    <span className="integral-output-slot-row__suffix">.idts</span>
+                  </div>
+
+                  {outputDataset ? (
+                    <div className="integral-slot-row__actions">
+                      <button
+                        className="integral-slot-row__link integral-slot-row__link--note"
+                        onClick={() => {
+                          openDatasetNote(outputReference);
+                        }}
+                        type="button"
+                      >
+                        ノート
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          );
-        })}
+              );
+            })}
+          </section>
+        ) : null}
       </div>
     ) : null;
 
@@ -813,6 +904,56 @@ function applyIntegralBlockMutation(
     error: null,
     nextText: serializeIntegralBlockContent(mutator(parsedDraft.block))
   };
+}
+
+function resolveOutputConfig(
+  block: IntegralBlockDocument,
+  slotName: string,
+  latestOutputReference: string | null
+): IntegralBlockOutputConfig {
+  return normalizeIntegralBlockOutputConfig(
+    block.outputConfigs?.[slotName],
+    slotName,
+    latestOutputReference
+  );
+}
+
+function resolveOutputDirectoryRelativePath(directory: string): string | null {
+  return toIntegralOutputDirectoryRelativePath(directory);
+}
+
+function formatOutputDirectoryLabel(directory: string): string {
+  const relativePath = resolveOutputDirectoryRelativePath(directory);
+
+  if (relativePath === null) {
+    return "/Data/";
+  }
+
+  return relativePath.length > 0 ? `/${relativePath}/` : "/";
+}
+
+function FolderBadgeIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="integral-output-slot-row__directory-icon"
+      viewBox="0 0 16 16"
+    >
+      <path
+        d="M2.25 4.25h3.2l1.1 1.35h7.2v5.7a1.2 1.2 0 0 1-1.2 1.2H3.45a1.2 1.2 0 0 1-1.2-1.2z"
+        fill="currentColor"
+        opacity="0.24"
+      />
+      <path
+        d="M2.25 4.25h3.2l1.1 1.35h7.2v5.7a1.2 1.2 0 0 1-1.2 1.2H3.45a1.2 1.2 0 0 1-1.2-1.2z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.1"
+      />
+    </svg>
+  );
 }
 
 function createIdleRunState(): RunState {

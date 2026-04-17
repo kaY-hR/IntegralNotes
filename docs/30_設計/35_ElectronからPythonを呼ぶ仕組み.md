@@ -72,7 +72,9 @@ run: scripts/demo_hello_report.py:main
 in: {}
 params: {}
 out:
-  report: auto
+  report:
+    dir: /Data
+    name: report
 ```
 
 `run:` は app 内部で次へ正規化する。
@@ -87,9 +89,11 @@ main process は block 実行時に次を行う。
 1. block source を internal normalized form に変換する
 2. input `.idts` path を datasetId に解決する
 3. datasetId を executable path に解決する
-4. output slot ごとに output dataset と output directory を確保する
-5. `.store/.integral/runtime/BLK-.../analysis-args.json` を書く
-6. 実行成功後は output slot ごとの visible `.idts` path を block source の `out:` に反映する
+4. output slot ごとに user 指定の `directory` と `name` を正規化する
+5. visible manifest path を `{directory}/{name}.idts` から決め、衝突時は suffix を付ける
+6. output dataset と output directory を確保する
+7. `.store/.integral/runtime/BLK-.../analysis-args.json` を書く
+8. 実行成功後は output slot ごとの visible `.idts` path を block source の `out.*.latest` に反映する
 
 `analysis-args.json` の責務は、Python callable へ渡す filesystem-oriented payload を固定形で表現することにある。
 

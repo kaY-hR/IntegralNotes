@@ -188,6 +188,10 @@ packaged app:
 
 output dataset が空でも、成功なら空の結果として確定する。
 
+output dataset の visible manifest 名は、block が保持する output config の `name` を使う。  
+既定値は slot 名で、保存先 folder の既定値は `/Data` とする。  
+同名 manifest が既に存在する場合は `_1`, `_2`, ... を付けて衝突を解消する。
+
 ## Python 環境
 
 MVP では Python 環境を本体が管理しない。
