@@ -3,3 +3,4 @@ dist/
 dist-electron/
 out/
 scripts/backup.bat
+**/__pycache__/
