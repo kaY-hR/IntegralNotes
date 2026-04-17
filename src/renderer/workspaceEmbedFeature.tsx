@@ -402,19 +402,10 @@ function WorkspaceEmbedPanel({
   const rootClassName = [
     "editor-workspace-embed",
     mode === "inline" ? "editor-workspace-embed--inline" : "editor-workspace-embed--block",
-    resolution.openTarget ? "editor-workspace-embed--openable" : "",
     selected ? "editor-workspace-embed--selected" : ""
   ]
     .filter(Boolean)
     .join(" ");
-
-  const handleOpenTarget = (): void => {
-    if (!resolution.openTarget) {
-      return;
-    }
-
-    openWorkspaceEmbedTarget(resolution.openTarget);
-  };
   const defaultSurfaceHeight = getDefaultEmbedHeight(mode, resolution.kind);
   const minimumSurfaceHeight = getMinimumEmbedHeight(mode, resolution.kind);
   const shouldAutoSizeImage =
@@ -422,6 +413,7 @@ function WorkspaceEmbedPanel({
   const currentSurfaceHeight = shouldAutoSizeImage
     ? null
     : clampNumber(surfaceHeight ?? defaultSurfaceHeight, minimumSurfaceHeight, 1200);
+  const openTarget = resolution.kind === "loading" ? null : resolution.openTarget;
 
   const handleResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const surfaceElement = surfaceRef.current;
@@ -575,28 +567,13 @@ function WorkspaceEmbedPanel({
 
   return (
     <div className={rootClassName}>
+      {openTarget ? <WorkspaceEmbedOpenAction openTarget={openTarget} /> : null}
       <div
-        className={`editor-workspace-embed__surface${
-          resolution.openTarget ? " editor-workspace-embed__surface--openable" : ""
-        }`}
-        onClick={resolution.openTarget ? handleOpenTarget : undefined}
-        onKeyDown={
-          resolution.openTarget
-            ? (event) => {
-                if (event.key !== "Enter" && event.key !== " ") {
-                  return;
-                }
-
-                event.preventDefault();
-                handleOpenTarget();
-              }
-            : undefined
-        }
+        className="editor-workspace-embed__surface"
         ref={surfaceRef}
         style={{
           height: currentSurfaceHeight === null ? undefined : `${currentSurfaceHeight}px`
         }}
-        tabIndex={resolution.openTarget ? 0 : undefined}
       >
         {resolution.kind === "loading" ? (
           <div className="editor-workspace-embed__status">読み込み中...</div>
@@ -677,6 +654,7 @@ function WorkspaceDatasetRenderableEmbed({
   const [resolution, setResolution] = useState<DatasetRenderableEmbedResolution>({
     kind: "loading"
   });
+  const openTarget = getWorkspaceFileOpenTarget(source);
 
   useEffect(() => {
     let cancelled = false;
@@ -706,6 +684,7 @@ function WorkspaceDatasetRenderableEmbed({
   if (resolution.kind === "loading") {
     return (
       <div className={className}>
+        {openTarget ? <WorkspaceEmbedOpenAction openTarget={openTarget} /> : null}
         <div className="workspace-dataset-renderable-embed__status">dataset を読み込み中...</div>
       </div>
     );
@@ -714,6 +693,7 @@ function WorkspaceDatasetRenderableEmbed({
   if (resolution.kind === "error") {
     return (
       <div className={className}>
+        {openTarget ? <WorkspaceEmbedOpenAction openTarget={openTarget} /> : null}
         <div className="workspace-dataset-renderable-embed__status workspace-dataset-renderable-embed__status--error">
           {resolution.message}
         </div>
@@ -723,7 +703,31 @@ function WorkspaceDatasetRenderableEmbed({
 
   return (
     <div className={className}>
+      {openTarget ? <WorkspaceEmbedOpenAction openTarget={openTarget} /> : null}
       <DatasetRenderableView datasetId={resolution.datasetId} />
+    </div>
+  );
+}
+
+function WorkspaceEmbedOpenAction({
+  openTarget
+}: {
+  openTarget: WorkspaceEmbedOpenTarget;
+}): JSX.Element {
+  return (
+    <div className="editor-workspace-embed__toolbar">
+      <button
+        className="button button--ghost button--xs editor-workspace-embed__open-button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openWorkspaceEmbedTarget(openTarget);
+        }}
+        title={getWorkspaceEmbedOpenActionTitle(openTarget)}
+        type="button"
+      >
+        別タブで開く
+      </button>
     </div>
   );
 }
@@ -949,6 +953,12 @@ function openWorkspaceEmbedTarget(openTarget: WorkspaceEmbedOpenTarget): void {
   requestOpenWorkspaceFile(openTarget.relativePath);
 }
 
+function getWorkspaceEmbedOpenActionTitle(openTarget: WorkspaceEmbedOpenTarget): string {
+  return openTarget.kind === "managed-data-note"
+    ? "対応するノートを別タブで開く"
+    : "対応するファイルを別タブで開く";
+}
+
 function readWorkspaceEmbedSource(node: ProseNode): string {
   return `${node.attrs.src ?? ""}`;
 }
@@ -1042,7 +1052,9 @@ function createTextFrameDocument(content: string, title: string): string {
         color-scheme: light;
       }
 
+      html,
       body {
+        height: 100%;
         margin: 0;
         background: #fbfcfd;
         color: #1f2733;

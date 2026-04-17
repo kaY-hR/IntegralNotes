@@ -276,8 +276,12 @@ export interface IntegralNotesApi {
   copyExternalEntries: (request: CopyExternalEntriesRequest) => Promise<CopyEntriesResult>;
   saveClipboardImage: (request: SaveClipboardImageRequest) => Promise<SaveClipboardImageResult>;
   saveNoteImage: (request: SaveNoteImageRequest, content: Uint8Array) => Promise<SaveNoteImageResult>;
+  getPathForFile: (file: unknown) => string;
+  writeWorkspaceSelectionToClipboard: (relativePaths: string[]) => void;
+  readWorkspaceSelectionFromClipboard: () => Promise<string[]>;
   writeClipboardText: (text: string) => void;
-  clipboardHasImage: () => boolean;
+  clipboardHasImage: () => Promise<boolean>;
+  readClipboardExternalPaths: () => Promise<string[]>;
   searchWorkspaceText: (request: WorkspaceSearchRequest) => Promise<WorkspaceSearchResult>;
   replaceWorkspaceText: (request: WorkspaceReplaceRequest) => Promise<WorkspaceReplaceResult>;
   resolveWorkspaceFileUrl: (relativePath: string) => Promise<string>;

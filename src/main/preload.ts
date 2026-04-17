@@ -1,4 +1,4 @@
-import { clipboard, contextBridge, ipcRenderer, webFrame } from "electron";
+import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import type { IntegralNotesApi } from "../shared/workspace";
 
@@ -60,8 +60,15 @@ const api: IntegralNotesApi = {
   copyExternalEntries: (request) => ipcRenderer.invoke("workspace:copyExternalEntries", request),
   saveClipboardImage: (request) => ipcRenderer.invoke("workspace:saveClipboardImage", request),
   saveNoteImage: (request, content) => ipcRenderer.invoke("workspace:saveNoteImage", request, content),
-  writeClipboardText: (text) => clipboard.writeText(text),
-  clipboardHasImage: () => !clipboard.readImage().isEmpty(),
+  getPathForFile: (file) =>
+    webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]),
+  writeWorkspaceSelectionToClipboard: (relativePaths) =>
+    ipcRenderer.send("workspace:writeWorkspaceSelectionToClipboard", relativePaths),
+  readWorkspaceSelectionFromClipboard: () =>
+    ipcRenderer.invoke("workspace:readWorkspaceSelectionFromClipboard"),
+  writeClipboardText: (text) => ipcRenderer.send("workspace:writeClipboardText", text),
+  clipboardHasImage: () => ipcRenderer.invoke("workspace:clipboardHasImage"),
+  readClipboardExternalPaths: () => ipcRenderer.invoke("workspace:readClipboardExternalPaths"),
   resolveWorkspaceFileUrl: (relativePath) => ipcRenderer.invoke("workspace:resolveFileUrl", relativePath),
   openPathInExternalApp: (relativePath) =>
     ipcRenderer.invoke("workspace:openPathInExternalApp", relativePath),

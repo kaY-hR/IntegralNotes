@@ -8,10 +8,15 @@
 - metadata には少なくとも `id`, `path`, `hash`, `representation`, `visibility`, `provenance`, `createdAt` を持たせる
 - `path` は current canonical workspace relative path とし、workspace 内のどこでもよい
 - `visibility` はその `path` を app が hidden 扱いするかどうかの属性であり、hidden canonical copy の存在を意味しない
+- hidden 判定は path segment ベースとし、親 directory のいずれか、または directory 自身が `.` または `_` で始まる場合は hidden とする
+- file 自体は `.` 始まりだけを hidden とし、`_` 始まり file は hidden としない
 - `Data/` は visible path の default に過ぎず、固定の canonical location ではない
 - `file` は content hash、`directory` は tree hash、`dataset-json` は manifest content hash で追跡する
 - dataset metadata の `path` は `.idts` manifest の path を指す
 - 起動時には `path` / `hash` の差分から rename / move / content update を検知する
+- 起動時または Sync 時には `cwd` を scan し、`.md` 以外かつ未管理の workspace file があれば `ORD-...` を発行して original data として自動登録する
+- 自動登録では hidden directory 配下、hidden file、system-managed directory 配下、既存 managed path と衝突する path は除外する
+- `path` / `hash` のいずれでも追跡できない managed data は confirm を出したうえで管理対象から外せるようにする
 - 検知規則は少なくとも次を満たす
   - `path same + hash same`: 変更なし
   - `path changed + hash same`: rename / move とみなす
@@ -37,6 +42,7 @@
 - ユーザーによる rename / move は許可しない
 - app は data-note を file path ではなく target ID で開く
 - data-note は「この data は何か」を説明する note であり、canonical file link 一覧の自動生成は必須要件にしない
+- managed data を管理対象から外したときは、対応する metadata JSON と data-note も同時に削除する
 - `data-note` に限らず、`cwd` 配下の通常 Markdown は frontmatter があれば app が保持し、editor / viewer には本文だけを渡す
 - Markdown 保存時は本文だけを更新し、既存 frontmatter は壊さず保持する
 - Markdown note tab では `見たまま編集` と `body-only raw text` を切り替えられる
@@ -157,6 +163,7 @@
 - source dataset では `createdByBlockId` は `null` でよい
 - `dataset-json` では provenance / resolve 用に `memberIds` や `dataPath` を metadata または manifest に持たせる
 - path / hash tracking の基盤は original data / dataset の両方で共通にする
+- source dataset の `memberIds` に含まれる original data が管理対象から外れた場合は、対応する `.idts` manifest からもその ID を除去して metadata を再同期する
 
 ## 14. GC
 
@@ -198,6 +205,32 @@
 - 読み取り時は `/path/from/cwd` と `path/from/cwd` の両方を受ける
 - 自動保存先は `Data/` だが、手書き image link は workspace 内の他 path も許容する
 - IntegralNotes 内の rename / move では、`cwd` 配下の `.md` を走査して image target も自動更新する
-- explorer 上での画像貼り付け、保存先設定 UI、非 image attachment は MVP 対象外とする
+- explorer 上の貼り付けは note image attach とは別機能として扱う
+- note image attach では保存先設定 UI と非 image attachment は MVP 対象外とする
 - 詳細は `docs/30_設計/70_ノート画像添付.md` を参照
+
+## 17. ノート内埋め込み preview
+
+- 通常 note 本文では標準 Markdown image 記法 `![](/path/from/cwd)` を、画像添付だけでなく workspace file の埋め込み preview にも使える
+- app は `/path/from/cwd` と `path/from/cwd` の両方を workspace root 基準で解決する
+- `.idts` embed は dataset renderable preview を使う
+- それ以外の file の embed 解決順は `plugin viewer -> built-in viewer -> unsupported` とする
+- `html / svg / text / markdown / plugin viewer` などの embed preview は read-only としつつ、preview 内では通常どおりスクロールや選択ができるようにする
+- 埋め込み中の open 導線は surface 全体 click ではなく、右上の flat な `[別タブで開く]` button に分離する
+- `[別タブで開く]` は workspace file なら通常の file tab、managed data note fallback なら対応する note tab を開く
+- resize handle による縦方向リサイズは維持してよい
+- 詳細は `docs/30_設計/40_標準描画と結果閲覧.md` を参照
+
+## 18. Explorer tree 操作
+
+- Explorer では単一選択に加え、`Ctrl/Cmd` による加算選択を許容する
+- Explorer では `Shift` による可視 tree 順の範囲選択を許容する
+- `Ctrl/Cmd + Shift` では既存選択へ範囲追加できてよい
+- Explorer 内 drag and drop では、通常 drag-drop は move、`Ctrl/Cmd + drag` は copy とする
+- 外部 OS からの file / directory drop は copy として workspace へ取り込める
+- `Ctrl/Cmd + V` および右クリック `貼り付け` では、app 内で copy した workspace 項目を貼り付けられる
+- `Ctrl/Cmd + V` および右クリック `貼り付け` では、外部アプリが clipboard に置いた file / directory を取り込める
+- Explorer 上の clipboard image 貼り付けは許容し、既定 file 名は `image.png` とする
+- 貼り付け先は選択中 directory、file 選択時はその親 directory、未選択時は workspace root とする
+- 右クリックメニューから `コピー / 貼り付け / 削除 / 名前を変更 / パスのコピー / 相対パスのコピー / DataSetに追加` を実行できる
 

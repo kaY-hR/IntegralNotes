@@ -46,6 +46,7 @@ export interface IntegralBlockTypeDefinition {
 export type IntegralManagedDataVisibility = "visible" | "hidden";
 export type IntegralManagedDataProvenance = "source" | "derived";
 export type IntegralManagedDataEntityType = "original-data" | "dataset";
+export type IntegralManagedDataTrackingIssueKind = "missing" | "relink";
 export type IntegralOriginalDataRepresentation = "directory" | "file";
 export type IntegralDatasetRepresentation = "dataset-json";
 
@@ -99,6 +100,7 @@ export interface IntegralManagedDataTrackingIssue {
   candidatePaths: string[];
   displayName: string;
   entityType: IntegralManagedDataEntityType;
+  kind: IntegralManagedDataTrackingIssueKind;
   recordedHash: string;
   recordedPath: string;
   representation: IntegralOriginalDataRepresentation | IntegralDatasetRepresentation;
@@ -106,8 +108,9 @@ export interface IntegralManagedDataTrackingIssue {
 }
 
 export interface ResolveIntegralManagedDataTrackingIssueRequest {
+  action: "remove" | "relink";
   entityType: IntegralManagedDataEntityType;
-  selectedPath: string;
+  selectedPath?: string;
   targetId: string;
 }
 

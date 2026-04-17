@@ -727,7 +727,12 @@ textarea:focus-visible {
   max-height: none;
 }
 
+.readonly-markdown-preview {
+  min-height: 0;
+}
+
 .readonly-markdown-preview .milkdown {
+  height: 100%;
   min-height: 100%;
   padding: 0;
   background: #ffffff;
@@ -735,9 +740,10 @@ textarea:focus-visible {
 
 .readonly-markdown-preview .milkdown .editor {
   max-width: none;
-  min-height: 100%;
+  min-height: 0;
   height: 100%;
-  overflow: auto;
+  overflow-y: scroll;
+  overflow-x: auto;
   margin: 0;
   padding: 16px 18px 22px;
   border: 0;
@@ -985,6 +991,27 @@ textarea:focus-visible {
     0 18px 36px rgba(35, 46, 60, 0.08);
 }
 
+.editor-surface .readonly-markdown-preview .milkdown {
+  height: 100%;
+  min-height: 100%;
+  padding: 0;
+  background: #ffffff;
+}
+
+.editor-surface .readonly-markdown-preview .milkdown .editor {
+  max-width: none;
+  min-height: 0;
+  height: 100%;
+  overflow-y: scroll;
+  overflow-x: auto;
+  margin: 0;
+  padding: 16px 18px 22px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
 .raw-markdown-editor {
   display: block;
   width: min(980px, 100%);
@@ -1126,39 +1153,44 @@ textarea:focus-visible {
   margin: 6px 0;
 }
 
-.editor-surface .milkdown .editor-workspace-embed--openable {
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    background 120ms ease;
-}
-
-.editor-surface .milkdown .editor-workspace-embed--openable:hover {
-  border-color: #bfd0e0;
-  background: #fbfdff;
-}
-
 .editor-surface .milkdown .editor-workspace-embed--selected {
   box-shadow: 0 0 0 2px rgba(15, 108, 189, 0.18);
   border-color: rgba(15, 108, 189, 0.34);
+}
+
+.editor-surface .milkdown .editor-workspace-embed__toolbar,
+.editor-surface .milkdown .workspace-dataset-renderable-embed .editor-workspace-embed__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__open-button {
+  border: 1px solid #d6e0ea;
+  background: #f7f9fb;
+  color: #314454;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__open-button:hover {
+  border-color: #bfd0e0;
+  background: #eef3f8;
 }
 
 .editor-surface .milkdown .editor-workspace-embed__surface {
   position: relative;
   display: grid;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border-radius: 6px;
-}
-
-.editor-surface .milkdown .editor-workspace-embed__surface--openable {
-  cursor: pointer;
 }
 
 .editor-surface .milkdown .editor-workspace-embed__frame,
 .editor-surface .milkdown .editor-workspace-embed__markdown {
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 1px solid #d6e0ea;
   border-radius: 6px;
   background: #ffffff;
@@ -1172,6 +1204,7 @@ textarea:focus-visible {
 .editor-surface .milkdown .editor-workspace-embed__plugin {
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 1px solid #d6e0ea;
   border-radius: 6px;
   background: #ffffff;
@@ -1181,21 +1214,26 @@ textarea:focus-visible {
 .editor-surface .milkdown .editor-workspace-embed__dataset {
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 1px solid #d6e0ea;
   border-radius: 6px;
   background: #ffffff;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .editor-surface .milkdown .editor-workspace-embed__plugin .integral-plugin-frame-shell,
 .editor-surface .milkdown .editor-workspace-embed__plugin .integral-plugin-frame {
   width: 100%;
   height: 100%;
+  min-height: 0;
+}
+
+.editor-surface .milkdown .editor-workspace-embed__plugin .integral-plugin-frame-shell--loading {
   min-height: 100%;
 }
 
 .editor-surface .milkdown .editor-workspace-embed__plugin .integral-plugin-frame {
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .editor-surface .milkdown .editor-workspace-embed__image {
@@ -1232,15 +1270,6 @@ textarea:focus-visible {
   color: #9d2f2f;
 }
 
-.editor-surface .milkdown .editor-workspace-embed__frame,
-.editor-surface .milkdown .editor-workspace-embed__image,
-.editor-surface .milkdown .editor-workspace-embed__markdown,
-.editor-surface .milkdown .editor-workspace-embed__dataset,
-.editor-surface .milkdown .editor-workspace-embed__dataset * ,
-.editor-surface .milkdown .editor-workspace-embed__plugin {
-  pointer-events: none;
-}
-
 .editor-surface .milkdown .editor-workspace-embed__resize-handle {
   position: absolute;
   right: 0;
@@ -1270,6 +1299,8 @@ textarea:focus-visible {
 }
 
 .editor-surface .milkdown .workspace-dataset-renderable-embed {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -2952,6 +2983,11 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   .editor-surface .milkdown .editor {
     min-height: calc(100vh - 280px);
     padding: 28px 22px;
+  }
+
+  .editor-surface .readonly-markdown-preview .milkdown .editor {
+    min-height: 0;
+    padding: 16px 18px 22px;
   }
 
   .raw-markdown-editor {

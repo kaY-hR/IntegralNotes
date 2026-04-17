@@ -11,7 +11,8 @@ import {
 import type {
   IntegralAssetCatalog,
   IntegralManagedDataTrackingIssue,
-  IntegralOriginalDataSummary
+  IntegralOriginalDataSummary,
+  ResolveIntegralManagedDataTrackingIssueRequest
 } from "../shared/integral";
 import type {
   CopyEntriesResult,
@@ -85,10 +86,6 @@ interface TreeContextMenuState {
 interface DatasetCreationDialogState {
   defaultName: string;
   relativePaths: string[];
-}
-
-interface ExplorerClipboardState {
-  sourcePaths: string[];
 }
 
 interface ManagedDataTarget {
@@ -284,10 +281,40 @@ function normalizeRelativePath(relativePath: string): string {
     .join("/");
 }
 
-function isHiddenWorkspacePath(relativePath: string): boolean {
-  return normalizeRelativePath(relativePath)
+function isHiddenWorkspaceEntry(entry: WorkspaceEntry): boolean {
+  const segments = normalizeRelativePath(entry.relativePath)
     .split("/")
-    .some((segment) => segment.startsWith("."));
+    .filter(Boolean);
+
+  if (segments.length === 0) {
+    return false;
+  }
+
+  const parentSegments = segments.slice(0, -1);
+  const leafSegment = segments[segments.length - 1] ?? "";
+
+  return parentSegments.some(isHiddenWorkspaceDirectorySegment) ||
+    (entry.kind === "directory"
+      ? isHiddenWorkspaceDirectorySegment(leafSegment)
+      : leafSegment.startsWith("."));
+}
+
+function isHiddenWorkspacePath(relativePath: string): boolean {
+  const normalizedPath = normalizeRelativePath(relativePath);
+
+  if (normalizedPath.length === 0) {
+    return false;
+  }
+
+  const segments = normalizedPath.split("/").filter(Boolean);
+  const parentSegments = segments.slice(0, -1);
+  const leafSegment = segments[segments.length - 1] ?? "";
+
+  return parentSegments.some(isHiddenWorkspaceDirectorySegment) || leafSegment.startsWith(".");
+}
+
+function isHiddenWorkspaceDirectorySegment(segment: string): boolean {
+  return segment.startsWith(".") || segment.startsWith("_");
 }
 
 function filterWorkspaceEntries(
@@ -299,7 +326,7 @@ function filterWorkspaceEntries(
   }
 
   return entries.flatMap((entry) => {
-    if (isHiddenWorkspacePath(entry.relativePath)) {
+    if (isHiddenWorkspaceEntry(entry)) {
       return [];
     }
 
@@ -434,6 +461,66 @@ function findManagedDataTargetForPath(
     : null;
 }
 
+function collectManagedDataTargetsForPaths(
+  catalog: IntegralAssetCatalog,
+  relativePaths: readonly string[]
+): ManagedDataTarget[] {
+  const normalizedPaths = relativePaths.map((relativePath) => normalizeRelativePath(relativePath));
+  const matches = new Map<string, ManagedDataTarget>();
+
+  const collectMatches = (
+    displayName: string,
+    targetId: string,
+    managedPath: string,
+    representation: "directory" | "file" | "dataset-json"
+  ): void => {
+    const normalizedManagedPath = normalizeRelativePath(managedPath);
+
+    if (
+      normalizedManagedPath.length === 0 ||
+      !normalizedPaths.some((relativePath) =>
+        doWorkspacePathsOverlapForManagedDelete(relativePath, normalizedManagedPath, representation)
+      )
+    ) {
+      return;
+    }
+
+    matches.set(targetId, {
+      displayName,
+      targetId
+    });
+  };
+
+  for (const entry of catalog.originalData) {
+    collectMatches(entry.displayName, entry.originalDataId, entry.path, entry.representation);
+  }
+
+  for (const entry of catalog.datasets) {
+    collectMatches(entry.name, entry.datasetId, entry.path, entry.representation);
+  }
+
+  return Array.from(matches.values()).sort((left, right) =>
+    `${left.displayName} ${left.targetId}`.localeCompare(
+      `${right.displayName} ${right.targetId}`,
+      "ja"
+    )
+  );
+}
+
+function doWorkspacePathsOverlapForManagedDelete(
+  selectedPath: string,
+  managedPath: string,
+  representation: "directory" | "file" | "dataset-json"
+): boolean {
+  if (representation === "directory") {
+    return selectedPath === managedPath ||
+      selectedPath.startsWith(`${managedPath}/`) ||
+      managedPath.startsWith(`${selectedPath}/`);
+  }
+
+  return selectedPath === managedPath || managedPath.startsWith(`${selectedPath}/`);
+}
+
 function createPathChange(previousPath: string, nextPath: string): WorkspacePathChange | null {
   const normalizedPreviousPath = normalizeRelativePath(previousPath);
   const normalizedNextPath = normalizeRelativePath(nextPath);
@@ -499,6 +586,87 @@ function findEntriesByPaths(entries: WorkspaceEntry[], relativePaths: Iterable<s
   return collapseNestedSelection(relativePaths)
     .map((relativePath) => findEntryByPath(entries, relativePath))
     .filter((entry): entry is WorkspaceEntry => entry !== undefined);
+}
+
+function flattenVisibleTreeEntries(
+  entries: WorkspaceEntry[],
+  expandedPaths: ReadonlySet<string>
+): WorkspaceEntry[] {
+  const flattened: WorkspaceEntry[] = [];
+
+  for (const entry of entries) {
+    flattened.push(entry);
+
+    if (
+      entry.kind === "directory" &&
+      entry.children &&
+      expandedPaths.has(entry.relativePath)
+    ) {
+      flattened.push(...flattenVisibleTreeEntries(entry.children, expandedPaths));
+    }
+  }
+
+  return flattened;
+}
+
+function findSelectionRangePaths(
+  visibleEntries: WorkspaceEntry[],
+  anchorPath: string,
+  targetPath: string
+): string[] {
+  const visiblePaths = visibleEntries.map((entry) => entry.relativePath);
+  const targetIndex = visiblePaths.indexOf(targetPath);
+
+  if (targetIndex < 0) {
+    return targetPath.length > 0 ? [targetPath] : [];
+  }
+
+  const anchorIndex = visiblePaths.indexOf(anchorPath);
+  const rangeAnchorIndex = anchorIndex >= 0 ? anchorIndex : targetIndex;
+  const startIndex = Math.min(rangeAnchorIndex, targetIndex);
+  const endIndex = Math.max(rangeAnchorIndex, targetIndex);
+
+  return visiblePaths.slice(startIndex, endIndex + 1);
+}
+
+function hasExternalTransferFiles(dataTransfer: DataTransfer): boolean {
+  if (dataTransfer.types.includes("Files")) {
+    return true;
+  }
+
+  return Array.from(dataTransfer.items).some((item) => item.kind === "file");
+}
+
+function collectExternalTransferAbsolutePaths(dataTransfer: DataTransfer): string[] {
+  const absolutePaths = new Set<string>();
+  const collectAbsolutePath = (file: File | null): void => {
+    if (!file) {
+      return;
+    }
+
+    let absolutePath = "";
+
+    try {
+      absolutePath = window.integralNotes.getPathForFile(file).trim();
+    } catch (error) {
+      console.error("[Explorer] failed to resolve dropped file path", error);
+    }
+
+    if (absolutePath.length > 0) {
+      absolutePaths.add(absolutePath);
+    }
+  };
+
+  Array.from(dataTransfer.files).forEach((file) => {
+    collectAbsolutePath(file);
+  });
+  Array.from(dataTransfer.items)
+    .filter((item) => item.kind === "file")
+    .forEach((item) => {
+      collectAbsolutePath(item.getAsFile());
+    });
+
+  return Array.from(absolutePaths);
 }
 
 function getEntryDirectoryPath(entry: WorkspaceEntry | undefined): string {
@@ -733,7 +901,6 @@ export function App(): JSX.Element {
   const [inlineEditorPending, setInlineEditorPending] = useState(false);
   const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
-  const [explorerClipboard, setExplorerClipboard] = useState<ExplorerClipboardState | null>(null);
   const [datasetCreationDialog, setDatasetCreationDialog] = useState<DatasetCreationDialogState | null>(null);
   const [datasetCreationPending, setDatasetCreationPending] = useState(false);
   const [activeSidebarViewId, setActiveSidebarViewId] = useState(BUILTIN_EXPLORER_SIDEBAR_VIEW_ID);
@@ -760,6 +927,7 @@ export function App(): JSX.Element {
   const visibleWorkspaceEntries = workspace
     ? filterWorkspaceEntries(workspace.entries, showHiddenEntries)
     : [];
+  const visibleTreeEntries = flattenVisibleTreeEntries(visibleWorkspaceEntries, expandedPaths);
   const selectedEntry = findEntryByPath(visibleWorkspaceEntries, selectedEntryPath);
   const selectedEntries = findEntriesByPaths(visibleWorkspaceEntries, selectedEntryPaths);
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
@@ -1105,8 +1273,13 @@ export function App(): JSX.Element {
     }
   };
 
-  const resolveTrackingIssue = async (selectedPath: string): Promise<void> => {
-    if (!activeTrackingIssue) {
+  const resolveTrackingIssue = async (
+    action: ResolveIntegralManagedDataTrackingIssueRequest["action"],
+    selectedPath?: string
+  ): Promise<void> => {
+    const issue = activeTrackingIssue;
+
+    if (!issue) {
       return;
     }
 
@@ -1114,13 +1287,18 @@ export function App(): JSX.Element {
 
     try {
       await window.integralNotes.resolveManagedDataTrackingIssue({
-        entityType: activeTrackingIssue.entityType,
+        action,
+        entityType: issue.entityType,
         selectedPath,
-        targetId: activeTrackingIssue.targetId
+        targetId: issue.targetId
       });
       resetIntegralPluginRuntime();
       setPluginCatalogRevision((current) => current + 1);
-      await refreshWorkspace(`${activeTrackingIssue.displayName} の tracked path を更新しました。`);
+      await refreshWorkspace(
+        action === "remove"
+          ? `${issue.displayName} を管理対象から外しました。`
+          : `${issue.displayName} の tracked path を更新しました。`
+      );
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     } finally {
@@ -1520,6 +1698,16 @@ export function App(): JSX.Element {
       }
 
       if (!sidebarPanelRef.current?.contains(activeElement)) {
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          ["c", "v"].includes(event.key.toLowerCase())
+        ) {
+          console.info("[Explorer] ignored shortcut because sidebar is not focused", {
+            activeElementTag: activeElement?.tagName ?? null,
+            activeElementClassName: activeElement?.className ?? null,
+            key: event.key
+          });
+        }
         return;
       }
 
@@ -1558,7 +1746,6 @@ export function App(): JSX.Element {
     contextMenu,
     datasetCreationDialog,
     deleteDialog,
-    explorerClipboard,
     activeSidebarViewId,
     inlineEditor,
     selectedEntry,
@@ -1997,7 +2184,7 @@ export function App(): JSX.Element {
     }
 
     const sourcePaths = collapseNestedSelection(entriesToCopy.map((entry) => entry.relativePath));
-    setExplorerClipboard({ sourcePaths });
+    window.integralNotes.writeWorkspaceSelectionToClipboard(sourcePaths);
     setContextMenu(null);
     setStatusMessage(
       sourcePaths.length === 1 ? `${basename(sourcePaths[0] ?? "")} をコピーしました` : `${sourcePaths.length} 件をコピーしました`
@@ -2013,10 +2200,14 @@ export function App(): JSX.Element {
     const destinationDirectoryPath = getPasteDestinationDirectoryPath(targetEntry);
 
     try {
-      if (explorerClipboard && explorerClipboard.sourcePaths.length > 0) {
+      const workspaceSelectionPaths = collapseNestedSelection(
+        await window.integralNotes.readWorkspaceSelectionFromClipboard()
+      );
+
+      if (workspaceSelectionPaths.length > 0) {
         const result = await window.integralNotes.copyEntries({
           destinationDirectoryPath,
-          sourcePaths: explorerClipboard.sourcePaths
+          sourcePaths: workspaceSelectionPaths
         });
 
         handleCopyEntriesResult(
@@ -2028,7 +2219,29 @@ export function App(): JSX.Element {
         return;
       }
 
-      if (window.integralNotes.clipboardHasImage()) {
+      const externalClipboardPaths = await window.integralNotes.readClipboardExternalPaths();
+
+      console.info("[Explorer] external clipboard probe", {
+        destinationDirectoryPath,
+        externalClipboardPaths
+      });
+
+      if (externalClipboardPaths.length > 0) {
+        const result = await window.integralNotes.copyExternalEntries({
+          destinationDirectoryPath,
+          sourceAbsolutePaths: externalClipboardPaths
+        });
+
+        handleCopyEntriesResult(
+          result,
+          result.createdEntries.length === 1
+            ? `${result.createdEntries[0]?.name ?? "項目"} を貼り付けました`
+            : `${result.createdEntries.length} 件を貼り付けました`
+        );
+        return;
+      }
+
+      if (await window.integralNotes.clipboardHasImage()) {
         const result = await window.integralNotes.saveClipboardImage({
           targetDirectoryPath: destinationDirectoryPath
         });
@@ -2037,8 +2250,9 @@ export function App(): JSX.Element {
         return;
       }
 
-      setStatusMessage("貼り付け可能な explorer 項目または画像がありません。");
+      setStatusMessage("貼り付け可能なファイル・フォルダ・画像がありません。");
     } catch (error) {
+      console.error("[Explorer] failed to paste into workspace", error);
       setStatusMessage(toErrorMessage(error));
     } finally {
       setContextMenu(null);
@@ -2229,16 +2443,22 @@ export function App(): JSX.Element {
 
     setInlineEditor(null);
     setContextMenu(null);
+    const targetPaths = collapseNestedSelection(entriesToDelete.map((entry) => entry.relativePath));
+    const managedTargets = collectManagedDataTargetsForPaths(assetCatalog, targetPaths);
+    const cleanupDescription =
+      managedTargets.length > 0
+        ? ` 対象に managed data が ${managedTargets.length} 件含まれるため、対応する metadata / data-note も削除し、必要なら source dataset の .idts も更新します。`
+        : "";
     setDeleteDialog({
       title: "削除確認",
       description:
         entriesToDelete.length === 1
           ? entriesToDelete[0]?.kind === "directory"
-            ? `${entriesToDelete[0]?.name ?? ""} 配下も含めて削除します。`
-            : `${entriesToDelete[0]?.name ?? ""} を削除します。`
-          : `${entriesToDelete.length} 件を削除します。フォルダ配下も含めて削除されます。`,
+            ? `${entriesToDelete[0]?.name ?? ""} 配下も含めて削除します。${cleanupDescription}`
+            : `${entriesToDelete[0]?.name ?? ""} を削除します。${cleanupDescription}`
+          : `${entriesToDelete.length} 件を削除します。フォルダ配下も含めて削除されます。${cleanupDescription}`,
       confirmLabel: "Delete",
-      targetPaths: collapseNestedSelection(entriesToDelete.map((entry) => entry.relativePath))
+      targetPaths
     });
   };
 
@@ -2265,6 +2485,7 @@ export function App(): JSX.Element {
 
   const openTreeContextMenu = (entry: WorkspaceEntry, x: number, y: number): void => {
     const position = clampContextMenuPosition(x, y);
+    focusExplorerSidebar();
 
     if (!selectedEntryPaths.has(entry.relativePath)) {
       replaceSelection([entry.relativePath], entry.relativePath);
@@ -2282,6 +2503,7 @@ export function App(): JSX.Element {
 
   const openTreeRootContextMenu = (x: number, y: number): void => {
     const position = clampContextMenuPosition(x, y);
+    focusExplorerSidebar();
 
     replaceSelection([], "");
     setContextMenu({
@@ -2296,7 +2518,25 @@ export function App(): JSX.Element {
       return;
     }
 
+    focusExplorerSidebar();
     const isAdditiveSelection = event.ctrlKey || event.metaKey;
+
+    if (event.shiftKey) {
+      const rangePaths = findSelectionRangePaths(
+        visibleTreeEntries,
+        selectedEntryPath,
+        entry.relativePath
+      );
+
+      if (isAdditiveSelection) {
+        replaceSelection(new Set([...selectedEntryPaths, ...rangePaths]), entry.relativePath);
+      } else {
+        replaceSelection(rangePaths, entry.relativePath);
+      }
+
+      setContextMenu(null);
+      return;
+    }
 
     if (isAdditiveSelection) {
       event.preventDefault();
@@ -2375,7 +2615,7 @@ export function App(): JSX.Element {
 
   const handleDragOverEntry = (entry: WorkspaceEntry, event: ReactDragEvent<HTMLDivElement>): void => {
     const hasInternalPayload = event.dataTransfer.types.includes(TREE_DRAG_MIME);
-    const hasExternalFiles = event.dataTransfer.files.length > 0;
+    const hasExternalFiles = hasExternalTransferFiles(event.dataTransfer);
 
     if (!hasInternalPayload && !hasExternalFiles) {
       return;
@@ -2432,9 +2672,15 @@ export function App(): JSX.Element {
         return;
       }
 
-      const sourceAbsolutePaths = Array.from(event.dataTransfer.files)
-        .map((file) => (file as File & { path?: string }).path?.trim() ?? "")
-        .filter((value) => value.length > 0);
+      const sourceAbsolutePaths = collectExternalTransferAbsolutePaths(event.dataTransfer);
+
+      console.info("[Explorer] external drop on entry", {
+        destinationDirectoryPath,
+        fileCount: event.dataTransfer.files.length,
+        itemKinds: Array.from(event.dataTransfer.items).map((item) => item.kind),
+        types: Array.from(event.dataTransfer.types),
+        sourceAbsolutePaths
+      });
 
       if (sourceAbsolutePaths.length === 0) {
         return;
@@ -2452,6 +2698,7 @@ export function App(): JSX.Element {
           : `${result.createdEntries.length} 件を取り込みました`
       );
     } catch (error) {
+      console.error("[Explorer] failed to handle external drop on entry", error);
       setStatusMessage(toErrorMessage(error));
     }
   };
@@ -2724,6 +2971,8 @@ export function App(): JSX.Element {
             return;
           }
 
+          focusExplorerSidebar();
+
           const target = event.target as HTMLElement | null;
 
           if (target?.closest(".tree-row")) {
@@ -2737,6 +2986,8 @@ export function App(): JSX.Element {
           if (!workspace) {
             return;
           }
+
+          focusExplorerSidebar();
 
           const target = event.target as HTMLElement | null;
 
@@ -2758,11 +3009,13 @@ export function App(): JSX.Element {
         }}
         onDragOver={(event) => {
           const hasInternalPayload = event.dataTransfer.types.includes(TREE_DRAG_MIME);
-          const hasExternalFiles = event.dataTransfer.files.length > 0;
+          const hasExternalFiles = hasExternalTransferFiles(event.dataTransfer);
 
           if (!hasInternalPayload && !hasExternalFiles) {
             return;
           }
+
+          focusExplorerSidebar();
 
           if ((event.target as HTMLElement | null)?.closest(".tree-row")) {
             return;
@@ -2778,6 +3031,7 @@ export function App(): JSX.Element {
             return;
           }
 
+          focusExplorerSidebar();
           event.preventDefault();
           setDropTargetPath(null);
 
@@ -2820,9 +3074,15 @@ export function App(): JSX.Element {
             return;
           }
 
-          const sourceAbsolutePaths = Array.from(event.dataTransfer.files)
-            .map((file) => (file as File & { path?: string }).path?.trim() ?? "")
-            .filter((value) => value.length > 0);
+          const sourceAbsolutePaths = collectExternalTransferAbsolutePaths(event.dataTransfer);
+
+          console.info("[Explorer] external drop on root", {
+            destinationDirectoryPath: "",
+            fileCount: event.dataTransfer.files.length,
+            itemKinds: Array.from(event.dataTransfer.items).map((item) => item.kind),
+            types: Array.from(event.dataTransfer.types),
+            sourceAbsolutePaths
+          });
 
           if (sourceAbsolutePaths.length === 0) {
             return;
@@ -2842,6 +3102,7 @@ export function App(): JSX.Element {
               );
             })
             .catch((error) => {
+              console.error("[Explorer] failed to handle external drop on root", error);
               setStatusMessage(toErrorMessage(error));
             });
         }}
@@ -2864,6 +3125,7 @@ export function App(): JSX.Element {
               }
             }}
             onContextMenuEntry={openTreeContextMenu}
+            onDoubleActivateEntry={handleDoubleActivateEntry}
             onDragEnd={handleDragEnd}
             onDragOverEntry={handleDragOverEntry}
             onDragStartEntry={handleDragStartEntry}
@@ -2969,6 +3231,14 @@ export function App(): JSX.Element {
   const activeSidebarView =
     sidebarViewDefinitions.find((view) => view.id === activeSidebarViewId) ?? sidebarViewDefinitions[0];
 
+  const focusExplorerSidebar = (): void => {
+    if (activeSidebarViewId !== BUILTIN_EXPLORER_SIDEBAR_VIEW_ID) {
+      return;
+    }
+
+    sidebarPanelRef.current?.focus({ preventScroll: true });
+  };
+
   useEffect(() => {
     if (!sidebarViewDefinitions.some((view) => view.id === activeSidebarViewId)) {
       setActiveSidebarViewId(BUILTIN_EXPLORER_SIDEBAR_VIEW_ID);
@@ -3019,6 +3289,7 @@ export function App(): JSX.Element {
         className="sidebar-panel"
         data-sidebar-view={activeSidebarView.id}
         ref={sidebarPanelRef}
+        tabIndex={-1}
       >
         {activeSidebarView.render()}
       </aside>
@@ -3163,7 +3434,7 @@ export function App(): JSX.Element {
         </div>
       ) : null}
 
-      {activeTrackingIssue ? (
+      {activeTrackingIssue?.kind === "relink" ? (
         <ManagedDataTrackingDialog
           issue={activeTrackingIssue}
           onClose={() => {
@@ -3172,9 +3443,28 @@ export function App(): JSX.Element {
             }
           }}
           onConfirm={(selectedPath) => {
-            void resolveTrackingIssue(selectedPath);
+            void resolveTrackingIssue("relink", selectedPath);
           }}
           pending={trackingResolutionPending}
+        />
+      ) : null}
+
+      {activeTrackingIssue?.kind === "missing" ? (
+        <WorkspaceDialog
+          confirmLabel="管理対象から外す"
+          danger
+          description={`${activeTrackingIssue.displayName} は recorded path (${activeTrackingIssue.recordedPath}) と hash の両方で追跡できません。管理対象から外し、紐づく data-note も整理します。`}
+          onClose={() => {
+            if (!trackingResolutionPending) {
+              setTrackingDialogDismissed(true);
+            }
+          }}
+          onConfirm={() => {
+            void resolveTrackingIssue("remove");
+          }}
+          pending={trackingResolutionPending}
+          requireInput={false}
+          title="管理対象の削除確認"
         />
       ) : null}
 

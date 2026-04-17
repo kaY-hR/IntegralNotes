@@ -88,6 +88,17 @@ const TEXT_EXTENSIONS = new Set([
   ".yaml",
   ".yml"
 ]);
+const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
+  ".git",
+  ".next",
+  ".store",
+  ".turbo",
+  ".vscode",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out"
+]);
 
 type ManagedDataVisibility = "hidden" | "visible";
 type ManagedDataProvenance = "derived" | "source";
@@ -146,6 +157,11 @@ interface DatasetManifest {
 interface ReconcileMetadataResult<TMetadata> {
   issue?: IntegralManagedDataTrackingIssue;
   metadata: TMetadata;
+}
+
+interface ReservedManagedPath {
+  relativePath: string;
+  representation: OriginalDataRepresentation | DatasetRepresentation;
 }
 
 interface PythonCallableSummary {
@@ -247,10 +263,37 @@ export class IntegralWorkspaceService {
 
     await this.workspaceService.ensureWorkspaceReady();
 
-    const metadataList = await this.readManagedDataMetadataList();
+    let metadataList = await this.readManagedDataMetadataList();
 
     if (metadataList.length === 0) {
       return;
+    }
+
+    const deletedManagedData = collectManagedDataDeletedByWorkspaceMutations(
+      mutations,
+      metadataList
+    );
+
+    if (deletedManagedData.length > 0) {
+      const deletedManagedDataIds = new Set<string>();
+
+      for (const metadata of deletedManagedData) {
+        if (deletedManagedDataIds.has(metadata.id)) {
+          continue;
+        }
+
+        deletedManagedDataIds.add(metadata.id);
+        await this.removeManagedDataMetadata(metadata, {
+          syncManagedDataNotes: false
+        });
+      }
+
+      metadataList = metadataList.filter((metadata) => !deletedManagedDataIds.has(metadata.id));
+      await this.workspaceService.syncManagedDataNotes();
+
+      if (metadataList.length === 0) {
+        return;
+      }
     }
 
     if (!this.shouldReconcileManagedDataMetadata(mutations, metadataList)) {
@@ -267,30 +310,31 @@ export class IntegralWorkspaceService {
   ): Promise<IntegralManagedDataTrackingIssue[]> {
     await this.ensureIntegralWorkspaceReady();
 
-    const selectedPath = normalizeRelativePath(request.selectedPath);
+    const metadata =
+      request.entityType === "original-data"
+        ? await this.readOriginalDataMetadata(request.targetId)
+        : await this.readDatasetMetadata(request.targetId);
+
+    if (!metadata) {
+      throw new Error(
+        request.entityType === "original-data"
+          ? `元データが見つかりません: ${request.targetId}`
+          : `dataset が見つかりません: ${request.targetId}`
+      );
+    }
+
+    if (request.action === "remove") {
+      await this.removeManagedDataMetadata(metadata);
+      return this.listManagedDataTrackingIssues();
+    }
+
+    const selectedPath = normalizeRelativePath(request.selectedPath ?? "");
 
     if (selectedPath.length === 0) {
       throw new Error("更新先の path を選択してください。");
     }
 
-    if (request.entityType === "original-data") {
-      const metadata = await this.readOriginalDataMetadata(request.targetId);
-
-      if (!metadata) {
-        throw new Error(`元データが見つかりません: ${request.targetId}`);
-      }
-
-      await this.applyTrackedPathResolution(metadata, selectedPath);
-    } else {
-      const metadata = await this.readDatasetMetadata(request.targetId);
-
-      if (!metadata) {
-        throw new Error(`dataset が見つかりません: ${request.targetId}`);
-      }
-
-      await this.applyTrackedPathResolution(metadata, selectedPath);
-    }
-
+    await this.applyTrackedPathResolution(metadata, selectedPath);
     return this.listManagedDataTrackingIssues();
   }
 
@@ -304,52 +348,14 @@ export class IntegralWorkspaceService {
     const importedOriginalData: IntegralOriginalDataSummary[] = [];
 
     for (const sourcePath of sourcePaths) {
-      const rootPath = this.getRootPath();
-      const resolvedSourcePath = path.resolve(sourcePath);
-      const sourceStats = await fs.stat(resolvedSourcePath);
-      const representation: OriginalDataRepresentation = sourceStats.isDirectory()
-        ? "directory"
-        : "file";
-      const sourceInsideWorkspace = this.isWorkspacePath(rootPath, resolvedSourcePath);
-
-      if (sourceInsideWorkspace) {
-        this.assertRegisterableOriginalDataPath(rootPath, resolvedSourcePath);
-      }
-
-      const originalDataId = createOpaqueId("ORD");
-      const visiblePath = await this.resolveOriginalDataVisiblePath(
-        rootPath,
-        resolvedSourcePath,
-        originalDataId,
-        representation
-      );
-      const visibleAbsolutePath = this.resolveWorkspacePath(visiblePath);
-
-      if (!sourceInsideWorkspace) {
-        await fs.mkdir(path.dirname(visibleAbsolutePath), { recursive: true });
-        await this.copyOriginalDataIntoWorkspace(
-          resolvedSourcePath,
-          visibleAbsolutePath,
-          representation
-        );
-      }
-
-      const metadata: OriginalDataMetadata = {
-        createdAt: new Date().toISOString(),
-        displayName: path.basename(resolvedSourcePath),
-        entityType: "original-data",
-        hash: await this.computeManagedDataHash(visibleAbsolutePath, representation),
-        id: originalDataId,
-        originalDataId,
-        path: visiblePath,
-        provenance: "source",
-        representation,
-        visibility: inferVisibilityFromPath(visiblePath)
-      };
-
-      await this.writeOriginalDataMetadata(originalDataId, metadata);
-      await this.writeOriginalDataNote(metadata);
+      const metadata = await this.registerOriginalDataPath(sourcePath, {
+        syncManagedDataNotes: false
+      });
       importedOriginalData.push(await this.toOriginalDataSummary(metadata));
+    }
+
+    if (importedOriginalData.length > 0) {
+      await this.workspaceService.syncManagedDataNotes();
     }
 
     return {
@@ -1012,12 +1018,97 @@ export class IntegralWorkspaceService {
     );
   }
 
-  private async writeOriginalDataNote(_metadata: OriginalDataMetadata): Promise<void> {
-    await this.workspaceService.syncManagedDataNotes();
+  private async writeDatasetManifest(relativePath: string, manifest: DatasetManifest): Promise<void> {
+    const absolutePath = this.resolveWorkspacePath(relativePath);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, JSON.stringify(manifest, null, 2), "utf8");
   }
 
   private async writeDatasetNote(_metadata: DatasetMetadata): Promise<void> {
     await this.workspaceService.syncManagedDataNotes();
+  }
+
+  private async removeManagedDataMetadata(
+    metadata: ManagedDataMetadata,
+    options: {
+      syncManagedDataNotes?: boolean;
+    } = {}
+  ): Promise<void> {
+    const { syncManagedDataNotes = true } = options;
+
+    await fs.rm(path.join(this.resolveStoreMetadataRootPath(), `${metadata.id}.json`), {
+      force: true
+    });
+
+    if (metadata.entityType === "original-data") {
+      await this.removeOriginalDataReferencesFromDatasets(metadata.originalDataId);
+    }
+
+    if (syncManagedDataNotes) {
+      await this.workspaceService.syncManagedDataNotes();
+    }
+  }
+
+  private async removeOriginalDataReferencesFromDatasets(originalDataId: string): Promise<void> {
+    const normalizedOriginalDataId = originalDataId.trim();
+
+    if (normalizedOriginalDataId.length === 0) {
+      return;
+    }
+
+    const metadataList = await this.readManagedDataMetadataList();
+
+    for (const metadata of metadataList) {
+      if (metadata.entityType !== "dataset") {
+        continue;
+      }
+
+      const manifest = await this.readDatasetManifest(metadata.path);
+
+      if (!manifest?.memberIds?.includes(normalizedOriginalDataId)) {
+        continue;
+      }
+
+      const nextManifest: DatasetManifest = {
+        ...manifest,
+        memberIds: manifest.memberIds.filter((memberId) => memberId !== normalizedOriginalDataId)
+      };
+
+      await this.writeDatasetManifest(metadata.path, nextManifest);
+
+      const nextMetadata: DatasetMetadata = {
+        ...metadata
+      };
+
+      await this.refreshDatasetManifestFields(nextMetadata);
+      nextMetadata.hash = await this.computeManagedDataHash(
+        this.resolveWorkspacePath(nextMetadata.path),
+        nextMetadata.representation
+      );
+      await this.writeDatasetMetadata(nextMetadata.datasetId, nextMetadata);
+    }
+  }
+
+  private async autoRegisterWorkspaceOriginalData(
+    workspaceEntries: readonly TrackableWorkspaceEntry[],
+    reservedManagedPaths: ReservedManagedPath[]
+  ): Promise<number> {
+    const candidates = workspaceEntries.filter((entry) =>
+      isAutoRegisterableOriginalDataEntry(entry, reservedManagedPaths)
+    );
+
+    if (candidates.length === 0) {
+      return 0;
+    }
+
+    for (const candidate of candidates) {
+      const metadata = await this.registerOriginalDataPath(candidate.absolutePath, {
+        syncManagedDataNotes: false
+      });
+      reserveManagedPath(reservedManagedPaths, metadata.path, metadata.representation);
+    }
+
+    return candidates.length;
   }
 
   private async applyTrackedPathResolution(
@@ -1044,7 +1135,7 @@ export class IntegralWorkspaceService {
         ...metadata,
         hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
         path: nextPath,
-        visibility: inferVisibilityFromPath(nextPath)
+        visibility: inferVisibilityFromPath(nextPath, metadata.representation)
       };
 
       await this.writeOriginalDataMetadata(nextMetadata.originalDataId, nextMetadata);
@@ -1053,7 +1144,7 @@ export class IntegralWorkspaceService {
         ...metadata,
         hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
         path: nextPath,
-        visibility: inferVisibilityFromPath(nextPath)
+        visibility: inferVisibilityFromPath(nextPath, metadata.representation)
       };
 
       await this.refreshDatasetManifestFields(nextMetadata);
@@ -1337,9 +1428,70 @@ export class IntegralWorkspaceService {
   private resolveOriginalDataContentPath(metadata: OriginalDataMetadata): string {
     return this.resolveWorkspacePath(metadata.path);
   }
+
   private isWorkspacePath(rootPath: string, absolutePath: string): boolean {
     const normalizedRelative = path.relative(rootPath, absolutePath);
-    return normalizedRelative.length === 0 || (!normalizedRelative.startsWith("..") && !path.isAbsolute(normalizedRelative));
+    return normalizedRelative.length === 0 ||
+      (!normalizedRelative.startsWith("..") && !path.isAbsolute(normalizedRelative));
+  }
+
+  private async registerOriginalDataPath(
+    sourcePath: string,
+    options: {
+      syncManagedDataNotes?: boolean;
+    } = {}
+  ): Promise<OriginalDataMetadata> {
+    const { syncManagedDataNotes = true } = options;
+    const rootPath = this.getRootPath();
+    const resolvedSourcePath = path.resolve(sourcePath);
+    const sourceStats = await fs.stat(resolvedSourcePath);
+    const representation: OriginalDataRepresentation = sourceStats.isDirectory()
+      ? "directory"
+      : "file";
+    const sourceInsideWorkspace = this.isWorkspacePath(rootPath, resolvedSourcePath);
+
+    if (sourceInsideWorkspace) {
+      this.assertRegisterableOriginalDataPath(rootPath, resolvedSourcePath);
+    }
+
+    const originalDataId = createOpaqueId("ORD");
+    const visiblePath = await this.resolveOriginalDataVisiblePath(
+      rootPath,
+      resolvedSourcePath,
+      originalDataId,
+      representation
+    );
+    const visibleAbsolutePath = this.resolveWorkspacePath(visiblePath);
+
+    if (!sourceInsideWorkspace) {
+      await fs.mkdir(path.dirname(visibleAbsolutePath), { recursive: true });
+      await this.copyOriginalDataIntoWorkspace(
+        resolvedSourcePath,
+        visibleAbsolutePath,
+        representation
+      );
+    }
+
+    const metadata: OriginalDataMetadata = {
+      createdAt: new Date().toISOString(),
+      displayName: path.basename(resolvedSourcePath),
+      entityType: "original-data",
+      hash: await this.computeManagedDataHash(visibleAbsolutePath, representation),
+      id: originalDataId,
+      originalDataId,
+      path: visiblePath,
+      provenance: "source",
+      representation,
+      visibility: inferVisibilityFromPath(visiblePath, representation)
+    };
+
+    await this.writeOriginalDataMetadata(originalDataId, metadata);
+
+    if (syncManagedDataNotes) {
+      await this.workspaceService.syncManagedDataNotes();
+    }
+
+    return metadata;
   }
 
   private assertRegisterableOriginalDataPath(rootPath: string, absolutePath: string): void {
@@ -1598,6 +1750,7 @@ export class IntegralWorkspaceService {
     const originalDataMetadataList: OriginalDataMetadata[] = [];
     const datasetMetadataList: DatasetMetadata[] = [];
     const claimedPaths = new Set<string>();
+    const reservedManagedPaths: ReservedManagedPath[] = [];
     const pendingIssues: IntegralManagedDataTrackingIssue[] = [];
     let hasChanges = false;
 
@@ -1638,6 +1791,13 @@ export class IntegralWorkspaceService {
 
       if (reconciled.issue) {
         pendingIssues.push(reconciled.issue);
+        reserveTrackingIssueCandidates(reservedManagedPaths, reconciled.issue);
+      } else {
+        reserveManagedPath(
+          reservedManagedPaths,
+          reconciled.metadata.path,
+          reconciled.metadata.representation
+        );
       }
 
       if (!areOriginalDataMetadataEqual(metadata, reconciled.metadata)) {
@@ -1655,12 +1815,28 @@ export class IntegralWorkspaceService {
 
       if (reconciled.issue) {
         pendingIssues.push(reconciled.issue);
+        reserveTrackingIssueCandidates(reservedManagedPaths, reconciled.issue);
+      } else {
+        reserveManagedPath(
+          reservedManagedPaths,
+          reconciled.metadata.path,
+          reconciled.metadata.representation
+        );
       }
 
       if (!areDatasetMetadataEqual(metadata, reconciled.metadata)) {
         await this.writeDatasetMetadata(reconciled.metadata.datasetId, reconciled.metadata);
         hasChanges = true;
       }
+    }
+
+    const autoRegisteredCount = await this.autoRegisterWorkspaceOriginalData(
+      workspaceEntries,
+      reservedManagedPaths
+    );
+
+    if (autoRegisteredCount > 0) {
+      hasChanges = true;
     }
 
     this.pendingTrackingIssues = pendingIssues.sort((left, right) =>
@@ -1685,7 +1861,7 @@ export class IntegralWorkspaceService {
 
     if (currentVisiblePath) {
       nextMetadata.hash = await this.computeManagedDataHash(currentVisiblePath, metadata.representation);
-      nextMetadata.visibility = inferVisibilityFromPath(metadata.path);
+      nextMetadata.visibility = inferVisibilityFromPath(metadata.path, metadata.representation);
       claimedPaths.add(metadata.path);
       return {
         metadata: nextMetadata
@@ -1705,7 +1881,10 @@ export class IntegralWorkspaceService {
         matchedPath.absolutePath,
         metadata.representation
       );
-      nextMetadata.visibility = inferVisibilityFromPath(matchedPath.relativePath);
+      nextMetadata.visibility = inferVisibilityFromPath(
+        matchedPath.relativePath,
+        metadata.representation
+      );
       claimedPaths.add(nextMetadata.path);
 
       return {
@@ -1721,18 +1900,25 @@ export class IntegralWorkspaceService {
         candidatePaths[0].absolutePath,
         metadata.representation
       );
-      nextMetadata.visibility = inferVisibilityFromPath(candidatePaths[0].relativePath);
+      nextMetadata.visibility = inferVisibilityFromPath(
+        candidatePaths[0].relativePath,
+        metadata.representation
+      );
       claimedPaths.add(nextMetadata.path);
       return {
         metadata: nextMetadata
       };
     }
 
+    if (candidatePaths.length > 1) {
+      return {
+        issue: buildRelinkTrackingIssue(nextMetadata, candidatePaths),
+        metadata: nextMetadata
+      };
+    }
+
     return {
-      issue:
-        candidatePaths.length > 1
-          ? buildTrackingIssue(nextMetadata, candidatePaths)
-          : undefined,
+      issue: buildMissingTrackingIssue(nextMetadata),
       metadata: nextMetadata
     };
   }
@@ -1747,7 +1933,7 @@ export class IntegralWorkspaceService {
 
     if (currentPath) {
       nextMetadata.hash = await this.computeManagedDataHash(currentPath, metadata.representation);
-      nextMetadata.visibility = inferVisibilityFromPath(metadata.path);
+      nextMetadata.visibility = inferVisibilityFromPath(metadata.path, metadata.representation);
       await this.refreshDatasetManifestFields(nextMetadata);
       claimedPaths.add(metadata.path);
       return {
@@ -1768,7 +1954,10 @@ export class IntegralWorkspaceService {
         matchedPath.absolutePath,
         metadata.representation
       );
-      nextMetadata.visibility = inferVisibilityFromPath(matchedPath.relativePath);
+      nextMetadata.visibility = inferVisibilityFromPath(
+        matchedPath.relativePath,
+        metadata.representation
+      );
       await this.refreshDatasetManifestFields(nextMetadata);
       claimedPaths.add(nextMetadata.path);
 
@@ -1785,7 +1974,10 @@ export class IntegralWorkspaceService {
         candidatePaths[0].absolutePath,
         metadata.representation
       );
-      nextMetadata.visibility = inferVisibilityFromPath(candidatePaths[0].relativePath);
+      nextMetadata.visibility = inferVisibilityFromPath(
+        candidatePaths[0].relativePath,
+        metadata.representation
+      );
       await this.refreshDatasetManifestFields(nextMetadata);
       claimedPaths.add(nextMetadata.path);
       return {
@@ -1793,11 +1985,15 @@ export class IntegralWorkspaceService {
       };
     }
 
+    if (candidatePaths.length > 1) {
+      return {
+        issue: buildRelinkTrackingIssue(nextMetadata, candidatePaths),
+        metadata: nextMetadata
+      };
+    }
+
     return {
-      issue:
-        candidatePaths.length > 1
-          ? buildTrackingIssue(nextMetadata, candidatePaths)
-          : undefined,
+      issue: buildMissingTrackingIssue(nextMetadata),
       metadata: nextMetadata
     };
   }
@@ -2614,8 +2810,31 @@ function areDatasetMetadataEqual(left: DatasetMetadata, right: DatasetMetadata):
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function inferVisibilityFromPath(relativePath: string): ManagedDataVisibility {
-  return normalizeRelativePath(relativePath).startsWith(".store/") ? "hidden" : "visible";
+function inferVisibilityFromPath(
+  relativePath: string,
+  representation: OriginalDataRepresentation | DatasetRepresentation
+): ManagedDataVisibility {
+  const normalizedPath = normalizeRelativePath(relativePath);
+
+  if (normalizedPath.length === 0) {
+    return "visible";
+  }
+
+  const segments = normalizedPath.split("/").filter(Boolean);
+  const parentSegments = segments.slice(0, -1);
+  const leafSegment = segments[segments.length - 1] ?? "";
+  const hasHiddenDirectory = parentSegments.some(isHiddenDirectorySegment) ||
+    (representation === "directory" && isHiddenDirectorySegment(leafSegment));
+
+  if (hasHiddenDirectory || leafSegment.startsWith(".")) {
+    return "hidden";
+  }
+
+  return "visible";
+}
+
+function isHiddenDirectorySegment(segment: string): boolean {
+  return segment.startsWith(".") || segment.startsWith("_");
 }
 
 function doesWorkspaceMutationAffectManagedData(
@@ -2627,6 +2846,21 @@ function doesWorkspaceMutationAffectManagedData(
   }
 
   return typeof mutation.nextPath === "string" && doWorkspacePathsOverlap(metadata.path, mutation.nextPath);
+}
+
+function collectManagedDataDeletedByWorkspaceMutations(
+  mutations: readonly WorkspaceMutation[],
+  metadataList: readonly ManagedDataMetadata[]
+): ManagedDataMetadata[] {
+  const deleteMutations = mutations.filter((mutation) => mutation.kind === "delete");
+
+  if (deleteMutations.length === 0) {
+    return [];
+  }
+
+  return metadataList.filter((metadata) =>
+    deleteMutations.some((mutation) => doWorkspacePathsOverlap(metadata.path, mutation.path))
+  );
 }
 
 function doWorkspacePathsOverlap(left: string, right: string): boolean {
@@ -2722,7 +2956,7 @@ function doesEntryMatchRepresentation(
     (representation !== "directory" && entry.kind === "file");
 }
 
-function buildTrackingIssue(
+function buildRelinkTrackingIssue(
   metadata: OriginalDataMetadata | DatasetMetadata,
   candidatePaths: readonly TrackableWorkspaceEntry[]
 ): IntegralManagedDataTrackingIssue {
@@ -2732,11 +2966,110 @@ function buildTrackingIssue(
       .sort((left, right) => left.localeCompare(right, "ja")),
     displayName: metadata.displayName,
     entityType: metadata.entityType,
+    kind: "relink",
     recordedHash: metadata.hash,
     recordedPath: metadata.path,
     representation: metadata.representation,
     targetId: metadata.id
   };
+}
+
+function buildMissingTrackingIssue(
+  metadata: OriginalDataMetadata | DatasetMetadata
+): IntegralManagedDataTrackingIssue {
+  return {
+    candidatePaths: [],
+    displayName: metadata.displayName,
+    entityType: metadata.entityType,
+    kind: "missing",
+    recordedHash: metadata.hash,
+    recordedPath: metadata.path,
+    representation: metadata.representation,
+    targetId: metadata.id
+  };
+}
+
+function reserveManagedPath(
+  reservedManagedPaths: ReservedManagedPath[],
+  relativePath: string,
+  representation: OriginalDataRepresentation | DatasetRepresentation
+): void {
+  const normalizedPath = normalizeRelativePath(relativePath);
+
+  if (
+    normalizedPath.length === 0 ||
+    reservedManagedPaths.some(
+      (reservedPath) =>
+        reservedPath.representation === representation &&
+        normalizeRelativePath(reservedPath.relativePath) === normalizedPath
+    )
+  ) {
+    return;
+  }
+
+  reservedManagedPaths.push({
+    relativePath: normalizedPath,
+    representation
+  });
+}
+
+function reserveTrackingIssueCandidates(
+  reservedManagedPaths: ReservedManagedPath[],
+  issue: IntegralManagedDataTrackingIssue
+): void {
+  for (const candidatePath of issue.candidatePaths) {
+    reserveManagedPath(reservedManagedPaths, candidatePath, issue.representation);
+  }
+}
+
+function isAutoRegisterableOriginalDataEntry(
+  entry: TrackableWorkspaceEntry,
+  reservedManagedPaths: readonly ReservedManagedPath[]
+): boolean {
+  if (entry.kind !== "file") {
+    return false;
+  }
+
+  const normalizedRelativePath = normalizeRelativePath(entry.relativePath);
+
+  if (normalizedRelativePath.length === 0) {
+    return false;
+  }
+
+  if (path.posix.extname(normalizedRelativePath).toLowerCase() === ".md") {
+    return false;
+  }
+
+  const pathSegments = normalizedRelativePath.split("/").filter(Boolean);
+
+  if (
+    pathSegments.length === 0 ||
+    pathSegments.slice(0, -1).some(isHiddenDirectorySegment) ||
+    (pathSegments[pathSegments.length - 1] ?? "").startsWith(".") ||
+    pathSegments.some((segment) => AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES.has(segment))
+  ) {
+    return false;
+  }
+
+  return !isReservedManagedPath(normalizedRelativePath, reservedManagedPaths);
+}
+
+function isReservedManagedPath(
+  relativePath: string,
+  reservedManagedPaths: readonly ReservedManagedPath[]
+): boolean {
+  const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+  return reservedManagedPaths.some((reservedPath) => {
+    const normalizedReservedPath = normalizeRelativePath(reservedPath.relativePath);
+
+    if (reservedPath.representation === "directory") {
+      return normalizedRelativePath === normalizedReservedPath ||
+        normalizedRelativePath.startsWith(`${normalizedReservedPath}/`);
+    }
+
+    return normalizedRelativePath === normalizedReservedPath;
+  });
 }
 
 function splitLogLines(value: string): string[] {

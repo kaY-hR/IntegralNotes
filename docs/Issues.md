@@ -694,3 +694,21 @@
   - `src/main/main.ts`, `src/main/preload.ts`: IPC bridge
   - `src/renderer/AIChatPanel.tsx`: tool call 状態や edit preview の表示
   - 必要なら `docs/30_設計` に AI tool contract を別紙で起こす
+
+## [x] 34. `![]()` の embed preview をスクロール可能にし、open 導線を button に分離したい
+- Status:completed
+- 優先重み:5
+- 記載日時:2026-04-17(UTC+9)
+
+* 現状の workspace embed は `surface click で別タブ open` を優先するため、preview 本体を `pointer-events: none` に寄せており、scroll bar が見えても実際には scroll できない
+* `html / svg / text / markdown / plugin viewer` など iframe 系または read-only preview 系の embed は、通常の preview として描画し、中身をそのまま scroll / 選択できるようにしたい
+* open 導線は embed surface 全体 click ではなく、右上の flat な `[別タブで開く]` button に分離したい
+* button の open 先は既存方針を維持し、workspace file は通常 file tab、managed data note fallback は対応 note tab にしたい
+* `.idts` embed は既存の dataset preview 優先方針を維持しつつ、今回の変更で interaction を不必要に阻害しないようにしたい
+* 既存の縦方向 resize handle は維持したい
+* 2026-04-17 実装:
+  - `docs/10_要求/10_MVP要件.md`, `docs/10_要求/20_ユーザー体験.md`, `docs/30_設計/40_標準描画と結果閲覧.md`, `docs/30_設計/50_プラグイン定義.md` を更新し、embed 内 scroll を許可しつつ open 導線を button に分離する方針を反映した
+  - `src/renderer/workspaceEmbedFeature.tsx` の surface 全体 click / Enter / Space open を削除し、右上の `[別タブで開く]` button を追加した
+  - `.idts` embed を含め、workspace target を持つ preview では同じ button 導線を出せるようにした
+  - `src/renderer/styles.css` で embed preview の `pointer-events` 制約を外し、plugin iframe を含む preview 本体を通常どおり操作・scroll できるようにした
+  - `npm run build` が通ることを確認した

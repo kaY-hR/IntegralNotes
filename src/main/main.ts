@@ -1,5 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import type {
   CreateSourceDatasetRequest,
@@ -29,6 +31,9 @@ import {
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { WorkspaceService } from "./workspaceService";
 
+const execFileAsync = promisify(execFile);
+const WORKSPACE_SELECTION_CLIPBOARD_FORMAT = "application/x-integralnotes-workspace-selection";
+
 function resolveInitialWorkspacePath(): string | undefined {
   const configuredRootPath = process.env.INTEGRALNOTES_DEFAULT_WORKSPACE?.trim();
 
@@ -37,6 +42,103 @@ function resolveInitialWorkspacePath(): string | undefined {
   }
 
   return undefined;
+}
+
+async function readClipboardExternalPaths(): Promise<string[]> {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  try {
+    const command = [
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      "$items = @(Get-Clipboard -Format FileDropList -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })",
+      "if ($items.Count -eq 0) { '[]' } else { ConvertTo-Json -Compress -InputObject $items }"
+    ].join("; ");
+    const execution = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command
+      ],
+      {
+        windowsHide: true
+      }
+    );
+    const stdout = (execution.stdout ?? "").trim();
+
+    if (stdout.length === 0) {
+      console.info("[Explorer/Main] FileDropList clipboard probe returned empty stdout");
+      return [];
+    }
+
+    const parsed = JSON.parse(stdout);
+    const normalizedPayload = Array.isArray(parsed)
+      ? parsed
+      : typeof parsed === "string"
+        ? [parsed]
+        : [];
+
+    if (normalizedPayload.length === 0) {
+      console.info("[Explorer/Main] FileDropList clipboard probe returned unsupported payload", {
+        stdout
+      });
+      return [];
+    }
+
+    const paths = normalizedPayload
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    console.info("[Explorer/Main] FileDropList clipboard probe", {
+      pathCount: paths.length,
+      paths
+    });
+
+    return paths;
+  } catch (error) {
+    console.error("[Explorer/Main] failed to read FileDropList clipboard payload", error);
+    return [];
+  }
+}
+
+function writeWorkspaceSelectionToClipboard(relativePaths: string[]): void {
+  const normalizedPaths = Array.from(
+    new Set(relativePaths.map((value) => value.trim()).filter((value) => value.length > 0))
+  );
+
+  clipboard.writeBuffer(
+    WORKSPACE_SELECTION_CLIPBOARD_FORMAT,
+    Buffer.from(JSON.stringify(normalizedPaths), "utf8")
+  );
+}
+
+function readWorkspaceSelectionFromClipboard(): string[] {
+  try {
+    if (!clipboard.has(WORKSPACE_SELECTION_CLIPBOARD_FORMAT)) {
+      return [];
+    }
+
+    const parsed = JSON.parse(
+      clipboard.readBuffer(WORKSPACE_SELECTION_CLIPBOARD_FORMAT).toString("utf8")
+    );
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 function formatWindowTitle(snapshot: WorkspaceSnapshot | null): string {
@@ -79,6 +181,26 @@ function registerWindowZoomHandlers(window: BrowserWindow): void {
   });
 }
 
+function registerDevelopmentShortcuts(window: BrowserWindow): void {
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    return;
+  }
+
+  window.webContents.on("before-input-event", (event, input) => {
+    const key = input.key.toLowerCase();
+
+    if (key === "f12" || ((input.control || input.meta) && input.shift && key === "i")) {
+      event.preventDefault();
+
+      if (window.webContents.isDevToolsOpened()) {
+        window.webContents.closeDevTools();
+      } else {
+        window.webContents.openDevTools({ mode: "detach" });
+      }
+    }
+  });
+}
+
 async function createMainWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -94,10 +216,8 @@ async function createMainWindow(): Promise<void> {
     }
   });
   registerWindowZoomHandlers(mainWindow);
-
-  if (!process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.removeMenu();
-  }
+  registerDevelopmentShortcuts(mainWindow);
+  mainWindow.removeMenu();
 
   const snapshot = await workspaceService.getSnapshot();
   mainWindow.setTitle(formatWindowTitle(snapshot));
@@ -289,6 +409,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle("workspace:copyExternalEntries", async (_event, request: CopyExternalEntriesRequest) =>
     workspaceService.copyExternalEntries(request)
   );
+  ipcMain.on("workspace:writeWorkspaceSelectionToClipboard", (_event, relativePaths: string[]) => {
+    writeWorkspaceSelectionToClipboard(relativePaths);
+  });
+  ipcMain.handle("workspace:readWorkspaceSelectionFromClipboard", async () =>
+    readWorkspaceSelectionFromClipboard()
+  );
+  ipcMain.on("workspace:writeClipboardText", (_event, text: string) => {
+    clipboard.writeText(text);
+  });
+  ipcMain.handle("workspace:clipboardHasImage", async () => !clipboard.readImage().isEmpty());
+  ipcMain.handle("workspace:readClipboardExternalPaths", async () => readClipboardExternalPaths());
   ipcMain.handle("workspace:saveClipboardImage", async (_event, request: SaveClipboardImageRequest) => {
     const image = clipboard.readImage();
 
