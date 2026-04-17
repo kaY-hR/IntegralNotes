@@ -106,7 +106,7 @@ app 内部では次の JSON object に正規化する。
 ### `out`
 
 - 未実行 slot は `auto`
-- 実行後は hidden output dataset の `.idts` path を書き戻してよい
+- 実行後は visible output dataset の `.idts` path を書き戻してよい
 - internal normalized form では `auto` を `null` にする
 - `.idts` path が入っている場合はその文字列を保持する
 
@@ -123,7 +123,7 @@ block card では次を表示してよい。
 
 - display name
 - `run` または `use`
-- input slot と現在の `.idts`
+- input / output slot と現在の dataset 名
 - param 要約
 - output slot 一覧
 - hidden metadata から読んだ最新実行状態

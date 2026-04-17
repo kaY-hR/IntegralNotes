@@ -34,9 +34,6 @@ export function DatasetManifestFileViewer({
             <span className="workspace-dataset-viewer__summary-chip">
               {manifest.datasetKind || "dataset"}
             </span>
-            <span className="workspace-dataset-viewer__summary-chip">
-              {manifest.datasetId}
-            </span>
           </div>
         </div>
       </section>
@@ -62,7 +59,6 @@ export function DatasetManifestFileViewer({
                 >
                   <div className="workspace-dataset-viewer__member-main">
                     <strong>{member.displayName}</strong>
-                    <span>{member.originalDataId}</span>
                   </div>
                   <div className="workspace-dataset-viewer__member-meta">
                     <span>
@@ -112,7 +108,6 @@ export function DatasetManifestFileViewer({
           <div className="workspace-dataset-viewer__member-card">
             <div className="workspace-dataset-viewer__member-main">
               <strong>実データ</strong>
-              <span>{manifest.datasetId}</span>
             </div>
             <div className="workspace-dataset-viewer__member-meta">
               <span>directory</span>
@@ -141,7 +136,6 @@ export function DatasetManifestFileViewer({
       <section className="workspace-dataset-viewer__section workspace-dataset-viewer__section--note">
         <div className="workspace-dataset-viewer__section-header">
           <h3>ノート</h3>
-          <span>{manifest.noteTargetId}</span>
         </div>
         {manifest.noteMarkdown && manifest.noteMarkdown.trim().length > 0 ? (
           <div

@@ -43,10 +43,8 @@ const execFileAsync = promisify(execFile);
 
 const DATA_DIRECTORY = "Data";
 const DATASET_JSON_EXTENSION = ".idts";
-const DATASETS_DIRECTORY = "datasets";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
-const STORE_DATASET_MANIFESTS_DIRECTORY = "datasets";
 const STORE_OBJECTS_DIRECTORY = "objects";
 const STORE_RUNTIME_DIRECTORY = "runtime";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
@@ -377,7 +375,7 @@ export class IntegralWorkspaceService {
     const uniqueOriginalDataIds = Array.from(new Set(originalDataIds));
     const datasetId = createOpaqueId("DTS");
     const datasetName = normalizeDatasetName(request.name, datasetId);
-    const manifestRelativePath = await this.createSourceDatasetManifestRelativePath(
+    const manifestRelativePath = await this.createVisibleDatasetManifestRelativePath(
       datasetName,
       datasetId
     );
@@ -643,12 +641,6 @@ export class IntegralWorkspaceService {
     );
   }
 
-  private createHiddenDatasetManifestRelativePath(datasetId: string): string {
-    return normalizeRelativePath(
-      `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/${STORE_DATASET_MANIFESTS_DIRECTORY}/${datasetId}${DATASET_JSON_EXTENSION}`
-    );
-  }
-
   private resolvePythonRuntimeRootPath(blockId: string): string {
     return this.resolveWorkspacePath(
       `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/${STORE_RUNTIME_DIRECTORY}/${blockId}`
@@ -760,32 +752,42 @@ export class IntegralWorkspaceService {
     }
 
     for (const outputSlot of definition.outputSlots) {
+      const createdAt = new Date();
       const nextDatasetId = createOpaqueId("DTS");
+      const datasetName = createDerivedDatasetName(
+        definition.title,
+        outputSlot.name,
+        createdAt,
+        resolvedBlock["block-type"]
+      );
       const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
-      const datasetManifestPath = this.createHiddenDatasetManifestRelativePath(nextDatasetId);
+      const datasetManifestPath = await this.createVisibleDatasetManifestRelativePath(
+        datasetName,
+        nextDatasetId
+      );
       const datasetAbsolutePath = this.resolveWorkspacePath(datasetDataPath);
       const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
       const metadata: DatasetMetadata = {
-        createdAt: new Date().toISOString(),
+        createdAt: createdAt.toISOString(),
         createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
         dataPath: datasetDataPath,
         datasetId: nextDatasetId,
-        displayName: nextDatasetId,
+        displayName: datasetName,
         entityType: "dataset",
         hash: "",
         id: nextDatasetId,
         kind: outputSlot.producedKind?.trim() || `${resolvedBlock["block-type"]}.${outputSlot.name}`,
-        name: nextDatasetId,
+        name: datasetName,
         path: datasetManifestPath,
         provenance: "derived",
         representation: "dataset-json",
-        visibility: "hidden"
+        visibility: "visible"
       };
       const manifest: DatasetManifest = {
         dataPath: datasetDataPath,
         datasetId: nextDatasetId,
         kind: metadata.kind,
-        name: nextDatasetId
+        name: datasetName
       };
 
       await fs.mkdir(datasetAbsolutePath, { recursive: true });
@@ -1561,11 +1563,11 @@ export class IntegralWorkspaceService {
     await fs.link(targetPath, aliasPath);
   }
 
-  private async createSourceDatasetManifestRelativePath(
+  private async createVisibleDatasetManifestRelativePath(
     datasetName: string,
     datasetId: string
   ): Promise<string> {
-    const datasetsRootPath = this.resolveWorkspacePath(DATASETS_DIRECTORY);
+    const datasetsRootPath = this.resolveWorkspacePath(DATA_DIRECTORY);
     await fs.mkdir(datasetsRootPath, { recursive: true });
 
     const preferredStem = sanitizeFileStem(datasetName) || datasetId;
@@ -1573,7 +1575,7 @@ export class IntegralWorkspaceService {
 
     while (true) {
       const suffix = serial === 0 ? "" : `_${serial}`;
-      const relativePath = `${DATASETS_DIRECTORY}/${preferredStem}${suffix}${DATASET_JSON_EXTENSION}`;
+      const relativePath = `${DATA_DIRECTORY}/${preferredStem}${suffix}${DATASET_JSON_EXTENSION}`;
 
       if (!(await pathExists(this.resolveWorkspacePath(relativePath)))) {
         return relativePath;
@@ -2504,6 +2506,29 @@ function sanitizeFileStem(value: string): string {
     .trim()
     .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
     .replace(/[. ]+$/gu, "");
+}
+
+function createDerivedDatasetName(
+  analysisName: string,
+  slotName: string,
+  createdAt: Date,
+  fallbackAnalysisName?: string
+): string {
+  const normalizedAnalysisName =
+    sanitizeFileStem(analysisName) ||
+    sanitizeFileStem(fallbackAnalysisName ?? "") ||
+    "analysis";
+  const normalizedSlotName = sanitizeFileStem(slotName) || "output";
+  return `${normalizedAnalysisName}_${normalizedSlotName}_${formatDatasetTimestamp(createdAt)}`;
+}
+
+function formatDatasetTimestamp(value: Date): string {
+  const year = value.getFullYear().toString().padStart(4, "0");
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  const hours = `${value.getHours()}`.padStart(2, "0");
+  const minutes = `${value.getMinutes()}`.padStart(2, "0");
+  return `${year}${month}${day}${hours}${minutes}`;
 }
 
 function normalizeRelativePath(relativePath: string): string {

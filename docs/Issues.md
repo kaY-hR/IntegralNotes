@@ -712,3 +712,28 @@
   - `.idts` embed を含め、workspace target を持つ preview では同じ button 導線を出せるようにした
   - `src/renderer/styles.css` で embed preview の `pointer-events` 制約を外し、plugin iframe を含む preview 本体を通常どおり操作・scroll できるようにした
   - `npm run build` が通ることを確認した
+
+## [x] 35. dataset の user-facing 表示を ID ではなく名称中心にし、結果 `.idts` を `Data/` に出したい
+- Status:completed
+- 優先重み:6
+- 記載日時:2026-04-17-21:32(UTC+9)
+
+* 現状は解析 input の割り当てや結果閲覧で `DTS-...` が前面に出ており、ユーザーが ID を選ぶ・読む前提になっていて UX が悪い
+* dataset には既に `name` があるため、user-facing な一覧・picker・viewer・status message では基本的に名称を主表示し、ID は内部参照に閉じたい
+* `.idts` file はユーザーが Explorer や note source から触るため、file 名も dataset 名ベースにしたい
+* source / derived を問わず、visible な dataset manifest の既定保存先は `Data/` に揃えたい
+* derived dataset の system 既定名は `{解析名}_{slot名}_yyyyMMddHHmm` にしたい
+* 一方で internal canonical ID としての `DTS-...` は維持し、metadata JSON / data-note / `.store/objects/{datasetId}` / block 内部参照は従来どおり ID ベースでよい
+* 実現性調査の結果、`src/main/integralWorkspaceService.ts` には既に `.idts path -> datasetId` 解決層があり、manifest path を `Data/` に変えても内部契約は崩れない見込み
+* 主な実装対象は次:
+  - derived dataset の name/path 生成規則
+  - source dataset manifest の既定保存先の `Data/` への統一
+  - `.idts` viewer、dataset 作成完了 message などの ID 露出整理
+  - 関連仕様文書の追随
+* 2026-04-17 実装:
+  - `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` の関連文書を更新し、dataset 名優先表示、visible `Data/*.idts`、derived dataset 名規則 `{解析名}_{slot名}_yyyyMMddHHmm` を明記した
+  - `src/main/integralWorkspaceService.ts` で source / derived dataset の visible manifest 既定保存先を `Data/` に統一した
+  - derived dataset 作成時の system 既定名を block title と slot 名から生成し、`Data/{dataset-name}.idts` に出力するようにした
+  - internal canonical ID と `.store/objects/{datasetId}` は維持し、`.idts path -> datasetId` 解決契約はそのまま再利用した
+  - `src/renderer/DatasetManifestFileViewer.tsx`, `src/renderer/App.tsx`, `src/renderer/DataRegistrationDialog.tsx`, `src/renderer/IntegralAssetDialogs.tsx` を更新し、主要な user-facing UI から dataset ID 表示を外した
+  - `npm run build` が通ることを確認した

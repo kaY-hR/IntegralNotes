@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-17T12:53:59.435Z",
+  "createdByBlockId": "BLK-07ED0143",
+  "datasetId": "DTS-7BFE467E",
+  "displayName": "Chromatogram PCA_report_202604172153",
+  "entityType": "dataset",
+  "hash": "sha256:32CF6A5FC7D6A7E88A61DDEDDF643D9185D22D5CD7EF5F55E262B74527BBAE17",
+  "id": "DTS-7BFE467E",
+  "kind": "src/chromatogram_pca.py:main.report",
+  "dataPath": ".store/objects/DTS-7BFE467E",
+  "name": "Chromatogram PCA_report_202604172153",
+  "path": "Data/Chromatogram PCA_report_202604172153.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

@@ -2317,7 +2317,7 @@ export function App(): JSX.Element {
       });
 
       setDatasetCreationDialog(null);
-      setStatusMessage(`${result.dataset.name} (${result.dataset.datasetId}) を作成しました`);
+      setStatusMessage(`${result.dataset.name} を作成しました`);
       await refreshWorkspace();
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
@@ -3516,9 +3516,9 @@ export function App(): JSX.Element {
           onImportDirectories={() => importOriginalDataDirectories()}
           onImportFiles={() => importOriginalDataFiles()}
           onImportedOriginalData={handleImportedOriginalData}
-          onSourceDatasetCreated={(datasetId) => {
+          onSourceDatasetCreated={(dataset) => {
             setDataRegistrationDialogOpen(false);
-            setStatusMessage(`${datasetId} の dataset を作成しました。`);
+            setStatusMessage(`${dataset.name} を作成しました。`);
           }}
         />
       ) : null}

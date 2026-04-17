@@ -79,15 +79,16 @@
 - dataset の `representation` は `dataset-json` とする
 - source / derived を問わず dataset の canonical entrypoint は `.idts` manifest に統一する
 - `dataset-json` には `memberIds` や `dataPath` など、directory 解決に必要な情報を保持できる
+- GUI 上の dataset 一覧や picker、viewer では `name` を主表示し、ID は通常表示しない
 - GUI 上だけ、`1 input slot = N original data items` を許容する
 - `N original data items` を選んだ場合、app は source dataset を新規作成する
 - source dataset の current path は visible path を default にしてよい
-- derived dataset の current path は hidden `.store/.integral/datasets/{datasetId}.idts` を default にしてよい
+- derived dataset の current path も visible `Data/{dataset-name}.idts` を default にしてよい
 - block 内部の参照は常に `datasetId` で行う
 - 実行や表示で file system access が必要な場合、app は `datasetId` を「読める directory path」へ resolve する
 - app は `.idts` manifest を読んで source / derived の差を意識せず resolve できるようにする
 - output dataset 作成時は対応する data-note も自動生成または更新する
-- output dataset の system 既定名には ID を使ってよい
+- output dataset の system 既定名は `{解析名}_{slot名}_yyyyMMddHHmm` とする
 
 ## 6. Python 汎用解析
 
@@ -117,7 +118,7 @@
 - Python callable は output dataset フォルダへ自由に書き込める
 - 成功/失敗判定は exit code のみで行う
 - output dataset が空でも「空の結果」として扱う
-- output dataset の current path は hidden `.store/.integral/datasets/{datasetId}.idts` を default にしてよい
+- output dataset の current path は visible `Data/{dataset-name}.idts` を default にしてよい
 - output dataset 作成時は対応する data-note も自動生成または更新する
 - 実行時の current working directory は workspace root を基本とする
 - `analysis-args.json` や log は `.store/.integral/runtime/` 配下へ置いてよい

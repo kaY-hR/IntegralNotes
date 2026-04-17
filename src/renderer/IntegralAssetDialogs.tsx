@@ -177,7 +177,7 @@ interface OriginalDataPickerDialogProps {
     originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSelectDataset: (datasetId: string) => void;
+  onSelectDataset: (dataset: IntegralDatasetSummary) => void;
 }
 
 interface OriginalDataSelectionDialogProps {
@@ -443,7 +443,7 @@ export function OriginalDataPickerDialog({
           originalDataIds
         });
 
-        onSelectDataset(result.dataset.datasetId);
+        onSelectDataset(result.dataset);
       }}
       pendingLabel="作成中..."
       requireDatasetName

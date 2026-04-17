@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-17T12:50:32.857Z",
+  "createdByBlockId": "BLK-74C8888A",
+  "datasetId": "DTS-2441969F",
+  "displayName": "Dataset Report Demo_report_202604172150",
+  "entityType": "dataset",
+  "hash": "sha256:FF102D93F280D4DFDD8ADBBD5AFE8FDAF53DA142157E725A54B8D9B30AA06493",
+  "id": "DTS-2441969F",
+  "kind": "demo_dataset_report.py:main.report",
+  "dataPath": ".store/objects/DTS-2441969F",
+  "name": "Dataset Report Demo_report_202604172150",
+  "path": "Data/Dataset Report Demo_report_202604172150.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

@@ -1,0 +1,13 @@
+{
+  "datasetId": "DTS-A307948F",
+  "kind": "source-bundle",
+  "memberIds": [
+    "ORD-3363F826",
+    "ORD-B89605B8",
+    "ORD-0A078084",
+    "ORD-3B65ADC5",
+    "ORD-486E1E07",
+    "ORD-5924806E"
+  ],
+  "name": "my-LC-Samples"
+}

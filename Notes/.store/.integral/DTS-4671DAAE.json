@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-17T12:51:45.035Z",
+  "createdByBlockId": "BLK-7FCB71AB",
+  "datasetId": "DTS-4671DAAE",
+  "displayName": "LC Text To Chromatogram JSON_json_202604172151",
+  "entityType": "dataset",
+  "hash": "sha256:0317D73992EC652280AA035AA1536CAAE8EDD797785AAB9060421483B564A218",
+  "id": "DTS-4671DAAE",
+  "kind": "src/lc_text_to_chromatogram_json.py:main.json",
+  "dataPath": ".store/objects/DTS-4671DAAE",
+  "name": "LC Text To Chromatogram JSON_json_202604172151",
+  "path": "Data/LC Text To Chromatogram JSON_json_202604172151.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

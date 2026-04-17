@@ -1,6 +1,9 @@
 import { useState } from "react";
 
-import type { IntegralOriginalDataSummary } from "../shared/integral";
+import type {
+  IntegralDatasetSummary,
+  IntegralOriginalDataSummary
+} from "../shared/integral";
 
 import { OriginalDataPickerDialog } from "./IntegralAssetDialogs";
 
@@ -13,7 +16,7 @@ interface DataRegistrationDialogProps {
     originalData: readonly IntegralOriginalDataSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSourceDatasetCreated: (datasetId: string) => void;
+  onSourceDatasetCreated: (dataset: IntegralDatasetSummary) => void;
 }
 
 type DataRegistrationMode = "menu" | "source-dataset";
@@ -51,8 +54,8 @@ export function DataRegistrationDialog({
         }}
         onError={onError}
         onImportedOriginalData={onImportedOriginalData}
-        onSelectDataset={(datasetId) => {
-          onSourceDatasetCreated(datasetId);
+        onSelectDataset={(dataset) => {
+          onSourceDatasetCreated(dataset);
         }}
       />
     );

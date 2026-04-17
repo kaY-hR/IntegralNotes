@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-17T12:49:49.719Z",
+  "displayName": "Output7.txt",
+  "entityType": "original-data",
+  "hash": "sha256:D6640AA27348185754C747ECF3855FAEF8CCAEB4FBA951AF84865E087E108805",
+  "id": "ORD-5924806E",
+  "originalDataId": "ORD-5924806E",
+  "path": "Data/LC_text_files/Output7.txt",
+  "provenance": "source",
+  "representation": "file",
+  "visibility": "visible"
+}

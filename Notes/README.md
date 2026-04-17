@@ -125,19 +125,17 @@ out:
 id: BLK-74C8888A
 run: demo_dataset_report.py:main
 in:
-  source: /datasets/my_LC_Samples.idts
+  source: /Data/my-LC-Samples.idts
 params: {}
 out:
-  report: /.store/.integral/datasets/DTS-A5CDB6EC.idts
+  report: "/Data/Dataset Report Demo_report_202604172150.idts"
 ```
 
 <br />
 
-この、DTS-A5CDB6ECが、Dataset Report Demoの結果になります。
+この、Dataset Report Demo\_report\_...が、Dataset Report Demoの結果になります。
 
-結果を見る場合は、`![`と打って、DTS-AGCDB6EC**.idts**を選ぶと閲覧できます。
-
-<br />
+結果を見る場合は、`![`と打って、このファイルを選ぶと閲覧できます。
 
 <br />
 

@@ -99,7 +99,8 @@ original data 複数選択の場合:
 
 - output slot 名は decorator から決まる
 - 初期状態では note source 上の value は `auto`
-- 実行成功後は output slot ごとの hidden `.idts` path を note source の `out:` へ書き戻す
+- 実行成功後は output slot ごとの visible `.idts` path を note source の `out:` へ書き戻す
+- output dataset の system 既定名は `{解析名}_{slot名}_yyyyMMddHHmm` とする
 
 ## 6. 実行準備
 
@@ -107,7 +108,7 @@ app は実行前に次を行う。
 
 1. input `.idts` を `datasetId` に解決する
 2. input dataset を executable path に resolve する
-3. output slot ごとに hidden `.idts` manifest と実データ directory を確保する
+3. output slot ごとに visible `Data/{dataset-name}.idts` manifest と実データ directory を確保する
 4. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
 
 ## 7. analysis-args.json
@@ -154,7 +155,7 @@ app は実行前に次を行う。
 
 - output dataset が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
-- 実行成功後、app は output slot ごとの hidden `.idts` path を block source の `out:` に反映してよい
+- 実行成功後、app は output slot ごとの visible `.idts` path を block source の `out:` に反映してよい
 
 ## 9. decorator の import 契約
 

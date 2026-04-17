@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-17T12:49:49.759Z",
+  "displayName": "lc_text_to_chromatogram_json.py",
+  "entityType": "original-data",
+  "hash": "sha256:85928FCBE6F13379DA7D68E95ABEE1D5CE986418B013701FB226C27FCB285C7C",
+  "id": "ORD-D0DA76AA",
+  "originalDataId": "ORD-D0DA76AA",
+  "path": "src/lc_text_to_chromatogram_json.py",
+  "provenance": "source",
+  "representation": "file",
+  "visibility": "visible"
+}
