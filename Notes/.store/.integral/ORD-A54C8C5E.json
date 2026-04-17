@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-17T09:03:10.479Z",
+  "displayName": "Output3.txt",
+  "entityType": "original-data",
+  "hash": "sha256:B3AEB32FC397DB8856578EACEE3B05D548612F1FBD1CEFEDFED0F45A3A5C2BB4",
+  "id": "ORD-A54C8C5E",
+  "originalDataId": "ORD-A54C8C5E",
+  "path": "Data/LC_text_files/Output3.txt",
+  "provenance": "source",
+  "representation": "file",
+  "visibility": "visible"
+}

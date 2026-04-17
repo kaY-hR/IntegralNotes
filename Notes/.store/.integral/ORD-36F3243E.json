@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-17T09:03:10.541Z",
+  "displayName": "__init__.py",
+  "entityType": "original-data",
+  "hash": "sha256:7BF14CE001CE3ECB30D0F6D8912C4CBAD53FC8DB7D00CD07162189B93D696041",
+  "id": "ORD-36F3243E",
+  "originalDataId": "ORD-36F3243E",
+  "path": "scripts/integral/__init__.py",
+  "provenance": "source",
+  "representation": "file",
+  "visibility": "visible"
+}

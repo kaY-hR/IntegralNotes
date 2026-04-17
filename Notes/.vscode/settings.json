@@ -1,0 +1,8 @@
+{
+  "python.analysis.extraPaths": [
+    "./scripts"
+  ],
+  "python.autoComplete.extraPaths": [
+    "./scripts"
+  ]
+}

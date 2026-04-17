@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-17T09:13:33.546Z",
+  "createdByBlockId": "BLK-92463DC8",
+  "datasetId": "DTS-05543811",
+  "displayName": "DTS-05543811",
+  "entityType": "dataset",
+  "hash": "sha256:222C217E7EA88EADE0160E50DABF36B94C2AFE95C276F0CEE9A76A9CF8976171",
+  "id": "DTS-05543811",
+  "kind": "src/chromatogram_json_to_plotly_html.py:main.plot",
+  "dataPath": ".store/objects/DTS-05543811",
+  "name": "DTS-05543811",
+  "path": ".store/.integral/datasets/DTS-05543811.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "hidden"
+}

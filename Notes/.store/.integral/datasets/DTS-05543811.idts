@@ -1,0 +1,6 @@
+{
+  "dataPath": ".store/objects/DTS-05543811",
+  "datasetId": "DTS-05543811",
+  "kind": "src/chromatogram_json_to_plotly_html.py:main.plot",
+  "name": "DTS-05543811"
+}

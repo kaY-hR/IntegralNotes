@@ -1,0 +1,15 @@
+---
+integralNoteType: "data-note"
+dataTargetType: "original-data"
+managedDataId: "ORD-ED4735F7"
+originalDataId: "ORD-ED4735F7"
+entityType: "original-data"
+displayName: "Output1.txt"
+representation: "file"
+path: "Data/LC_text_files/Output1.txt"
+hash: "sha256:FD3367F1952E1E80D6F380476C228F7D41CC8EFD36A9F4C1AA48AB2A19D6AE0F"
+visibility: "visible"
+provenance: "source"
+createdAt: "2026-04-17T09:03:10.473Z"
+---
+# Output1.txt
