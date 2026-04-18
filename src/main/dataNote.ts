@@ -6,10 +6,10 @@ import {
   splitFrontmatterBlock
 } from "./frontmatter";
 
-type DataNoteTargetType = "dataset" | "original-data";
+type DataNoteTargetType = "dataset" | "managed-file";
 type ManagedDataVisibility = "hidden" | "visible";
 type ManagedDataProvenance = "derived" | "source";
-type OriginalDataRepresentation = "directory" | "file";
+type ManagedFileRepresentation = "directory" | "file";
 type DatasetRepresentation = "dataset-json";
 
 interface ManagedDataNoteMetadataBase {
@@ -18,14 +18,8 @@ interface ManagedDataNoteMetadataBase {
   hash: string;
   id: string;
   path: string;
-  provenance: ManagedDataProvenance;
+  provenance?: ManagedDataProvenance;
   visibility: ManagedDataVisibility;
-}
-
-export interface OriginalDataNoteMetadata extends ManagedDataNoteMetadataBase {
-  entityType: "original-data";
-  originalDataId: string;
-  representation: OriginalDataRepresentation;
 }
 
 export interface DatasetDataNoteMetadata extends ManagedDataNoteMetadataBase {
@@ -35,6 +29,13 @@ export interface DatasetDataNoteMetadata extends ManagedDataNoteMetadataBase {
   kind: string;
   memberIds?: string[];
   representation: DatasetRepresentation;
+}
+
+export interface ManagedFileDataNoteMetadata extends ManagedDataNoteMetadataBase {
+  createdByBlockId: string | null;
+  entityType: "managed-file";
+  format: string | null;
+  representation: ManagedFileRepresentation;
 }
 
 export interface DataNoteTargetInfo {
@@ -57,10 +58,6 @@ const COMMON_MANAGED_FRONTMATTER_KEYS = [
   "provenance",
   "createdAt"
 ] as const;
-const ORIGINAL_DATA_MANAGED_FRONTMATTER_KEYS = [
-  ...COMMON_MANAGED_FRONTMATTER_KEYS,
-  "originalDataId"
-] as const;
 const DATASET_MANAGED_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
   "datasetId",
@@ -68,39 +65,11 @@ const DATASET_MANAGED_FRONTMATTER_KEYS = [
   "createdByBlockId",
   "memberIds"
 ] as const;
-
-export function normalizeOriginalDataNoteMetadata(value: unknown): OriginalDataNoteMetadata | null {
-  if (!isJsonRecord(value)) {
-    return null;
-  }
-
-  if (
-    value.entityType === "original-data" &&
-    typeof value.id === "string" &&
-    typeof value.displayName === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.path === "string" &&
-    typeof value.hash === "string" &&
-    (value.representation === "file" || value.representation === "directory") &&
-    (value.visibility === "visible" || value.visibility === "hidden") &&
-    (value.provenance === "source" || value.provenance === "derived")
-  ) {
-    return {
-      createdAt: value.createdAt,
-      displayName: value.displayName,
-      entityType: "original-data",
-      hash: value.hash,
-      id: value.id.trim(),
-      originalDataId: value.id.trim(),
-      path: normalizeWorkspaceRelativePath(value.path),
-      provenance: value.provenance,
-      representation: value.representation,
-      visibility: value.visibility
-    };
-  }
-
-  return null;
-}
+const MANAGED_FILE_FRONTMATTER_KEYS = [
+  ...COMMON_MANAGED_FRONTMATTER_KEYS,
+  "createdByBlockId",
+  "format"
+] as const;
 
 export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNoteMetadata | null {
   if (!isJsonRecord(value)) {
@@ -145,42 +114,48 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
   return null;
 }
 
-export function isOriginalDataNoteMetadata(value: unknown): value is OriginalDataNoteMetadata {
-  return normalizeOriginalDataNoteMetadata(value) !== null;
+export function normalizeManagedFileNoteMetadata(value: unknown): ManagedFileDataNoteMetadata | null {
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  if (
+    value.entityType === "managed-file" &&
+    typeof value.id === "string" &&
+    typeof value.displayName === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.path === "string" &&
+    typeof value.hash === "string" &&
+    (value.representation === "file" || value.representation === "directory") &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    (value.createdByBlockId === null ||
+      value.createdByBlockId === undefined ||
+      typeof value.createdByBlockId === "string") &&
+    (value.format === null || value.format === undefined || typeof value.format === "string")
+  ) {
+    return {
+      createdAt: value.createdAt,
+      createdByBlockId: value.createdByBlockId ?? null,
+      displayName: value.displayName,
+      entityType: "managed-file",
+      format: value.format ?? null,
+      hash: value.hash,
+      id: value.id.trim(),
+      path: normalizeWorkspaceRelativePath(value.path),
+      representation: value.representation,
+      visibility: value.visibility
+    };
+  }
+
+  return null;
 }
 
 export function isDatasetDataNoteMetadata(value: unknown): value is DatasetDataNoteMetadata {
   return normalizeDatasetDataNoteMetadata(value) !== null;
 }
 
-export function buildOriginalDataNoteMarkdown(
-  metadata: OriginalDataNoteMetadata,
-  existingContent?: string
-): string {
-  return buildManagedDataNoteMarkdown({
-    defaultBody: buildTitleOnlyNoteBody(metadata.displayName),
-    existingContent,
-    frontmatterLines: [
-      `integralNoteType: ${serializeYamlValue(DATA_NOTE_TYPE)}`,
-      `dataTargetType: ${serializeYamlValue("original-data")}`,
-      `managedDataId: ${serializeYamlValue(metadata.id)}`,
-      `originalDataId: ${serializeYamlValue(metadata.originalDataId)}`,
-      `entityType: ${serializeYamlValue(metadata.entityType)}`,
-      `displayName: ${serializeYamlValue(metadata.displayName)}`,
-      `representation: ${serializeYamlValue(metadata.representation)}`,
-      `path: ${serializeYamlValue(metadata.path)}`,
-      `hash: ${serializeYamlValue(metadata.hash)}`,
-      `visibility: ${serializeYamlValue(metadata.visibility)}`,
-      `provenance: ${serializeYamlValue(metadata.provenance)}`,
-      `createdAt: ${serializeYamlValue(metadata.createdAt)}`
-    ],
-    generatedBodyCandidates: [
-      buildLegacyOriginalDataNoteBody(metadata),
-      buildTitleOnlyNoteBody(metadata.displayName)
-    ],
-    isGeneratedBody: (body) => isGeneratedDataNoteBody(body, metadata.displayName),
-    managedKeys: ORIGINAL_DATA_MANAGED_FRONTMATTER_KEYS
-  });
+export function isManagedFileNoteMetadata(value: unknown): value is ManagedFileDataNoteMetadata {
+  return normalizeManagedFileNoteMetadata(value) !== null;
 }
 
 export function buildDatasetDataNoteMarkdown(
@@ -221,6 +196,35 @@ export function buildDatasetDataNoteMarkdown(
   });
 }
 
+export function buildManagedFileNoteMarkdown(
+  metadata: ManagedFileDataNoteMetadata,
+  existingContent?: string
+): string {
+  const frontmatterLines = [
+    `integralNoteType: ${serializeYamlValue(DATA_NOTE_TYPE)}`,
+    `dataTargetType: ${serializeYamlValue("managed-file")}`,
+    `managedDataId: ${serializeYamlValue(metadata.id)}`,
+    `entityType: ${serializeYamlValue(metadata.entityType)}`,
+    `displayName: ${serializeYamlValue(metadata.displayName)}`,
+    `representation: ${serializeYamlValue(metadata.representation)}`,
+    `path: ${serializeYamlValue(metadata.path)}`,
+    `hash: ${serializeYamlValue(metadata.hash)}`,
+    `visibility: ${serializeYamlValue(metadata.visibility)}`,
+    `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
+    `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`,
+    `format: ${serializeYamlValue(metadata.format)}`
+  ];
+
+  return buildManagedDataNoteMarkdown({
+    defaultBody: buildTitleOnlyNoteBody(metadata.displayName),
+    existingContent,
+    frontmatterLines,
+    generatedBodyCandidates: [buildTitleOnlyNoteBody(metadata.displayName)],
+    isGeneratedBody: (body) => isGeneratedDataNoteBody(body, metadata.displayName),
+    managedKeys: MANAGED_FILE_FRONTMATTER_KEYS
+  });
+}
+
 export function extractDataNoteBody(markdown: string): string {
   const normalizedMarkdown = normalizeNewlines(markdown);
   const parsed = splitFrontmatterBlock(normalizedMarkdown);
@@ -257,19 +261,6 @@ export function parseDataNoteTargetInfo(markdown: string): DataNoteTargetInfo | 
 
   const dataTargetType = parseFrontmatterValue(frontmatter, "dataTargetType");
 
-  if (dataTargetType === "original-data") {
-    const originalDataId =
-      parseFrontmatterValue(frontmatter, "originalDataId") ??
-      parseFrontmatterValue(frontmatter, "managedDataId");
-
-    return typeof originalDataId === "string" && originalDataId.trim().length > 0
-      ? {
-          dataTargetType,
-          targetId: originalDataId.trim()
-        }
-      : null;
-  }
-
   if (dataTargetType === "dataset") {
     const datasetId =
       parseFrontmatterValue(frontmatter, "datasetId") ??
@@ -279,6 +270,17 @@ export function parseDataNoteTargetInfo(markdown: string): DataNoteTargetInfo | 
       ? {
           dataTargetType,
           targetId: datasetId.trim()
+        }
+      : null;
+  }
+
+  if (dataTargetType === "managed-file") {
+    const managedDataId = parseFrontmatterValue(frontmatter, "managedDataId");
+
+    return typeof managedDataId === "string" && managedDataId.trim().length > 0
+      ? {
+          dataTargetType,
+          targetId: managedDataId.trim()
         }
       : null;
   }
@@ -382,10 +384,6 @@ function buildMergedFrontmatter(
 
 function buildTitleOnlyNoteBody(displayName: string): string {
   return `# ${resolveManagedDataNoteName(displayName)}\n`;
-}
-
-function buildLegacyOriginalDataNoteBody(metadata: OriginalDataNoteMetadata): string {
-  return `# ${metadata.displayName}_${metadata.originalDataId}\n`;
 }
 
 function buildLegacyDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {

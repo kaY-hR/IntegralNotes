@@ -6,7 +6,7 @@ import type {
 let assetCatalog: IntegralAssetCatalog = {
   datasets: [],
   blockTypes: [],
-  originalData: []
+  managedFiles: []
 };
 let loadAssetCatalogPromise: Promise<void> | null = null;
 
@@ -32,7 +32,7 @@ export function resetIntegralPluginRuntime(): void {
   assetCatalog = {
     datasets: [],
     blockTypes: [],
-    originalData: []
+    managedFiles: []
   };
   loadAssetCatalogPromise = null;
 }

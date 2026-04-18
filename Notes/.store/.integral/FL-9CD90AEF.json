@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-18T06:53:32.663Z",
+  "createdByBlockId": null,
+  "displayName": "Output1.txt",
+  "entityType": "managed-file",
+  "format": "ext/txt",
+  "hash": "sha256:FD3367F1952E1E80D6F380476C228F7D41CC8EFD36A9F4C1AA48AB2A19D6AE0F",
+  "id": "FL-9CD90AEF",
+  "path": "Data/LC_text_files/Output1.txt",
+  "representation": "file",
+  "visibility": "visible"
+}

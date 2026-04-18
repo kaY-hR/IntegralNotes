@@ -22,9 +22,9 @@ function adjustZoomLevel(direction: "in" | "out" | "reset"): void {
 }
 
 const api: IntegralNotesApi = {
-  createSourceDataset: (request) => ipcRenderer.invoke("integral:createSourceDataset", request),
-  createSourceDatasetFromWorkspaceEntries: (request) =>
-    ipcRenderer.invoke("integral:createSourceDatasetFromWorkspaceEntries", request),
+  createDataset: (request) => ipcRenderer.invoke("integral:createDataset", request),
+  createDatasetFromWorkspaceEntries: (request) =>
+    ipcRenderer.invoke("integral:createDatasetFromWorkspaceEntries", request),
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
   zoomIn: () => adjustZoomLevel("in"),
@@ -32,11 +32,12 @@ const api: IntegralNotesApi = {
   resetZoom: () => adjustZoomLevel("reset"),
   getIntegralAssetCatalog: () => ipcRenderer.invoke("integral:getAssetCatalog"),
   listManagedDataTrackingIssues: () => ipcRenderer.invoke("integral:listManagedDataTrackingIssues"),
-  importOriginalDataDirectories: () => ipcRenderer.invoke("integral:importOriginalDataDirectories"),
-  importOriginalDataFiles: () => ipcRenderer.invoke("integral:importOriginalDataFiles"),
+  importManagedFileDirectories: () => ipcRenderer.invoke("integral:importManagedFileDirectories"),
+  importManagedFileFiles: () => ipcRenderer.invoke("integral:importManagedFileFiles"),
   inspectDataset: (datasetId) => ipcRenderer.invoke("integral:inspectDataset", datasetId),
   selectWorkspaceDirectory: (initialRelativePath) =>
     ipcRenderer.invoke("workspace:selectDirectory", initialRelativePath),
+  selectWorkspaceFile: (request) => ipcRenderer.invoke("workspace:selectFile", request),
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),

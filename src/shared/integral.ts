@@ -6,6 +6,9 @@ import type {
 
 export interface IntegralSlotDefinition {
   acceptedKinds?: string[];
+  extension?: string;
+  extensions?: string[];
+  format?: string;
   name: string;
   producedKind?: string;
 }
@@ -50,20 +53,24 @@ export interface IntegralBlockTypeDefinition {
 }
 
 export type IntegralManagedDataVisibility = "visible" | "hidden";
-export type IntegralManagedDataProvenance = "source" | "derived";
-export type IntegralManagedDataEntityType = "original-data" | "dataset";
+export type IntegralManagedDataEntityType = "managed-file" | "dataset";
 export type IntegralManagedDataTrackingIssueKind = "missing" | "relink";
-export type IntegralOriginalDataRepresentation = "directory" | "file";
+export type IntegralManagedFileContentRepresentation = "directory" | "file";
 export type IntegralDatasetRepresentation = "dataset-json";
+export type IntegralManagedFileRepresentation =
+  | IntegralManagedFileContentRepresentation
+  | IntegralDatasetRepresentation;
 
-export interface IntegralOriginalDataSummary {
+export interface IntegralManagedFileSummary {
   createdAt: string;
+  createdByBlockId: string | null;
   displayName: string;
+  entityType: IntegralManagedDataEntityType;
+  format: string | null;
   hash: string;
-  originalDataId: string;
+  id: string;
   path: string;
-  provenance: IntegralManagedDataProvenance;
-  representation: IntegralOriginalDataRepresentation;
+  representation: IntegralManagedFileRepresentation;
   visibility: IntegralManagedDataVisibility;
 }
 
@@ -77,7 +84,6 @@ export interface IntegralDatasetSummary {
   memberIds?: string[];
   name: string;
   path: string;
-  provenance: IntegralManagedDataProvenance;
   representation: IntegralDatasetRepresentation;
   renderableCount: number;
   visibility: IntegralManagedDataVisibility;
@@ -99,7 +105,7 @@ export interface IntegralDatasetInspection extends IntegralDatasetSummary {
 export interface IntegralAssetCatalog {
   datasets: IntegralDatasetSummary[];
   blockTypes: IntegralBlockTypeDefinition[];
-  originalData: IntegralOriginalDataSummary[];
+  managedFiles: IntegralManagedFileSummary[];
 }
 
 export interface IntegralManagedDataTrackingIssue {
@@ -109,7 +115,7 @@ export interface IntegralManagedDataTrackingIssue {
   kind: IntegralManagedDataTrackingIssueKind;
   recordedHash: string;
   recordedPath: string;
-  representation: IntegralOriginalDataRepresentation | IntegralDatasetRepresentation;
+  representation: IntegralManagedFileRepresentation;
   targetId: string;
 }
 
@@ -120,21 +126,21 @@ export interface ResolveIntegralManagedDataTrackingIssueRequest {
   targetId: string;
 }
 
-export interface ImportOriginalDataResult {
-  originalData: IntegralOriginalDataSummary[];
+export interface ImportManagedFilesResult {
+  managedFiles: IntegralManagedFileSummary[];
 }
 
-export interface CreateSourceDatasetRequest {
-  originalDataIds: string[];
+export interface CreateDatasetRequest {
+  managedFileIds: string[];
   name?: string;
 }
 
-export interface CreateSourceDatasetFromWorkspaceEntriesRequest {
+export interface CreateDatasetFromWorkspaceEntriesRequest {
   name?: string;
   relativePaths: string[];
 }
 
-export interface CreateSourceDatasetResult {
+export interface CreateDatasetResult {
   dataset: IntegralDatasetSummary;
 }
 
@@ -154,6 +160,56 @@ export interface ExecuteIntegralBlockResult {
 
 const DEFAULT_OUTPUT_DIRECTORY = "/Data";
 const EXTERNAL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/u;
+
+export function normalizeIntegralSlotExtension(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
+}
+
+export function normalizeIntegralSlotExtensions(
+  values: readonly string[] | null | undefined
+): string[] | undefined {
+  if (!values) {
+    return undefined;
+  }
+
+  const normalized = Array.from(
+    new Set(
+      values
+        .map((value) => normalizeIntegralSlotExtension(value))
+        .filter((value): value is string => value !== null)
+    )
+  );
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+export function getIntegralSlotPrimaryExtension(
+  slot: Pick<IntegralSlotDefinition, "extension" | "extensions">,
+  fallback: string | null = null
+): string | null {
+  const direct = normalizeIntegralSlotExtension(slot.extension);
+
+  if (direct) {
+    return direct;
+  }
+
+  const listed = normalizeIntegralSlotExtensions(slot.extensions)?.[0] ?? null;
+  return listed ?? normalizeIntegralSlotExtension(fallback);
+}
+
+export function isIntegralBundleExtension(value: string | null | undefined): boolean {
+  return normalizeIntegralSlotExtension(value) === ".idts";
+}
 
 export function createDefaultIntegralBlockOutputConfig(
   slotName: string,

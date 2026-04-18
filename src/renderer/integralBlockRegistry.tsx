@@ -98,7 +98,7 @@ export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
       <section className="integral-json-preview__section">
         <div className="integral-json-preview__section-header">
           <span>Input Slots</span>
-          <span>{inputEntries.length > 0 ? "dataset refs" : "empty"}</span>
+          <span>{inputEntries.length > 0 ? "input refs" : "empty"}</span>
         </div>
 
         <div className="integral-json-preview__chips">
@@ -117,7 +117,7 @@ export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
       <section className="integral-json-preview__section">
         <div className="integral-json-preview__section-header">
           <span>Output Slots</span>
-          <span>{outputEntries.length > 0 ? "latest datasets" : "empty"}</span>
+          <span>{outputEntries.length > 0 ? "output refs" : "empty"}</span>
         </div>
 
         <div className="integral-json-preview__chips">

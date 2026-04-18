@@ -1,33 +1,30 @@
 import { useState } from "react";
 
-import type {
-  IntegralDatasetSummary,
-  IntegralOriginalDataSummary
-} from "../shared/integral";
+import type { IntegralDatasetSummary, IntegralManagedFileSummary } from "../shared/integral";
 
-import { OriginalDataPickerDialog } from "./IntegralAssetDialogs";
+import { ManagedFilePickerDialog } from "./IntegralAssetDialogs";
 
 interface DataRegistrationDialogProps {
   onClose: () => void;
   onError: (message: string) => void;
   onImportDirectories: () => Promise<void>;
   onImportFiles: () => Promise<void>;
-  onImportedOriginalData?: (
-    originalData: readonly IntegralOriginalDataSummary[],
+  onImportedManagedFiles?: (
+    managedFiles: readonly IntegralManagedFileSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSourceDatasetCreated: (dataset: IntegralDatasetSummary) => void;
+  onDatasetCreated: (dataset: IntegralDatasetSummary) => void;
 }
 
-type DataRegistrationMode = "menu" | "source-dataset";
+type DataRegistrationMode = "menu" | "dataset";
 
 export function DataRegistrationDialog({
   onClose,
   onError,
   onImportDirectories,
   onImportFiles,
-  onImportedOriginalData,
-  onSourceDatasetCreated
+  onImportedManagedFiles,
+  onDatasetCreated
 }: DataRegistrationDialogProps): JSX.Element {
   const [mode, setMode] = useState<DataRegistrationMode>("menu");
   const [pendingAction, setPendingAction] = useState<"directories" | "files" | null>(null);
@@ -46,16 +43,16 @@ export function DataRegistrationDialog({
     }
   };
 
-  if (mode === "source-dataset") {
+  if (mode === "dataset") {
     return (
-      <OriginalDataPickerDialog
+      <ManagedFilePickerDialog
         onClose={() => {
           setMode("menu");
         }}
         onError={onError}
-        onImportedOriginalData={onImportedOriginalData}
+        onImportedManagedFiles={onImportedManagedFiles}
         onSelectDataset={(dataset) => {
-          onSourceDatasetCreated(dataset);
+          onDatasetCreated(dataset);
         }}
       />
     );
@@ -66,12 +63,12 @@ export function DataRegistrationDialog({
       <div className="dialog-card dialog-card--data-registration">
         <div className="dialog-card__header">
           <h2>データ登録</h2>
-          <p>データファイルの取り込みと dataset の作成</p>
+          <p>managed file の取り込みと dataset の作成</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--data-registration">
           <section className="data-registration-card">
-            <strong>データファイルを取り込む</strong>
+            <strong>managed file を取り込む</strong>
             <p>外部のファイルやフォルダを workspace に登録します。</p>
             <div className="data-registration-card__actions">
               <button
@@ -99,13 +96,13 @@ export function DataRegistrationDialog({
 
           <section className="data-registration-card">
             <strong>Dataset を作成</strong>
-            <p>登録済みのデータファイルを組み合わせて dataset を作成します。</p>
+            <p>登録済みの managed file を組み合わせて dataset を作成します。</p>
             <div className="data-registration-card__actions">
               <button
                 className="button button--primary"
                 disabled={pendingAction !== null}
                 onClick={() => {
-                  setMode("source-dataset");
+                  setMode("dataset");
                 }}
                 type="button"
               >

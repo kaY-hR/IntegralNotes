@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-18T06:53:32.702Z",
+  "createdByBlockId": null,
+  "displayName": "chromatogram_json_to_plotly_html.py",
+  "entityType": "managed-file",
+  "format": "ext/py",
+  "hash": "sha256:87875CF4935D270A98D8304D343888A5379EB048AEF8A89CFFD9C9C76D233967",
+  "id": "FL-F9D9F641",
+  "path": "src/chromatogram_json_to_plotly_html.py",
+  "representation": "file",
+  "visibility": "visible"
+}

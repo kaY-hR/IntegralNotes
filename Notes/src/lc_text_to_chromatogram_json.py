@@ -9,9 +9,13 @@ from integral import integral_block
 
 @integral_block(
     display_name="LC Text To Chromatogram JSON",
-    description="Aggregate LabSolutions LC text exports into one chromatogram JSON file.",
-    inputs=["source"],
-    outputs=["json"],
+    description="Aggregate LabSolutions LC text exports from one bundle into a chromatogram JSON file.",
+    inputs=[
+        {"name": "source", "extensions": [".idts"], "format": "bundle/idts"},
+    ],
+    outputs=[
+        {"name": "json", "extension": ".json", "format": "chromatogram/json"},
+    ],
 )
 def main(
     inputs: dict[str, str | None],
@@ -19,10 +23,9 @@ def main(
     params: dict[str, Any] | None,
 ) -> None:
     source_root = require_existing_directory(inputs, "source")
-    output_root = require_output_directory(outputs, "json")
+    output_path = require_output_file(outputs, "json")
     options = params or {}
     pattern = str(options.get("glob") or "*.txt")
-    output_filename = normalize_output_filename(options.get("output_filename") or "chromatograms.json")
 
     payload: dict[str, dict[str, list[float]]] = {}
 
@@ -41,8 +44,8 @@ def main(
     if not payload:
         raise ValueError(f"No chromatogram sections were found in files matched by '{pattern}'")
 
-    output_root.mkdir(parents=True, exist_ok=True)
-    (output_root / output_filename).write_text(
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -62,24 +65,12 @@ def require_existing_directory(values: dict[str, str | None], slot_name: str) ->
     return directory
 
 
-def require_output_directory(values: dict[str, str | None], slot_name: str) -> Path:
+def require_output_file(values: dict[str, str | None], slot_name: str) -> Path:
     candidate = (values or {}).get(slot_name)
     if not candidate:
         raise ValueError(f"Output slot '{slot_name}' is required.")
 
     return Path(candidate)
-
-
-def normalize_output_filename(raw_value: Any) -> str:
-    filename = str(raw_value).strip()
-    if not filename:
-        raise ValueError("output_filename must not be empty.")
-
-    path_value = Path(filename)
-    if path_value.name != filename:
-        raise ValueError("output_filename must be a plain filename, not a path.")
-
-    return filename
 
 
 def parse_chromatogram_file(path: Path) -> dict[str, list[float]] | None:

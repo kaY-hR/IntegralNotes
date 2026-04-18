@@ -14,26 +14,7 @@
 
 ための汎用 plugin である。
 
-これは「全解析の本体」ではなく、
-
-- 汎用 UI で扱える解析
-- Python で素早く書きたい解析
-
-を受け持つ 1 plugin である。
-
-## なぜ Python を個別 plugin にしないか
-
-解析 1 本ごとに plugin を切ると、plugin 数が増えすぎる。  
-一方、すべてを本体機能にすると、Python 特有の都合まで本体が背負うことになる。
-
-そこで MVP では、
-
-- 共通 block schema は本体
-- Python 実行の都合は `general-analysis` plugin
-
-に分ける。
-
-## Python callable
+## Python Callable
 
 `general-analysis` plugin が扱う解析は、workspace 内の `.py` file に定義された decorator 付き関数である。
 
@@ -45,11 +26,6 @@
 
 を canonical な block-type とする。
 
-例:
-
-- `scripts/pca.py:main`
-- `analysis/normalize.py:run`
-
 ### decorator 例
 
 ```python
@@ -57,9 +33,14 @@ from integral import integral_block
 
 @integral_block(
     display_name="PCA",
-    description="数値テーブルに対して主成分分析を行う",
-    inputs=["samples", "labels"],
-    outputs=["score", "loading"],
+    description="CSV から PCA を計算する",
+    inputs=[
+        {"name": "samples", "extensions": [".csv"], "format": "table/csv"}
+    ],
+    outputs=[
+        {"name": "score", "extension": ".csv", "format": "table/pca-score"},
+        {"name": "report", "extension": ".html", "format": "report/html"},
+    ],
 )
 def main(inputs, outputs, params):
     ...
@@ -75,7 +56,7 @@ def main(inputs, outputs, params):
 MVP ではここに params schema は持たせない。  
 `params` 自体は free-form object として note source から与える。
 
-## discovery
+## Discovery
 
 app は workspace を scan して callable 一覧を作る。
 
@@ -83,8 +64,6 @@ app は workspace を scan して callable 一覧を作る。
 
 - 主表示: `PCA`
 - 補助表示: `scripts/pca.py:main`
-
-ユーザーが候補を選ぶと、app は `run:` を持つ `itg-notes` block を挿入する。
 
 ### 現行 scan 契約
 
@@ -103,7 +82,9 @@ def main(...):
 
 という形を前提にしている。
 
-## block-type
+object form の slot 定義を読む必要があるため、discovery parser は string shorthand だけでなく dict literal も解釈できる必要がある。
+
+## Block Type
 
 Python block では
 
@@ -112,8 +93,6 @@ Python block では
 
 とする。
 
-つまり callable 参照そのものが block-type になる。
-
 ## 実行
 
 ### source of truth
@@ -121,13 +100,6 @@ Python block では
 - workspace 上の `.py` file 自体を source of truth にする
 - `.py-scripts/` のような専用コピー領域は持たない
 - helper module や隣接 file も、通常の workspace file として扱う
-- ただし `from integral import ...` をそのまま使いたい callable は `scripts/` 配下に置くのを推奨する
-
-### 実行場所
-
-- current working directory は workspace root を基本とする
-- app は callable を file path と function 名から解決して起動する
-- 実行時の補助 file は `.store/.integral/runtime/BLK-.../` に置いてよい
 
 ### analysis-args.json
 
@@ -138,12 +110,12 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D",
-    "labels": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-1A2B3C4D"
+    "samples": "C:\\Workspace\\Data\\samples.csv",
+    "source": "C:\\Workspace\\.store\\objects\\MF-1A2B3C4D"
   },
   "outputs": {
-    "score": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A",
-    "loading": "C:\\Workspace\\.store\\objects\\DTS-1B2C3D4E"
+    "score": "C:\\Workspace\\Results\\score.csv",
+    "bundle": "C:\\Workspace\\.store\\objects\\MF-9X4Q2M1A"
   },
   "params": {
     "n_components": 2
@@ -153,12 +125,13 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 ### ルール
 
-- `inputs` は絶対パスまたは `null`
-- `outputs` は絶対パスまたは `null`
-- `inputs` は current path をそのまま指す場合も、dataset-json を staging resolve した path の場合もある
+- `inputs` は絶対 path または `null`
+- `outputs` は絶対 path または `null`
+- 非 `.idts` input は file path をそのまま渡す
+- `.idts` input は hidden bundle directory path に resolve して渡す
+- 非 `.idts` output は target file path をそのまま渡す
+- `.idts` output は hidden bundle directory path を渡す
 - `params` は free-form object をそのまま渡す
-- `blockId` は Python へ必須ではない
-- user script 自体が `analysis-args.json` を読む前提ではない
 - runner が `analysis-args.json` を読んだ上で target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 
 ## decorator の所在
@@ -171,41 +144,9 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 app は必要に応じてこの package を workspace の `scripts/integral/` へ同期し、runner は `scripts/` を `sys.path` の先頭へ追加して import を成立させる。
 
-開発時:
-
-- workspace の `scripts/`
-
-packaged app:
-
-- `process.resourcesPath/python-sdk/integral` を template source として保持し、workspace の `scripts/integral/` へ同期する
-
-詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
-
 ## 成功判定
 
 - exit code が 0 なら成功
 - それ以外は失敗
 
-output dataset が空でも、成功なら空の結果として確定する。
-
-output dataset の visible manifest 名は、block が保持する output config の `name` を使う。  
-既定値は slot 名で、保存先 folder の既定値は `/Data` とする。  
-同名 manifest が既に存在する場合は `_1`, `_2`, ... を付けて衝突を解消する。
-
-## Python 環境
-
-MVP では Python 環境を本体が管理しない。
-
-- `.venv` はユーザー管理
-- dependency install もユーザー管理
-- app は「この callable を実行する」ことだけを担う
-
-## 将来拡張
-
-必要になれば、後から次を足せる。
-
-- params schema
-- kind 制約 enforcement
-- import/file access 解析による依存候補サジェスト
-- Python 実行環境の callable 単位指定
-- sandbox 実行
+output path が file でも bundle でも、成功した場合は app が metadata を更新する。

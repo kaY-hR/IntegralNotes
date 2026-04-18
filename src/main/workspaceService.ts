@@ -46,9 +46,9 @@ import {
 } from "../shared/workspaceLinks";
 import {
   buildDatasetDataNoteMarkdown,
-  buildOriginalDataNoteMarkdown,
+  buildManagedFileNoteMarkdown,
   normalizeDatasetDataNoteMetadata,
-  normalizeOriginalDataNoteMetadata,
+  normalizeManagedFileNoteMetadata,
   resolveManagedDataNoteTabName
 } from "./dataNote";
 import {
@@ -1060,22 +1060,19 @@ export class WorkspaceService {
               path.join(metadataRootPath, entry.name)
             );
 
-            const originalDataMetadata = normalizeOriginalDataNoteMetadata(metadata);
+              const managedFileMetadata = normalizeManagedFileNoteMetadata(metadata);
 
-            if (originalDataMetadata) {
-              const absolutePath = path.join(
-                dataNoteRootPath,
-                `${originalDataMetadata.originalDataId.trim()}.md`
-              );
-              const existingContent = await readTextFileIfExists(absolutePath);
+              if (managedFileMetadata) {
+                const absolutePath = path.join(dataNoteRootPath, `${managedFileMetadata.id.trim()}.md`);
+                const existingContent = await readTextFileIfExists(absolutePath);
 
-              return {
-                absolutePath,
-                nextContent: buildOriginalDataNoteMarkdown(originalDataMetadata, existingContent)
-              } satisfies ManagedDataNoteWritePlan;
-            }
+                return {
+                  absolutePath,
+                  nextContent: buildManagedFileNoteMarkdown(managedFileMetadata, existingContent)
+                } satisfies ManagedDataNoteWritePlan;
+              }
 
-            const datasetMetadata = normalizeDatasetDataNoteMetadata(metadata);
+              const datasetMetadata = normalizeDatasetDataNoteMetadata(metadata);
 
             if (!datasetMetadata) {
               return null;

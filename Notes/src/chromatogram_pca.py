@@ -80,20 +80,22 @@ class PcaResult:
 
 @integral_block(
     display_name="Chromatogram PCA",
-    description="Read one JSON dataset containing multiple chromatograms, run PCA, and emit score/loading plots as HTML.",
-    inputs=["source"],
-    outputs=["report"],
+    description="Read one chromatogram JSON file, run PCA, and emit a report bundle.",
+    inputs=[
+        {"name": "source", "extensions": [".json"], "format": "chromatogram/json"},
+    ],
+    outputs=[
+        {"name": "report", "extension": ".idts", "format": "bundle/pca-report"},
+    ],
 )
 def main(
     inputs: dict[str, str | None],
     outputs: dict[str, str | None],
     params: dict[str, Any] | None,
 ) -> None:
-    source_root = require_existing_directory(inputs, "source")
+    input_json_path = require_existing_file(inputs, "source")
     report_root = require_output_directory(outputs, "report")
     options = params or {}
-
-    input_json_path = require_single_json_file(source_root)
     chromatograms = load_chromatograms(input_json_path)
 
     requested_components = coerce_positive_int(options.get("n_components"), default=2)
@@ -118,7 +120,7 @@ def main(
     write_loadings_csv(report_root / "loadings.csv", result)
     write_resampled_signals_csv(report_root / "resampled_signals.csv", result)
 
-    summary = build_summary(title=title, result=result, params=options, source_root=source_root)
+    summary = build_summary(title=title, result=result, params=options, input_json_path=input_json_path)
     (report_root / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -129,21 +131,21 @@ def main(
     )
 
 
-def require_existing_directory(values: dict[str, str | None], slot_name: str) -> Path:
+def require_existing_file(values: dict[str, str | None], slot_name: str) -> Path:
     candidate = (values or {}).get(slot_name)
 
     if not candidate:
         raise ValueError(f"Input slot '{slot_name}' is required.")
 
-    directory = Path(candidate)
+    file_path = Path(candidate)
 
-    if not directory.exists():
-        raise FileNotFoundError(f"Input path does not exist: {directory}")
+    if not file_path.exists():
+        raise FileNotFoundError(f"Input path does not exist: {file_path}")
 
-    if not directory.is_dir():
-        raise NotADirectoryError(f"Input path is not a directory: {directory}")
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Input path is not a file: {file_path}")
 
-    return directory
+    return file_path
 
 
 def require_output_directory(values: dict[str, str | None], slot_name: str) -> Path:
@@ -153,21 +155,6 @@ def require_output_directory(values: dict[str, str | None], slot_name: str) -> P
         raise ValueError(f"Output slot '{slot_name}' is required.")
 
     return Path(candidate)
-
-
-def require_single_json_file(source_root: Path) -> Path:
-    json_files = sorted(candidate for candidate in source_root.rglob("*.json") if candidate.is_file())
-
-    if not json_files:
-        raise FileNotFoundError(f"No JSON file was found under input dataset: {source_root}")
-
-    if len(json_files) != 1:
-        listed = ", ".join(candidate.relative_to(source_root).as_posix() for candidate in json_files)
-        raise ValueError(
-            f"Expected exactly one JSON file under input dataset, found {len(json_files)}: {listed}"
-        )
-
-    return json_files[0]
 
 
 def load_chromatograms(input_json_path: Path) -> list[Chromatogram]:
@@ -414,11 +401,11 @@ def build_summary(
     title: str,
     result: PcaResult,
     params: dict[str, Any],
-    source_root: Path,
+    input_json_path: Path,
 ) -> dict[str, Any]:
     return {
         "title": title,
-        "input_root": str(source_root),
+        "input_path": str(input_json_path),
         "input_json_name": result.input_json_name,
         "sample_names": result.sample_names,
         "sample_count": len(result.sample_names),

@@ -802,3 +802,28 @@
 
 * エクスプローラパネルに `全てたたむ` button を追加したい
 * icon は `[-]` のような VS Code と同じ系統のものにしたい
+
+## [ ] 42. managed file / format / path-based slot I/O モデルへ再設計したい
+- 優先重み:9
+- 記載日時:2026-04-18-12:20(UTC+9)
+
+* `original data / dataset` を universal な中核概念として持つのをやめ、`managed file` を中心に再設計したい
+* `cwd` 内の通常 file は `.store/` などの system-managed path を除き managed file として追跡し、`.md` も管理対象に含めたい
+* managed file の最小 metadata は少なくとも `id / path / hash / formatId / createdByBlockId` としたい
+* `provenance` は専用 enum を持たず、`createdByBlockId: null | BLK-*` で十分としたい
+* format は別 registry で管理し、最小で `id / name / description` を持てばよい
+* block の input / output は `datasetId` ではなく path ベースにしたい
+* slot 定義は少なくとも `name / extension(s) / format` を持てるようにしたい
+* `.idts` は universal な I/O 単位ではなく、複数 file を束ねたいときだけ使う optional bundle 表現に下げたい
+* `.idts` input は runtime では hidden bundle directory に resolve し、`.idts` output は visible manifest と hidden bundle directory を分けたい
+* 非 `.idts` output は通常の workspace file として生成し、実行成功後に managed file metadata を作成または更新したい
+* Markdown link / image / block source の記法自体は path ベースのまま維持したい
+* 外部 rename / move を path/hash tracking で追跡できた場合は、参照元 text file を scan して path を置換するのが望ましい
+* metadata backend は first slice では JSON file でもよいが、中期的には SQLite へ寄せたい
+* まずは次の順で進めたい
+  - 文書更新
+  - Python SDK の slot schema 拡張
+  - discovery parser の object-form slot 対応
+  - general-analysis runner の file path / `.idts` 混在対応
+  - renderer の input/output UI を file path 中心へ更新
+  - managed catalog を generic な managed file モデルへ寄せる

@@ -3,14 +3,13 @@ import type {
   ResolvedPluginViewer
 } from "./plugins";
 import type {
-  CreateSourceDatasetRequest,
-  CreateSourceDatasetFromWorkspaceEntriesRequest,
-  CreateSourceDatasetResult,
+  CreateDatasetRequest,
+  CreateDatasetFromWorkspaceEntriesRequest,
+  CreateDatasetResult,
   ExecuteIntegralBlockRequest,
   ExecuteIntegralBlockResult,
-  ImportOriginalDataResult,
+  ImportManagedFilesResult,
   IntegralAssetCatalog,
-  IntegralOriginalDataRepresentation,
   IntegralDatasetInspection,
   IntegralManagedDataTrackingIssue,
   ResolveIntegralManagedDataTrackingIssueRequest
@@ -42,9 +41,9 @@ export interface NoteDocument {
 
 export interface WorkspaceDatasetManifestMember {
   displayName: string;
-  originalDataId: string;
+  managedFileId: string;
   relativePath: string | null;
-  representation: IntegralOriginalDataRepresentation | null;
+  representation: "directory" | "file" | null;
 }
 
 export interface WorkspaceDatasetManifestView {
@@ -240,11 +239,16 @@ export interface UninstallPluginResult {
   removed: boolean;
 }
 
+export interface SelectWorkspaceFileRequest {
+  extensions?: string[];
+  initialRelativePath?: string | null;
+}
+
 export interface IntegralNotesApi {
-  createSourceDataset: (request: CreateSourceDatasetRequest) => Promise<CreateSourceDatasetResult>;
-  createSourceDatasetFromWorkspaceEntries: (
-    request: CreateSourceDatasetFromWorkspaceEntriesRequest
-  ) => Promise<CreateSourceDatasetResult>;
+  createDataset: (request: CreateDatasetRequest) => Promise<CreateDatasetResult>;
+  createDatasetFromWorkspaceEntries: (
+    request: CreateDatasetFromWorkspaceEntriesRequest
+  ) => Promise<CreateDatasetResult>;
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot | null>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   zoomIn: () => void;
@@ -252,10 +256,11 @@ export interface IntegralNotesApi {
   resetZoom: () => void;
   getIntegralAssetCatalog: () => Promise<IntegralAssetCatalog>;
   listManagedDataTrackingIssues: () => Promise<IntegralManagedDataTrackingIssue[]>;
-  importOriginalDataDirectories: () => Promise<ImportOriginalDataResult | null>;
-  importOriginalDataFiles: () => Promise<ImportOriginalDataResult | null>;
+  importManagedFileDirectories: () => Promise<ImportManagedFilesResult | null>;
+  importManagedFileFiles: () => Promise<ImportManagedFilesResult | null>;
   inspectDataset: (datasetId: string) => Promise<IntegralDatasetInspection>;
   selectWorkspaceDirectory: (initialRelativePath?: string | null) => Promise<string | null>;
+  selectWorkspaceFile: (request?: SelectWorkspaceFileRequest | null) => Promise<string | null>;
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;

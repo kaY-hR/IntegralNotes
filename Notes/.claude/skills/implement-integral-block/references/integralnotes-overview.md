@@ -23,11 +23,12 @@ For AI-assisted implementation, this means the explanation should start from the
 
 ## Data Model That The AI Must Respect
 
-- Users manage `original data`, but processing blocks consume and produce `dataset`.
-- In the note source, datasets are written as `.idts` paths.
-- Inside the app, the `.idts` path is resolved to a dataset ID and then to a readable directory path.
+- The basic tracked unit is `managed file`.
+- In the note source, slots are path-based.
+- `.idts` is optional and is used only when one slot needs multiple files.
 - At runtime, Python receives resolved absolute paths in `inputs` and `outputs`.
-- One output slot means one output dataset. Re-running the block creates a new dataset.
+- Non-`.idts` slots stay as direct file paths. `.idts` slots are resolved to readable directory paths.
+- One output slot may be a single file or a bundle, depending on the slot extension.
 
 Do not design the script as if it receives dataset IDs, raw manifest JSON, or notebook cell state.
 
@@ -35,7 +36,7 @@ Do not design the script as if it receives dataset IDs, raw manifest JSON, or no
 
 - Human-readable note source that matches `run/use`, `in`, `params`, `out`
 - Small, explicit slot names
-- Deterministic file output under the assigned output directory
+- Deterministic file output at the assigned output path or bundle directory
 - Renderable artifacts such as HTML, text, JSON, CSV, or images when immediate viewing matters
 - Workspace-local Python that does not depend on app-managed package installation
 

@@ -18,9 +18,13 @@ import type {
   IntegralAssetCatalog,
   IntegralBlockDocument,
   IntegralBlockOutputConfig,
-  IntegralDatasetSummary
+  IntegralDatasetSummary,
+  IntegralManagedFileSummary,
+  IntegralSlotDefinition
 } from "../shared/integral";
 import {
+  getIntegralSlotPrimaryExtension,
+  isIntegralBundleExtension,
   normalizeIntegralBlockOutputConfig,
   toIntegralOutputDirectoryRelativePath
 } from "../shared/integral";
@@ -231,12 +235,12 @@ class IntegralNotesBlockView implements NodeView {
 
     this.root.render(
       <IntegralBlockPanel
-        onAssignDataset={(slotName, datasetReference) => {
+        onAssignInputReference={(slotName, inputReference) => {
           const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
             ...currentBlock,
             inputs: {
               ...currentBlock.inputs,
-              [slotName]: datasetReference
+              [slotName]: inputReference
             }
           }));
 
@@ -382,7 +386,7 @@ class IntegralNotesBlockView implements NodeView {
 }
 
 function IntegralBlockPanel({
-  onAssignDataset,
+  onAssignInputReference,
   onUpdateOutputConfig,
   onUpdateParams,
   onRun,
@@ -390,7 +394,7 @@ function IntegralBlockPanel({
   runState,
   selected
 }: {
-  onAssignDataset: (slotName: string, datasetReference: string | null) => void;
+  onAssignInputReference: (slotName: string, inputReference: string | null) => void;
   onUpdateOutputConfig: (slotName: string, nextOutputConfig: IntegralBlockOutputConfig) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
   onRun: () => void;
@@ -403,7 +407,7 @@ function IntegralBlockPanel({
   const [assetCatalog, setAssetCatalog] = useState<IntegralAssetCatalog>({
     blockTypes: [],
     datasets: [],
-    originalData: []
+    managedFiles: []
   });
 
   useEffect(() => {
@@ -421,11 +425,19 @@ function IntegralBlockPanel({
 
   const datasetMap = new Map<string, IntegralDatasetSummary>();
   const datasetPathMap = new Map<string, IntegralDatasetSummary>();
+  const managedFileMap = new Map<string, IntegralManagedFileSummary>();
+  const managedFilePathMap = new Map<string, IntegralManagedFileSummary>();
 
   for (const dataset of assetCatalog.datasets) {
     datasetMap.set(dataset.datasetId, dataset);
     datasetPathMap.set(dataset.path, dataset);
     datasetPathMap.set(toCanonicalWorkspaceTarget(dataset.path), dataset);
+  }
+
+  for (const managedFile of assetCatalog.managedFiles) {
+    managedFileMap.set(managedFile.id, managedFile);
+    managedFilePathMap.set(managedFile.path, managedFile);
+    managedFilePathMap.set(toCanonicalWorkspaceTarget(managedFile.path), managedFile);
   }
 
   const resolveDataset = (datasetReference: string | null): IntegralDatasetSummary | null => {
@@ -443,6 +455,19 @@ function IntegralBlockPanel({
 
   const resolveDatasetId = (datasetReference: string | null): string | null => {
     return resolveDataset(datasetReference)?.datasetId ?? null;
+  };
+
+  const resolveManagedFile = (reference: string | null): IntegralManagedFileSummary | null => {
+    if (!reference) {
+      return null;
+    }
+
+    return (
+      managedFileMap.get(reference) ??
+      managedFilePathMap.get(reference) ??
+      managedFilePathMap.get(resolveWorkspaceMarkdownTarget(reference) ?? reference) ??
+      null
+    );
   };
 
   const toStoredDatasetReference = (datasetId: string): string => {
@@ -482,22 +507,54 @@ function IntegralBlockPanel({
       return "未設定";
     }
 
-    const dataset = resolveDataset(datasetReference);
-    return dataset ? dataset.name : datasetReference;
+    const managedFile = resolveManagedFile(datasetReference);
+    return managedFile ? managedFile.displayName : datasetReference;
   };
 
-  const openDatasetNote = (datasetReference: string | null): void => {
-    if (!datasetReference) {
+  const selectInputReference = (slot: IntegralSlotDefinition, currentReference: string | null): void => {
+    const primaryExtension = getIntegralSlotPrimaryExtension(slot, ".idts");
+
+    if (isIntegralBundleExtension(primaryExtension)) {
+      setInlineError(null);
+      setSlotDialogState({ slotName: slot.name });
       return;
     }
 
-    const dataset = resolveDataset(datasetReference);
+    setInlineError(null);
+    void window.integralNotes
+      .selectWorkspaceFile({
+        extensions: [slot.extension, ...(slot.extensions ?? [])].filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        ),
+        initialRelativePath:
+          currentReference === null
+            ? null
+            : (resolveWorkspaceMarkdownTarget(currentReference) ?? currentReference)
+      })
+      .then((selectedRelativePath) => {
+        if (selectedRelativePath === null) {
+          return;
+        }
 
-    if (!dataset) {
+        onAssignInputReference(slot.name, toCanonicalWorkspaceTarget(selectedRelativePath));
+      })
+      .catch((error) => {
+        setInlineError(formatErrorMessage(error));
+      });
+  };
+
+  const openManagedFileNote = (reference: string | null): void => {
+    if (!reference) {
       return;
     }
 
-    requestOpenManagedDataNote(dataset.datasetId);
+    const managedFile = resolveManagedFile(reference);
+
+    if (!managedFile) {
+      return;
+    }
+
+    requestOpenManagedDataNote(managedFile.id);
   };
 
   if (!parsed.block) {
@@ -556,13 +613,13 @@ function IntegralBlockPanel({
               {formatDatasetLabel(sourceDatasetRef)}
             </button>
             {hasSourceNote ? (
-              <button
-                className="integral-slot-row__link integral-slot-row__link--note"
-                onClick={() => {
-                  openDatasetNote(sourceDatasetRef);
-                }}
-                type="button"
-              >
+                <button
+                  className="integral-slot-row__link integral-slot-row__link--note"
+                  onClick={() => {
+                    openManagedFileNote(sourceDatasetRef);
+                  }}
+                  type="button"
+                >
                 ノート
               </button>
             ) : null}
@@ -585,7 +642,7 @@ function IntegralBlockPanel({
             }}
             onError={setInlineError}
             onSelect={(datasetId) => {
-              onAssignDataset(slotDialogState.slotName, toStoredDatasetReference(datasetId));
+              onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
             }}
           />
@@ -605,7 +662,7 @@ function IntegralBlockPanel({
             </div>
             {blockDefinition.inputSlots.map((slot) => {
               const assignedReference = parsed.block.inputs[slot.name] ?? null;
-              const assignedDataset = resolveDataset(assignedReference);
+              const assignedManagedFile = resolveManagedFile(assignedReference);
               const isAssigned = assignedReference !== null;
 
               return (
@@ -618,22 +675,29 @@ function IntegralBlockPanel({
                   </div>
                   {blockDefinition.executionMode === "manual" ? (
                     <div className="integral-slot-row__actions">
-                      {isAssigned && assignedDataset ? (
+                      {isAssigned && assignedManagedFile ? (
                         <button
                           className="integral-slot-row__link integral-slot-row__link--note"
                           onClick={() => {
-                            openDatasetNote(assignedReference);
+                            openManagedFileNote(assignedReference);
                           }}
                           type="button"
                         >
                           ノート
                         </button>
                       ) : null}
-                      <button className="integral-code-block__button integral-code-block__button--ghost" onClick={() => {
-                        setInlineError(null);
-                        setSlotDialogState({ slotName: slot.name });
-                      }} type="button">
-                        {isAssigned ? "変更" : "データを割り当て"}
+                      <button
+                        className="integral-code-block__button integral-code-block__button--ghost"
+                        onClick={() => {
+                          selectInputReference(slot, assignedReference);
+                        }}
+                        type="button"
+                      >
+                        {isAssigned
+                          ? "変更"
+                          : isIntegralBundleExtension(getIntegralSlotPrimaryExtension(slot, ".idts"))
+                            ? "データを割り当て"
+                            : "ファイルを割り当て"}
                       </button>
                     </div>
                   ) : null}
@@ -650,9 +714,12 @@ function IntegralBlockPanel({
               <span>{blockDefinition.outputSlots.length} slots</span>
             </div>
             {blockDefinition.outputSlots.map((slot) => {
-              const outputDataset =
-                latestOutputMap.get(slot.name) ?? resolveDataset(parsed.block.outputs[slot.name] ?? null);
-              const outputReference = outputDataset?.datasetId ?? parsed.block.outputs[slot.name] ?? null;
+              const outputSuffix = getIntegralSlotPrimaryExtension(slot, ".idts") ?? ".idts";
+              const latestOutputReference = latestOutputMap.get(slot.name)?.datasetId ?? null;
+              const outputManagedFile =
+                resolveManagedFile(latestOutputReference) ??
+                resolveManagedFile(parsed.block.outputs[slot.name] ?? null);
+              const outputReference = outputManagedFile?.id ?? parsed.block.outputs[slot.name] ?? null;
               const outputConfig = resolveOutputConfig(
                 parsed.block,
                 slot.name,
@@ -706,17 +773,17 @@ function IntegralBlockPanel({
                         type="text"
                         value={outputConfig.name}
                       />
-                      <span className="integral-output-slot-row__suffix">.idts</span>
+                      <span className="integral-output-slot-row__suffix">{outputSuffix}</span>
                     </div>
 
-                    {outputDataset ? (
+                    {outputManagedFile ? (
                       <div className="integral-slot-row__actions">
                         <button
                           className="integral-slot-row__link integral-slot-row__link--note"
                           onClick={() => {
-                            openDatasetNote(outputReference);
+                            openManagedFileNote(outputReference);
                           }}
-                          title={outputDataset ? `最新: ${outputDataset.name}` : undefined}
+                          title={outputManagedFile ? `最新: ${outputManagedFile.displayName}` : undefined}
                           type="button"
                         >
                           ノート
@@ -771,7 +838,7 @@ function IntegralBlockPanel({
             }}
             onError={setInlineError}
             onSelect={(datasetId) => {
-              onAssignDataset(slotDialogState.slotName, toStoredDatasetReference(datasetId));
+              onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
             }}
           />
@@ -828,7 +895,7 @@ function IntegralBlockPanel({
           }}
           onError={setInlineError}
           onSelect={(datasetId) => {
-            onAssignDataset(slotDialogState.slotName, toStoredDatasetReference(datasetId));
+            onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
             setSlotDialogState(null);
           }}
         />

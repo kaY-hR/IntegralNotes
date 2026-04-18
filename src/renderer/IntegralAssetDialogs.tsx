@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   IntegralDatasetInspection,
   IntegralDatasetSummary,
-  IntegralOriginalDataSummary
+  IntegralManagedFileSummary
 } from "../shared/integral";
 import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
@@ -18,8 +18,8 @@ interface DatasetPickerDialogProps {
   defaultDatasetName?: string;
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedOriginalData?: (
-    originalData: readonly IntegralOriginalDataSummary[],
+  onImportedManagedFiles?: (
+    managedFiles: readonly IntegralManagedFileSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
   onSelect: (datasetId: string) => void;
@@ -32,7 +32,7 @@ export function DatasetPickerDialog({
   defaultDatasetName,
   onClose,
   onError,
-  onImportedOriginalData,
+  onImportedManagedFiles,
   onSelect
 }: DatasetPickerDialogProps): JSX.Element {
   const [mode, setMode] = useState<DatasetPickerMode>("select");
@@ -65,19 +65,19 @@ export function DatasetPickerDialog({
 
   if (mode === "create") {
     return (
-      <OriginalDataSelectionDialog
+      <ManagedFileSelectionDialog
         confirmLabel="Dataset を作成して割り当て"
         defaultDatasetName={defaultDatasetName}
-        description="データファイルを選んで新しい dataset を作成します。"
+        description="managed file を選んで新しい dataset を作成します。"
         onClose={() => {
           setMode("select");
         }}
         onError={onError}
-        onImportedOriginalData={onImportedOriginalData}
-        onSelect={async ({ datasetName, originalDataIds }) => {
-          const result = await window.integralNotes.createSourceDataset({
+        onImportedManagedFiles={onImportedManagedFiles}
+        onSelect={async ({ datasetName, relativePaths }) => {
+          const result = await window.integralNotes.createDatasetFromWorkspaceEntries({
             name: datasetName,
-            originalDataIds
+            relativePaths
           });
 
           onSelect(result.dataset.datasetId);
@@ -145,7 +145,7 @@ export function DatasetPickerDialog({
             }}
             type="button"
           >
-            データファイルから新しい dataset を作成
+            managed file から新しい dataset を作成
           </button>
 
           <div className="dialog-actions">
@@ -169,69 +169,75 @@ export function DatasetPickerDialog({
   );
 }
 
-interface OriginalDataPickerDialogProps {
+interface ManagedFilePickerDialogProps {
   defaultDatasetName?: string;
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedOriginalData?: (
-    originalData: readonly IntegralOriginalDataSummary[],
+  onImportedManagedFiles?: (
+    managedFiles: readonly IntegralManagedFileSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
   onSelectDataset: (dataset: IntegralDatasetSummary) => void;
 }
 
-interface OriginalDataSelectionDialogProps {
+interface ManagedFileSelectionDialogProps {
   confirmLabel: string;
   defaultDatasetName?: string;
   description: string;
-  initialSelectedOriginalDataIds?: readonly string[];
+  initialSelectedRelativePaths?: readonly string[];
   onClose: () => void;
   onError: (message: string) => void;
-  onImportedOriginalData?: (
-    originalData: readonly IntegralOriginalDataSummary[],
+  onImportedManagedFiles?: (
+    managedFiles: readonly IntegralManagedFileSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
-  onSelect: (selection: { datasetName: string; originalDataIds: string[] }) => Promise<void> | void;
+  onSelect: (selection: { datasetName: string; relativePaths: string[] }) => Promise<void> | void;
   pendingLabel?: string;
   requireDatasetName?: boolean;
   title: string;
 }
 
-export function OriginalDataSelectionDialog({
+export function ManagedFileSelectionDialog({
   confirmLabel,
   defaultDatasetName,
   description,
-  initialSelectedOriginalDataIds = [],
+  initialSelectedRelativePaths = [],
   onClose,
   onError,
-  onImportedOriginalData,
+  onImportedManagedFiles,
   onSelect,
   pendingLabel,
   requireDatasetName = false,
   title
-}: OriginalDataSelectionDialogProps): JSX.Element {
-  const [originalData, setOriginalData] = useState<IntegralOriginalDataSummary[]>([]);
-  const [selectedOriginalDataIds, setSelectedOriginalDataIds] = useState<Set<string>>(
-    () => new Set(initialSelectedOriginalDataIds)
+}: ManagedFileSelectionDialogProps): JSX.Element {
+  const [managedFiles, setManagedFiles] = useState<IntegralManagedFileSummary[]>([]);
+  const [selectedRelativePaths, setSelectedRelativePaths] = useState<Set<string>>(
+    () => new Set(initialSelectedRelativePaths)
   );
   const [datasetName, setDatasetName] = useState(defaultDatasetName ?? "");
   const [pending, setPending] = useState(false);
   const selectionSeed = useMemo(
     () =>
-      [...initialSelectedOriginalDataIds]
+      [...initialSelectedRelativePaths]
         .sort((left, right) => left.localeCompare(right, "ja"))
         .join("\u0000"),
-    [initialSelectedOriginalDataIds]
+    [initialSelectedRelativePaths]
   );
   const datasetNameSeed = defaultDatasetName ?? "";
 
-  const reloadOriginalData = async (): Promise<void> => {
+  const reloadSelectableManagedFiles = async (): Promise<void> => {
     const catalog = await window.integralNotes.getIntegralAssetCatalog();
-    setOriginalData(catalog.originalData);
+    setManagedFiles(
+      [...catalog.managedFiles]
+        .filter((entry) => entry.visibility === "visible" && entry.representation !== "dataset-json")
+        .sort((left, right) =>
+          `${left.displayName} ${left.path}`.localeCompare(`${right.displayName} ${right.path}`, "ja")
+        )
+    );
   };
 
   useEffect(() => {
-    setSelectedOriginalDataIds(new Set(initialSelectedOriginalDataIds));
+    setSelectedRelativePaths(new Set(initialSelectedRelativePaths));
   }, [selectionSeed]);
 
   useEffect(() => {
@@ -239,31 +245,31 @@ export function OriginalDataSelectionDialog({
   }, [datasetNameSeed, defaultDatasetName]);
 
   useEffect(() => {
-    void reloadOriginalData().catch((error) => {
+    void reloadSelectableManagedFiles().catch((error) => {
       onError(toErrorMessage(error));
     });
   }, [onError]);
 
-  const importOriginalData = async (kind: "directories" | "files"): Promise<void> => {
+  const importManagedFiles = async (kind: "directories" | "files"): Promise<void> => {
     setPending(true);
 
     try {
       const result =
         kind === "files"
-          ? await window.integralNotes.importOriginalDataFiles()
-          : await window.integralNotes.importOriginalDataDirectories();
+          ? await window.integralNotes.importManagedFileFiles()
+          : await window.integralNotes.importManagedFileDirectories();
 
       if (!result) {
         return;
       }
 
-      setSelectedOriginalDataIds((current) => {
+      setSelectedRelativePaths((current) => {
         const next = new Set(current);
-        result.originalData.forEach((entry) => next.add(entry.originalDataId));
+        result.managedFiles.forEach((entry) => next.add(entry.path));
         return next;
       });
-      await reloadOriginalData();
-      await onImportedOriginalData?.(result.originalData, kind);
+      await reloadSelectableManagedFiles();
+      await onImportedManagedFiles?.(result.managedFiles, kind);
     } catch (error) {
       onError(toErrorMessage(error));
     } finally {
@@ -284,7 +290,7 @@ export function OriginalDataSelectionDialog({
     try {
       await onSelect({
         datasetName: normalizedDatasetName,
-        originalDataIds: Array.from(selectedOriginalDataIds)
+        relativePaths: Array.from(selectedRelativePaths)
       });
     } catch (error) {
       onError(toErrorMessage(error));
@@ -320,16 +326,16 @@ export function OriginalDataSelectionDialog({
           <div className="asset-picker__list-section">
             <div className="asset-picker__list-header">
               <span className="asset-picker__hint">
-                {selectedOriginalDataIds.size > 0
-                  ? `${selectedOriginalDataIds.size} 件選択中`
-                  : "データファイルを選択"}
+                {selectedRelativePaths.size > 0
+                  ? `${selectedRelativePaths.size} 件選択中`
+                  : "managed file を選択"}
               </span>
               <span className="asset-picker__toolbar">
                 <button
                   className="button button--ghost button--xs"
                   disabled={pending}
                   onClick={() => {
-                    void importOriginalData("files");
+                    void importManagedFiles("files");
                   }}
                   type="button"
                 >
@@ -339,7 +345,7 @@ export function OriginalDataSelectionDialog({
                   className="button button--ghost button--xs"
                   disabled={pending}
                   onClick={() => {
-                    void importOriginalData("directories");
+                    void importManagedFiles("directories");
                   }}
                   type="button"
                 >
@@ -349,55 +355,58 @@ export function OriginalDataSelectionDialog({
             </div>
 
             <div className="asset-picker__list">
-            {originalData.length > 0 ? (
-              originalData.map((entry) => {
-                const checked = selectedOriginalDataIds.has(entry.originalDataId);
+              {managedFiles.length > 0 ? (
+                managedFiles.map((entry) => {
+                  const checked = selectedRelativePaths.has(entry.path);
 
-                return (
-                  <div className="asset-picker__row" key={entry.originalDataId}>
-                    <label className="asset-picker__row-main">
-                      <input
-                        checked={checked}
-                        onChange={() => {
-                          setSelectedOriginalDataIds((current) => {
-                            const next = new Set(current);
+                  return (
+                    <div className="asset-picker__row" key={entry.id}>
+                      <label className="asset-picker__row-main">
+                        <input
+                          checked={checked}
+                          onChange={() => {
+                            setSelectedRelativePaths((current) => {
+                              const next = new Set(current);
 
-                            if (checked) {
-                              next.delete(entry.originalDataId);
-                            } else {
-                              next.add(entry.originalDataId);
-                            }
+                              if (checked) {
+                                next.delete(entry.path);
+                              } else {
+                                next.add(entry.path);
+                              }
 
-                            return next;
-                          });
-                        }}
-                        type="checkbox"
-                      />
-                      <div>
-                        <strong>{entry.displayName}</strong>
-                        <div className="asset-picker__meta">
-                          <span>{entry.representation}</span>
-                          <span>{entry.visibility}</span>
+                              return next;
+                            });
+                          }}
+                          type="checkbox"
+                        />
+                        <div>
+                          <strong>{entry.displayName}</strong>
+                          <div className="asset-picker__meta">
+                            <span>{entry.representation}</span>
+                            <span>{entry.format ?? "format 未設定"}</span>
+                            <span>{entry.path}</span>
+                          </div>
                         </div>
-                      </div>
-                    </label>
-                    <button
-                      className="asset-picker__row-link asset-picker__row-link--note"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        requestOpenManagedDataNote(entry.originalDataId);
-                      }}
-                      type="button"
-                    >
-                      ノート
-                    </button>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="asset-picker__empty">データファイルがありません。先にデータを取り込んでください。</div>
-            )}
+                      </label>
+                      <button
+                        className="asset-picker__row-link asset-picker__row-link--note"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          requestOpenManagedDataNote(entry.id);
+                        }}
+                        type="button"
+                      >
+                        ノート
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="asset-picker__empty">
+                  選択可能な managed file がありません。先にファイルを取り込むか、workspace 内に file を用意してください。
+                </div>
+              )}
             </div>
           </div>
 
@@ -407,7 +416,7 @@ export function OriginalDataSelectionDialog({
             </button>
             <button
               className="button button--primary"
-              disabled={pending || selectedOriginalDataIds.size === 0}
+              disabled={pending || selectedRelativePaths.size === 0}
               onClick={() => {
                 void commitSelection();
               }}
@@ -422,25 +431,25 @@ export function OriginalDataSelectionDialog({
   );
 }
 
-export function OriginalDataPickerDialog({
+export function ManagedFilePickerDialog({
   defaultDatasetName,
   onClose,
   onError,
-  onImportedOriginalData,
+  onImportedManagedFiles,
   onSelectDataset
-}: OriginalDataPickerDialogProps): JSX.Element {
+}: ManagedFilePickerDialogProps): JSX.Element {
   return (
-    <OriginalDataSelectionDialog
+    <ManagedFileSelectionDialog
       confirmLabel="Dataset を作成"
       defaultDatasetName={defaultDatasetName}
-      description="データファイルを選んで新しい dataset を作成します。"
+      description="managed file を選んで新しい dataset を作成します。"
       onClose={onClose}
       onError={onError}
-      onImportedOriginalData={onImportedOriginalData}
-      onSelect={async ({ datasetName, originalDataIds }) => {
-        const result = await window.integralNotes.createSourceDataset({
+      onImportedManagedFiles={onImportedManagedFiles}
+      onSelect={async ({ datasetName, relativePaths }) => {
+        const result = await window.integralNotes.createDatasetFromWorkspaceEntries({
           name: datasetName,
-          originalDataIds
+          relativePaths
         });
 
         onSelectDataset(result.dataset);

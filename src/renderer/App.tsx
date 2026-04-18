@@ -11,7 +11,7 @@ import {
 import type {
   IntegralAssetCatalog,
   IntegralManagedDataTrackingIssue,
-  IntegralOriginalDataSummary,
+  IntegralManagedFileSummary,
   ResolveIntegralManagedDataTrackingIssueRequest
 } from "../shared/integral";
 import type {
@@ -171,7 +171,7 @@ function createEmptyIntegralAssetCatalog(): IntegralAssetCatalog {
   return {
     blockTypes: [],
     datasets: [],
-    originalData: []
+    managedFiles: []
   };
 }
 
@@ -362,23 +362,12 @@ function findManagedDataTargetById(
     return null;
   }
 
-  const originalData = catalog.originalData.find(
-    (entry) => entry.originalDataId === normalizedTargetId
-  );
+  const managedFile = catalog.managedFiles.find((entry) => entry.id === normalizedTargetId);
 
-  if (originalData) {
+  if (managedFile) {
     return {
-      displayName: originalData.displayName,
-      targetId: originalData.originalDataId
-    };
-  }
-
-  const dataset = catalog.datasets.find((entry) => entry.datasetId === normalizedTargetId);
-
-  if (dataset) {
-    return {
-      displayName: dataset.name,
-      targetId: dataset.datasetId
+      displayName: managedFile.displayName,
+      targetId: managedFile.id
     };
   }
 
@@ -431,12 +420,8 @@ function findManagedDataTargetForPath(
     });
   };
 
-  for (const entry of catalog.originalData) {
-    collectMatch(entry.displayName, entry.originalDataId, entry.path, entry.representation);
-  }
-
-  for (const entry of catalog.datasets) {
-    collectMatch(entry.name, entry.datasetId, entry.path, entry.representation);
+  for (const entry of catalog.managedFiles) {
+    collectMatch(entry.displayName, entry.id, entry.path, entry.representation);
   }
 
   matches.sort((left, right) => {
@@ -491,12 +476,8 @@ function collectManagedDataTargetsForPaths(
     });
   };
 
-  for (const entry of catalog.originalData) {
-    collectMatches(entry.displayName, entry.originalDataId, entry.path, entry.representation);
-  }
-
-  for (const entry of catalog.datasets) {
-    collectMatches(entry.name, entry.datasetId, entry.path, entry.representation);
+  for (const entry of catalog.managedFiles) {
+    collectMatches(entry.displayName, entry.id, entry.path, entry.representation);
   }
 
   return Array.from(matches.values()).sort((left, right) =>
@@ -1414,39 +1395,39 @@ export function App(): JSX.Element {
     return fallbackEntry ? [fallbackEntry] : [];
   };
 
-  const handleImportedOriginalData = async (
-    originalData: readonly IntegralOriginalDataSummary[],
+  const handleImportedManagedFiles = async (
+    managedFiles: readonly IntegralManagedFileSummary[],
     kind: "directories" | "files"
   ): Promise<void> => {
     const unit = kind === "files" ? "ファイル" : "フォルダ";
-    await refreshWorkspace(`${originalData.length} 件の${unit}元データを登録しました。`);
+    await refreshWorkspace(`${managedFiles.length} 件の${unit}を managed file として登録しました。`);
   };
 
-  const importOriginalDataFiles = async (): Promise<void> => {
+  const importManagedFileFiles = async (): Promise<void> => {
     try {
-      const result = await window.integralNotes.importOriginalDataFiles();
+      const result = await window.integralNotes.importManagedFileFiles();
 
       if (!result) {
-        setStatusMessage("元データ登録をキャンセルしました。");
+        setStatusMessage("ファイル登録をキャンセルしました。");
         return;
       }
 
-      await refreshWorkspace(`${result.originalData.length} 件のファイル元データを登録しました。`);
+      await refreshWorkspace(`${result.managedFiles.length} 件のファイルを登録しました。`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
   };
 
-  const importOriginalDataDirectories = async (): Promise<void> => {
+  const importManagedFileDirectories = async (): Promise<void> => {
     try {
-      const result = await window.integralNotes.importOriginalDataDirectories();
+      const result = await window.integralNotes.importManagedFileDirectories();
 
       if (!result) {
-        setStatusMessage("元データ登録をキャンセルしました。");
+        setStatusMessage("フォルダ登録をキャンセルしました。");
         return;
       }
 
-      await refreshWorkspace(`${result.originalData.length} 件のフォルダ元データを登録しました。`);
+      await refreshWorkspace(`${result.managedFiles.length} 件のフォルダを登録しました。`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
@@ -2311,7 +2292,7 @@ export function App(): JSX.Element {
     setDatasetCreationPending(true);
 
     try {
-      const result = await window.integralNotes.createSourceDatasetFromWorkspaceEntries({
+      const result = await window.integralNotes.createDatasetFromWorkspaceEntries({
         name: datasetName.trim(),
         relativePaths: datasetCreationDialog.relativePaths
       });
@@ -2447,7 +2428,7 @@ export function App(): JSX.Element {
     const managedTargets = collectManagedDataTargetsForPaths(assetCatalog, targetPaths);
     const cleanupDescription =
       managedTargets.length > 0
-        ? ` 対象に managed data が ${managedTargets.length} 件含まれるため、対応する metadata / data-note も削除し、必要なら source dataset の .idts も更新します。`
+        ? ` 対象に managed data が ${managedTargets.length} 件含まれるため、対応する metadata / data-note も削除し、必要なら関連する dataset の .idts も更新します。`
         : "";
     setDeleteDialog({
       title: "削除確認",
@@ -3513,10 +3494,10 @@ export function App(): JSX.Element {
             setDataRegistrationDialogOpen(false);
           }}
           onError={setStatusMessage}
-          onImportDirectories={() => importOriginalDataDirectories()}
-          onImportFiles={() => importOriginalDataFiles()}
-          onImportedOriginalData={handleImportedOriginalData}
-          onSourceDatasetCreated={(dataset) => {
+          onImportDirectories={() => importManagedFileDirectories()}
+          onImportFiles={() => importManagedFileFiles()}
+          onImportedManagedFiles={handleImportedManagedFiles}
+          onDatasetCreated={(dataset) => {
             setDataRegistrationDialogOpen(false);
             setStatusMessage(`${dataset.name} を作成しました。`);
           }}

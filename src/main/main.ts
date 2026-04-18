@@ -4,11 +4,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type {
-  CreateSourceDatasetRequest,
-  CreateSourceDatasetFromWorkspaceEntriesRequest,
+  CreateDatasetRequest,
+  CreateDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
   ResolveIntegralManagedDataTrackingIssueRequest
 } from "../shared/integral";
+import { normalizeIntegralSlotExtensions } from "../shared/integral";
 import type {
   CopyEntriesRequest,
   CopyExternalEntriesRequest,
@@ -20,6 +21,7 @@ import type {
   RenameEntryRequest,
   SaveClipboardImageRequest,
   SaveNoteImageRequest,
+  SelectWorkspaceFileRequest,
   WorkspaceReplaceRequest,
   WorkspaceSearchRequest,
   WorkspaceSnapshot
@@ -265,10 +267,10 @@ function registerIpcHandlers(): void {
 
     return snapshot;
   });
-  ipcMain.handle("workspace:selectDirectory", async (_event, initialRelativePath?: string | null) => {
-    if (!mainWindow) {
-      throw new Error("main window is not available.");
-    }
+    ipcMain.handle("workspace:selectDirectory", async (_event, initialRelativePath?: string | null) => {
+      if (!mainWindow) {
+        throw new Error("main window is not available.");
+      }
 
     const rootPath = workspaceService.currentRootPath;
 
@@ -304,13 +306,74 @@ function registerIpcHandlers(): void {
       throw new Error("workspace 内のフォルダを選択してください。");
     }
 
-    return relativePath.split(path.sep).join("/");
-  });
-  ipcMain.handle("integral:getAssetCatalog", async () => getIntegralWorkspaceService().listAssetCatalog());
+      return relativePath.split(path.sep).join("/");
+    });
+    ipcMain.handle("workspace:selectFile", async (_event, request?: SelectWorkspaceFileRequest | null) => {
+      if (!mainWindow) {
+        throw new Error("main window is not available.");
+      }
+
+      const rootPath = workspaceService.currentRootPath;
+
+      if (!rootPath) {
+        throw new Error("workspace folder is not open.");
+      }
+
+      const normalizedExtensions = normalizeIntegralSlotExtensions(request?.extensions) ?? [];
+      const normalizedInitialRelativePath =
+        typeof request?.initialRelativePath === "string"
+          ? request.initialRelativePath
+              .trim()
+              .split(/[\\/]+/u)
+              .filter(Boolean)
+          : [];
+      const defaultPath =
+        normalizedInitialRelativePath.length > 0
+          ? path.resolve(rootPath, ...normalizedInitialRelativePath)
+          : rootPath;
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: "入力ファイルを選択",
+        defaultPath,
+        filters:
+          normalizedExtensions.length > 0
+            ? [
+                {
+                  name: "Allowed Files",
+                  extensions: normalizedExtensions.map((extension) => extension.slice(1))
+                }
+              ]
+            : undefined,
+        properties: ["openFile"]
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null;
+      }
+
+      const selectedPath = path.resolve(result.filePaths[0]);
+      const relativePath = path.relative(rootPath, selectedPath);
+
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+        throw new Error("workspace 内のファイルを選択してください。");
+      }
+
+      const normalizedRelativePath = relativePath.split(path.sep).join("/");
+
+      if (normalizedExtensions.length > 0) {
+        const selectedExtension = path.extname(selectedPath).toLowerCase();
+
+        if (!normalizedExtensions.includes(selectedExtension)) {
+          throw new Error(`許可されていない拡張子です: ${normalizedRelativePath}`);
+        }
+      }
+
+      return normalizedRelativePath;
+    });
+    ipcMain.handle("integral:getAssetCatalog", async () => getIntegralWorkspaceService().listAssetCatalog());
   ipcMain.handle("integral:listManagedDataTrackingIssues", async () =>
     getIntegralWorkspaceService().listManagedDataTrackingIssues()
   );
-  ipcMain.handle("integral:importOriginalDataFiles", async () => {
+  ipcMain.handle("integral:importManagedFileFiles", async () => {
     if (!mainWindow) {
       throw new Error("main window is not available.");
     }
@@ -318,16 +381,16 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
       properties: ["openFile", "multiSelections"],
-      title: "Import Files as Original Data"
+      title: "Import Files as Managed Files"
     });
 
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
 
-    return getIntegralWorkspaceService().importOriginalDataPaths(result.filePaths);
+    return getIntegralWorkspaceService().importManagedFilePaths(result.filePaths);
   });
-  ipcMain.handle("integral:importOriginalDataDirectories", async () => {
+  ipcMain.handle("integral:importManagedFileDirectories", async () => {
     if (!mainWindow) {
       throw new Error("main window is not available.");
     }
@@ -335,22 +398,22 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       defaultPath: workspaceService.currentRootPath ?? app.getPath("documents"),
       properties: ["openDirectory", "multiSelections"],
-      title: "Import Folders as Original Data"
+      title: "Import Folders as Managed Files"
     });
 
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
 
-    return getIntegralWorkspaceService().importOriginalDataPaths(result.filePaths);
+    return getIntegralWorkspaceService().importManagedFilePaths(result.filePaths);
   });
-  ipcMain.handle("integral:createSourceDataset", async (_event, request: CreateSourceDatasetRequest) =>
-    getIntegralWorkspaceService().createSourceDataset(request)
+  ipcMain.handle("integral:createDataset", async (_event, request: CreateDatasetRequest) =>
+    getIntegralWorkspaceService().createDataset(request)
   );
   ipcMain.handle(
-    "integral:createSourceDatasetFromWorkspaceEntries",
-    async (_event, request: CreateSourceDatasetFromWorkspaceEntriesRequest) =>
-      getIntegralWorkspaceService().createSourceDatasetFromWorkspaceEntries(request)
+    "integral:createDatasetFromWorkspaceEntries",
+    async (_event, request: CreateDatasetFromWorkspaceEntriesRequest) =>
+      getIntegralWorkspaceService().createDatasetFromWorkspaceEntries(request)
   );
   ipcMain.handle("integral:inspectDataset", async (_event, datasetId: string) =>
     getIntegralWorkspaceService().inspectDataset(datasetId)

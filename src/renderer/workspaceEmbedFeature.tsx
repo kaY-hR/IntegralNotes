@@ -1177,12 +1177,8 @@ function findManagedDataTargetForPath(
     });
   };
 
-  for (const entry of catalog.originalData) {
-    collectMatch(entry.displayName, entry.originalDataId, entry.path, entry.representation);
-  }
-
-  for (const entry of catalog.datasets) {
-    collectMatch(entry.name, entry.datasetId, entry.path, entry.representation);
+  for (const entry of catalog.managedFiles) {
+    collectMatch(entry.displayName, entry.id, entry.path, entry.representation);
   }
 
   matches.sort((left, right) => {

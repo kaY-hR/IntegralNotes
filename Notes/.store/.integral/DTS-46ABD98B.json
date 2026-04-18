@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-18T06:56:27.206Z",
+  "createdByBlockId": "BLK-B36CFD3C",
+  "datasetId": "DTS-46ABD98B",
+  "displayName": "PCA-result",
+  "entityType": "dataset",
+  "hash": "sha256:F74236AFF47BE6CDCAC5DE9D0DB7FBC3C9F034069000F0ECA1F9170F52E64D59",
+  "id": "DTS-46ABD98B",
+  "kind": "bundle/pca-report",
+  "dataPath": ".store/objects/DTS-46ABD98B",
+  "name": "PCA-result",
+  "path": "Data/PCA-result.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

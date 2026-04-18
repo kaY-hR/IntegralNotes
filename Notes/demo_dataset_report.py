@@ -11,9 +11,13 @@ from integral import integral_block
 
 @integral_block(
     display_name="Dataset Report Demo",
-    description="Summarize files in one input dataset and emit a small HTML report.",
-    inputs=["source"],
-    outputs=["report"],
+    description="Summarize files in one input bundle and emit a small report bundle.",
+    inputs=[
+        {"name": "source", "extensions": [".idts"], "format": "bundle/idts"},
+    ],
+    outputs=[
+        {"name": "report", "extension": ".idts", "format": "bundle/report-demo"},
+    ],
 )
 def main(inputs: dict[str, str | None], outputs: dict[str, str | None], params: dict[str, Any] | None) -> None:
     source_root = require_existing_directory(inputs, "source")

@@ -55,7 +55,7 @@ export function DatasetManifestFileViewer({
               return (
                 <li
                   className="workspace-dataset-viewer__member-card"
-                  key={`${member.originalDataId}:${member.relativePath ?? "missing"}`}
+                  key={`${member.managedFileId}:${member.relativePath ?? "missing"}`}
                 >
                   <div className="workspace-dataset-viewer__member-main">
                     <strong>{member.displayName}</strong>

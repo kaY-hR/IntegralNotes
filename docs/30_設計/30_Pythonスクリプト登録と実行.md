@@ -19,8 +19,14 @@ from integral import integral_block
 @integral_block(
     display_name="PCA",
     description="数値テーブルに対して主成分分析を行う",
-    inputs=["samples", "labels"],
-    outputs=["score", "loading"],
+    inputs=[
+        {"name": "samples", "extensions": [".csv"], "format": "table/csv"},
+        {"name": "labels", "extensions": [".csv"], "format": "table/csv"},
+    ],
+    outputs=[
+        {"name": "score", "extension": ".csv", "format": "table/pca-score"},
+        {"name": "report", "extension": ".html", "format": "report/html"},
+    ],
 )
 def main(inputs, outputs, params):
     ...
@@ -32,6 +38,7 @@ def main(inputs, outputs, params):
 - `description`
 - `inputs`
 - `outputs`
+- slot ごとの `extension(s)` / `format`
 
 ### 現行 scan 条件
 
@@ -74,49 +81,46 @@ in:
   labels: null
 params: {}
 out:
-  score:
-    dir: /Data
-    name: score
-  loading:
-    dir: /Data
-    name: loading
+  score: /Data/score.csv
+  report: /Data/report.html
 ```
 
-`.idts` が既に決まっている場合は `in:` の値へその path を入れる。
+slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` path を入れる。
 
 ## 4. input 割当
 
 各 input slot には次を指定できる。
 
-- 既存 dataset 1 つ
-- original data 複数選択
+- slot 制約に合う file path 1 つ
+- `.idts` slot の場合は既存 dataset 1 つ
+- `.idts` slot の場合は複数 managed file から新しい dataset を作る
 
-original data 複数選択の場合:
+`.idts` dataset を新しく作る場合:
 
-1. ユーザーが source dataset 名を決める
-2. app が新しい source dataset を作る
-3. source dataset は visible `.idts` として保存される
-4. app は source dataset に紐づく data-note を system-managed に作る
-5. block source の `in:` には source dataset の `.idts` path を書く
+1. ユーザーが dataset 名を決める
+2. app が選択した managed file から新しい dataset を作る
+3. dataset は visible `.idts` として保存される
+4. app は dataset に紐づく data-note を system-managed に作る
+5. block source の `in:` にはその `.idts` path を書く
 
 ## 5. output 宣言
 
 - output slot 名は decorator から決まる
-- 初期状態では各 slot に `dir: /Data` と `name: {slot名}` を入れる
+- 初期状態では各 slot に `extension` を踏まえた既定 path を入れる
 - block card 上では `Inputs` / `Outputs` を section 分離して表示する
-- output slot には folder picker と dataset 名 textarea を表示する
-- 実行成功後は output slot ごとの visible `.idts` path を `latest` として note source の `out:` へ書き戻す
+- output slot には保存先 path を編集できる UI を表示する
+- `.idts` output の場合は manifest path を編集し、中身の hidden bundle directory は app が内部で確保する
+- 実行成功後は output slot ごとの実際の file path または `.idts` path を note source の `out:` へ書き戻す
 
 ## 6. 実行準備
 
 app は実行前に次を行う。
 
-1. input `.idts` を `datasetId` に解決する
-2. input dataset を executable path に resolve する
-3. output slot ごとに `dir` と `name` から visible `{dir}/{dataset-name}.idts` manifest 候補を決める
-4. 同名 manifest が存在する場合は `_1`, `_2`, ... を付与して新規 path を選ぶ
-5. 実データ directory を確保する
-6. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
+1. input path を検証する
+2. input が `.idts` なら datasetId を解決し、runtime 用 directory path に resolve する
+3. 非 `.idts` output は target file path をそのまま使う
+4. `.idts` output は visible manifest path を確定し、hidden bundle directory を確保する
+5. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
 
 ## 7. analysis-args.json
 
@@ -125,12 +129,12 @@ app は実行前に次を行う。
 ```json
 {
   "inputs": {
-    "samples": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-7K2M9Q4D",
-    "labels": "C:\\Workspace\\.store\\runtime\\resolved\\DTS-1A2B3C4D"
+    "samples": "C:\\Workspace\\Data\\samples.csv",
+    "bundle": "C:\\Workspace\\.store\\.integral\\datasets\\staging\\DTS-7K2M9Q4D"
   },
   "outputs": {
-    "score": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A",
-    "loading": "C:\\Workspace\\.store\\objects\\DTS-1B2C3D4E"
+    "score": "C:\\Workspace\\Results\\score.csv",
+    "reportBundle": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A"
   },
   "params": {
     "n_components": 2
@@ -141,7 +145,8 @@ app は実行前に次を行う。
 ### ルール
 
 - 値は絶対パスまたは `null`
-- input path は current path をそのまま使う場合も、staging path の場合もある
+- 非 `.idts` input / output は current path をそのまま使う
+- `.idts` input / output は runtime 用 directory path を渡す
 - `params` は note source から読んだ object をそのまま渡す
 
 ## 8. 実行
@@ -160,9 +165,9 @@ app は実行前に次を行う。
 
 ### 補足
 
-- output dataset が空でも成功なら空の結果として確定する
+- `.idts` output の中身が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
-- 実行成功後、app は output slot ごとの visible `.idts` path を block source の `out:` に反映してよい
+- 実行成功後、app は output slot ごとの file path または visible `.idts` path を block source の `out:` に反映してよい
 
 ## 9. decorator の import 契約
 

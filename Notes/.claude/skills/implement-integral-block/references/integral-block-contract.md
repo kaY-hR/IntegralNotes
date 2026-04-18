@@ -15,12 +15,17 @@ Use the SDK exactly as it exists today:
 from integral import integral_block
 ```
 
-The current decorator accepts only these fields:
+The current decorator accepts these top-level fields:
 
 - `display_name`
 - `description`
 - `inputs`
 - `outputs`
+
+Each slot item may be either:
+
+- string shorthand such as `"source"`
+- object form such as `{"name": "report", "extension": ".html", "format": "report/html"}`
 
 Do not add params schema or custom metadata to the decorator unless the task explicitly changes the SDK itself.
 
@@ -56,32 +61,49 @@ from integral import integral_block
 @integral_block(
     display_name="Example Report",
     description="Describe the block in one sentence.",
-    inputs=["source"],
-    outputs=["report"],
+    inputs=[
+        {"name": "source", "extensions": [".json"], "format": "chromatogram/json"},
+    ],
+    outputs=[
+        {"name": "report", "extension": ".html", "format": "report/html"},
+    ],
 )
 def main(
     inputs: dict[str, str | None],
     outputs: dict[str, str | None],
     params: dict[str, Any] | None,
 ) -> None:
-    source_root = require_existing_directory(inputs, "source")
-    report_root = require_output_directory(outputs, "report")
+    source_path = require_existing_file(inputs, "source")
+    report_path = require_output_file(outputs, "report")
     options = params or {}
-    report_root.mkdir(parents=True, exist_ok=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     ...
 ```
 
 Interpret the arguments this way:
 
-- `inputs[slot]`: absolute directory path for the resolved input dataset, or `None`
-- `outputs[slot]`: absolute directory path reserved for the output dataset, or `None`
+- non-`.idts` `inputs[slot]`: absolute file path chosen by the user, or `None`
+- `.idts` `inputs[slot]`: absolute directory path resolved from the bundle, or `None`
+- non-`.idts` `outputs[slot]`: absolute file path reserved for the output file, or `None`
+- `.idts` `outputs[slot]`: absolute directory path reserved for the bundle contents, or `None`
 - `params`: free-form object from the note source, or `None`
 
-The callable should write files into the output directory. It should not return data to the app.
+The callable should write files to the assigned output path or bundle directory. It should not return data to the app.
 
 ## Note Source Pattern
 
 The user-facing note block should stay simple:
+
+```itg-notes
+id: BLK-1F8E2D0A
+run: scripts/demo_hello_report.py:main
+params:
+  title: Image Set Report
+out:
+  report: /Results/image-set-report.html
+```
+
+If a slot needs multiple files, use `.idts` explicitly:
 
 ```itg-notes
 id: BLK-1F8E2D0A
@@ -101,8 +123,9 @@ The AI should reason from this source format first, then map it to Python implem
 
 - Validate required input paths explicitly with `Path`.
 - Convert optional `params` using `options = params or {}`.
-- Create the output directory with `mkdir(parents=True, exist_ok=True)` before writing files.
-- Emit stable filenames so the dataset is easy to inspect later.
+- For single-file output, create the parent directory with `output_path.parent.mkdir(...)`.
+- For `.idts` output, create the bundle directory with `output_root.mkdir(...)`.
+- Emit stable filenames so the output is easy to inspect later.
 - Prefer UTF-8 text output.
 - If the block is meant for human inspection, generate at least one renderable file such as HTML or text.
 - If the block has no inputs, remove the unused `inputs` variable intentionally with `del inputs`.
@@ -111,7 +134,8 @@ The AI should reason from this source format first, then map it to Python implem
 
 - expecting dataset IDs instead of resolved paths
 - reading `analysis-args.json` inside the user script
-- writing outside the assigned output directory
+- assuming every slot path is a dataset directory
+- writing outside the assigned output path or bundle directory
 - adding blank lines or extra decorators that break callable discovery
 - treating the decorator as a place for runtime params schema
 - putting new scripts outside `scripts/` when import simplicity matters

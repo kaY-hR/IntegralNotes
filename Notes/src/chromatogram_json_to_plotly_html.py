@@ -10,32 +10,32 @@ from integral import integral_block
 
 @integral_block(
     display_name="Chromatogram JSON To Plotly HTML",
-    description="Render an overlaid chromatogram plot from a dataset that contains a single JSON file.",
-    inputs=["source"],
-    outputs=["plot"],
+    description="Render an overlaid chromatogram plot from one chromatogram JSON file.",
+    inputs=[
+        {"name": "source", "extensions": [".json"], "format": "chromatogram/json"},
+    ],
+    outputs=[
+        {"name": "plot", "extension": ".html", "format": "report/html"},
+    ],
 )
 def main(
     inputs: dict[str, str | None],
     outputs: dict[str, str | None],
     params: dict[str, Any] | None,
 ) -> None:
-    source_root = require_existing_directory(inputs, "source")
-    output_root = require_output_directory(outputs, "plot")
+    source_path = require_existing_file(inputs, "source")
+    output_path = require_output_file(outputs, "plot")
     options = params or {}
-    json_glob = str(options.get("json_glob") or "*.json")
-    output_filename = normalize_output_filename(options.get("output_filename") or "index.html")
     title = str(options.get("title") or "LC Chromatograms Overlay")
     line_width = coerce_positive_float(options.get("line_width"), default=1.5)
     height = coerce_positive_int(options.get("height"), default=720)
+    traces = load_traces(source_path)
 
-    json_path = require_single_file(source_root, json_glob)
-    traces = load_traces(json_path)
-
-    output_root.mkdir(parents=True, exist_ok=True)
-    (output_root / output_filename).write_text(
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
         build_plot_html(
             title=title,
-            json_name=json_path.name,
+            json_name=source_path.name,
             traces=traces,
             line_width=line_width,
             height=height,
@@ -44,49 +44,26 @@ def main(
     )
 
 
-def require_existing_directory(values: dict[str, str | None], slot_name: str) -> Path:
+def require_existing_file(values: dict[str, str | None], slot_name: str) -> Path:
     candidate = (values or {}).get(slot_name)
     if not candidate:
         raise ValueError(f"Input slot '{slot_name}' is required.")
 
-    directory = Path(candidate)
-    if not directory.exists():
-        raise FileNotFoundError(f"Input path does not exist: {directory}")
-    if not directory.is_dir():
-        raise NotADirectoryError(f"Input path is not a directory: {directory}")
+    file_path = Path(candidate)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Input path does not exist: {file_path}")
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Input path is not a file: {file_path}")
 
-    return directory
+    return file_path
 
 
-def require_output_directory(values: dict[str, str | None], slot_name: str) -> Path:
+def require_output_file(values: dict[str, str | None], slot_name: str) -> Path:
     candidate = (values or {}).get(slot_name)
     if not candidate:
         raise ValueError(f"Output slot '{slot_name}' is required.")
 
     return Path(candidate)
-
-
-def normalize_output_filename(raw_value: Any) -> str:
-    filename = str(raw_value).strip()
-    if not filename:
-        raise ValueError("output_filename must not be empty.")
-
-    path_value = Path(filename)
-    if path_value.name != filename:
-        raise ValueError("output_filename must be a plain filename, not a path.")
-
-    return filename
-
-
-def require_single_file(source_root: Path, pattern: str) -> Path:
-    candidates = sorted(candidate for candidate in source_root.glob(pattern) if candidate.is_file())
-    if not candidates:
-        raise FileNotFoundError(f"No files matched pattern '{pattern}' in {source_root}")
-    if len(candidates) != 1:
-        joined = ", ".join(candidate.name for candidate in candidates)
-        raise ValueError(f"Expected exactly one JSON file in {source_root}, found {len(candidates)}: {joined}")
-
-    return candidates[0]
 
 
 def load_traces(json_path: Path) -> list[dict[str, Any]]:

@@ -6,26 +6,30 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import type {
-  CreateSourceDatasetRequest,
-  CreateSourceDatasetFromWorkspaceEntriesRequest,
-  CreateSourceDatasetResult,
+  CreateDatasetRequest,
+  CreateDatasetFromWorkspaceEntriesRequest,
+  CreateDatasetResult,
   ExecuteIntegralBlockRequest,
   ExecuteIntegralBlockResult,
-  ImportOriginalDataResult,
+  ImportManagedFilesResult,
   IntegralAssetCatalog,
   IntegralBlockDocument,
   IntegralBlockOutputConfig,
   IntegralBlockTypeDefinition,
   IntegralDatasetInspection,
   IntegralDatasetSummary,
+  IntegralManagedFileSummary,
   IntegralManagedDataTrackingIssue,
-  IntegralOriginalDataSummary,
   IntegralRenderableFile,
   ResolveIntegralManagedDataTrackingIssueRequest,
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
+  getIntegralSlotPrimaryExtension,
+  isIntegralBundleExtension,
   normalizeIntegralBlockOutputConfig,
+  normalizeIntegralSlotExtension,
+  normalizeIntegralSlotExtensions,
   toIntegralOutputDirectoryRelativePath
 } from "../shared/integral";
 import {
@@ -105,7 +109,7 @@ const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
 
 type ManagedDataVisibility = "hidden" | "visible";
 type ManagedDataProvenance = "derived" | "source";
-type OriginalDataRepresentation = "directory" | "file";
+type ManagedFileRepresentation = "directory" | "file";
 type DatasetRepresentation = "dataset-json";
 
 interface ManagedMetadataBase {
@@ -114,14 +118,7 @@ interface ManagedMetadataBase {
   hash: string;
   id: string;
   path: string;
-  provenance: ManagedDataProvenance;
   visibility: ManagedDataVisibility;
-}
-
-interface OriginalDataMetadata extends ManagedMetadataBase {
-  entityType: "original-data";
-  originalDataId: string;
-  representation: OriginalDataRepresentation;
 }
 
 interface DatasetMetadata extends ManagedMetadataBase {
@@ -132,10 +129,18 @@ interface DatasetMetadata extends ManagedMetadataBase {
   kind: string;
   memberIds?: string[];
   name: string;
+  provenance: ManagedDataProvenance;
   representation: DatasetRepresentation;
 }
 
-type ManagedDataMetadata = OriginalDataMetadata | DatasetMetadata;
+interface ManagedFileMetadata extends ManagedMetadataBase {
+  createdByBlockId: string | null;
+  entityType: "managed-file";
+  format: string | null;
+  representation: ManagedFileRepresentation;
+}
+
+type ManagedDataMetadata = DatasetMetadata | ManagedFileMetadata;
 
 interface InspectableFileEntry {
   absolutePath: string;
@@ -164,7 +169,7 @@ interface ReconcileMetadataResult<TMetadata> {
 
 interface ReservedManagedPath {
   relativePath: string;
-  representation: OriginalDataRepresentation | DatasetRepresentation;
+  representation: DatasetRepresentation | ManagedFileRepresentation;
 }
 
 interface PythonCallableSummary {
@@ -237,8 +242,8 @@ export class IntegralWorkspaceService {
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
     await this.ensureIntegralWorkspaceReady();
 
-    const [originalData, datasets, pythonCallables, externalPlugins] = await Promise.all([
-      this.readOriginalDataSummaries(),
+    const [managedFiles, datasets, pythonCallables, externalPlugins] = await Promise.all([
+      this.readManagedFileSummaries(),
       this.readDatasetSummaries(),
       this.readPythonCallableSummaries(),
       this.pluginRegistry.listInstalledPlugins()
@@ -247,7 +252,7 @@ export class IntegralWorkspaceService {
     return {
       datasets,
       blockTypes: buildBlockTypeCatalog(pythonCallables, externalPlugins),
-      originalData
+      managedFiles
     };
   }
 
@@ -314,15 +319,15 @@ export class IntegralWorkspaceService {
     await this.ensureIntegralWorkspaceReady();
 
     const metadata =
-      request.entityType === "original-data"
-        ? await this.readOriginalDataMetadata(request.targetId)
-        : await this.readDatasetMetadata(request.targetId);
+      request.entityType === "dataset"
+        ? await this.readDatasetMetadata(request.targetId)
+        : await this.readManagedFileMetadata(request.targetId);
 
     if (!metadata) {
       throw new Error(
-        request.entityType === "original-data"
-          ? `元データが見つかりません: ${request.targetId}`
-          : `dataset が見つかりません: ${request.targetId}`
+        request.entityType === "dataset"
+          ? `dataset が見つかりません: ${request.targetId}`
+          : `managed file が見つかりません: ${request.targetId}`
       );
     }
 
@@ -341,43 +346,43 @@ export class IntegralWorkspaceService {
     return this.listManagedDataTrackingIssues();
   }
 
-  async importOriginalDataPaths(sourcePaths: string[]): Promise<ImportOriginalDataResult> {
+  async importManagedFilePaths(sourcePaths: string[]): Promise<ImportManagedFilesResult> {
     await this.ensureIntegralWorkspaceReady();
 
     if (sourcePaths.length === 0) {
-      throw new Error("元データとして登録するファイルまたはフォルダを選択してください。");
+      throw new Error("managed file として登録するファイルまたはフォルダを選択してください。");
     }
 
-    const importedOriginalData: IntegralOriginalDataSummary[] = [];
+    const importedManagedFiles: IntegralManagedFileSummary[] = [];
 
     for (const sourcePath of sourcePaths) {
-      const metadata = await this.registerOriginalDataPath(sourcePath, {
+      const metadata = await this.registerManagedFilePath(sourcePath, {
         syncManagedDataNotes: false
       });
-      importedOriginalData.push(await this.toOriginalDataSummary(metadata));
+      importedManagedFiles.push(this.toManagedFileSummary(metadata));
     }
 
-    if (importedOriginalData.length > 0) {
+    if (importedManagedFiles.length > 0) {
       await this.workspaceService.syncManagedDataNotes();
     }
 
     return {
-      originalData: importedOriginalData
+      managedFiles: importedManagedFiles
     };
   }
 
-  async createSourceDataset(request: CreateSourceDatasetRequest): Promise<CreateSourceDatasetResult> {
+  async createDataset(request: CreateDatasetRequest): Promise<CreateDatasetResult> {
     await this.ensureIntegralWorkspaceReady();
 
-    const originalDataIds = request.originalDataIds
-      .map((originalDataId) => originalDataId.trim())
-      .filter((originalDataId) => originalDataId.length > 0);
+    const managedFileIds = request.managedFileIds
+      .map((managedFileId) => managedFileId.trim())
+      .filter((managedFileId) => managedFileId.length > 0);
 
-    if (originalDataIds.length === 0) {
-      throw new Error("source dataset を作るには少なくとも 1 つの元データが必要です。");
+    if (managedFileIds.length === 0) {
+      throw new Error("dataset を作るには少なくとも 1 つの managed file が必要です。");
     }
 
-    const uniqueOriginalDataIds = Array.from(new Set(originalDataIds));
+    const uniqueManagedFileIds = Array.from(new Set(managedFileIds));
     const datasetId = createOpaqueId("DTS");
     const datasetName = normalizeDatasetName(request.name, datasetId);
     const manifestRelativePath = await this.createVisibleDatasetManifestRelativePath(
@@ -388,14 +393,14 @@ export class IntegralWorkspaceService {
     const manifestAbsolutePath = this.resolveWorkspacePath(manifestRelativePath);
     const memberIds: string[] = [];
 
-    for (const originalDataId of uniqueOriginalDataIds) {
-      const originalDataMetadata = await this.readOriginalDataMetadata(originalDataId);
+    for (const managedFileId of uniqueManagedFileIds) {
+      const managedFileMetadata = await this.readManagedFileMetadata(managedFileId);
 
-      if (originalDataMetadata === null) {
-        throw new Error(`元データが見つかりません: ${originalDataId}`);
+      if (managedFileMetadata === null) {
+        throw new Error(`managed file が見つかりません: ${managedFileId}`);
       }
 
-      memberIds.push(originalDataId);
+      memberIds.push(managedFileId);
     }
 
     const manifest: DatasetManifest = {
@@ -433,9 +438,9 @@ export class IntegralWorkspaceService {
     };
   }
 
-  async createSourceDatasetFromWorkspaceEntries(
-    request: CreateSourceDatasetFromWorkspaceEntriesRequest
-  ): Promise<CreateSourceDatasetResult> {
+  async createDatasetFromWorkspaceEntries(
+    request: CreateDatasetFromWorkspaceEntriesRequest
+  ): Promise<CreateDatasetResult> {
     await this.ensureIntegralWorkspaceReady();
 
     const relativePaths = collapseNestedRelativePaths(request.relativePaths);
@@ -444,29 +449,29 @@ export class IntegralWorkspaceService {
       throw new Error("dataset に追加するファイルまたはフォルダを選択してください。");
     }
 
-    const originalDataIds: string[] = [];
+    const managedFileIds: string[] = [];
 
     for (const relativePath of relativePaths) {
-      const existingMetadata = await this.findOriginalDataMetadataByPath(relativePath);
+      const managedFileMetadata = await this.findManagedFileMetadataByPath(relativePath);
 
-      if (existingMetadata) {
-        originalDataIds.push(existingMetadata.originalDataId);
+      if (managedFileMetadata) {
+        managedFileIds.push(managedFileMetadata.id);
         continue;
       }
 
-      const importResult = await this.importOriginalDataPaths([this.resolveWorkspacePath(relativePath)]);
-      const importedOriginalDataId = importResult.originalData[0]?.originalDataId;
+      const importResult = await this.importManagedFilePaths([this.resolveWorkspacePath(relativePath)]);
+      const importedManagedFileId = importResult.managedFiles[0]?.id;
 
-      if (!importedOriginalDataId) {
-        throw new Error(`${relativePath} を元データとして登録できませんでした。`);
+      if (!importedManagedFileId) {
+        throw new Error(`${relativePath} を managed file として登録できませんでした。`);
       }
 
-      originalDataIds.push(importedOriginalDataId);
+      managedFileIds.push(importedManagedFileId);
     }
 
-    return this.createSourceDataset({
+    return this.createDataset({
       name: request.name,
-      originalDataIds
+      managedFileIds
     });
   }
 
@@ -506,7 +511,6 @@ export class IntegralWorkspaceService {
       memberIds: datasetMetadata.memberIds,
       name: datasetMetadata.name,
       path: datasetMetadata.path,
-      provenance: datasetMetadata.provenance,
       representation: datasetMetadata.representation,
       renderableCount: renderables.length,
       renderables,
@@ -710,15 +714,13 @@ export class IntegralWorkspaceService {
     }
 
     for (const inputSlot of definition.inputSlots) {
-      const datasetId = resolvedBlock.inputs[inputSlot.name];
+      const inputReference = resolvedBlock.inputs[inputSlot.name];
 
-      if (!datasetId) {
+      if (!inputReference) {
         throw new Error(`input slot が未設定です: ${inputSlot.name}`);
       }
 
-      if ((await this.readDatasetMetadata(datasetId)) === null) {
-        throw new Error(`input dataset が見つかりません: ${datasetId}`);
-      }
+      await this.resolveInputExecutionPath(inputReference, inputSlot);
     }
 
     const callable = parsePythonCallableBlockType(definition.blockType);
@@ -737,29 +739,33 @@ export class IntegralWorkspaceService {
     const runtimeRootPath = this.resolvePythonRuntimeRootPath(sourceBlock.id ?? resolvedBlock.id ?? createOpaqueId("BLK"));
     await resetDirectory(runtimeRootPath);
     const outputDatasetMap = new Map<string, IntegralDatasetSummary>();
+    const outputManagedFilePlanMap = new Map<
+      string,
+      {
+        displayName: string;
+        format: string | null;
+        relativePath: string;
+      }
+    >();
+    const outputFileReferenceMap = new Map<string, string>();
     const outputPaths: Record<string, string | null> = {};
     const inputPaths: Record<string, string | null> = {};
 
     for (const inputSlot of definition.inputSlots) {
-      const datasetId = resolvedBlock.inputs[inputSlot.name];
+      const inputReference = resolvedBlock.inputs[inputSlot.name];
 
-      if (!datasetId) {
+      if (!inputReference) {
         inputPaths[inputSlot.name] = null;
         continue;
       }
 
-      const metadata = await this.readDatasetMetadata(datasetId);
-
-      if (metadata === null) {
-        throw new Error(`input dataset が見つかりません: ${datasetId}`);
-      }
-
-      inputPaths[inputSlot.name] = await this.resolveDatasetReadablePath(metadata);
+      inputPaths[inputSlot.name] = await this.resolveInputExecutionPath(inputReference, inputSlot);
     }
 
     for (const outputSlot of definition.outputSlots) {
+      const outputExtension =
+        getIntegralSlotPrimaryExtension(outputSlot, DATASET_JSON_EXTENSION) ?? DATASET_JSON_EXTENSION;
       const createdAt = new Date();
-      const nextDatasetId = createOpaqueId("DTS");
       const outputConfig = normalizeOutputConfigForSlot(
         resolvedBlock.outputConfigs?.[outputSlot.name],
         outputSlot.name,
@@ -767,51 +773,74 @@ export class IntegralWorkspaceService {
       );
       const manifestDirectoryRelativePath =
         toIntegralOutputDirectoryRelativePath(outputConfig.directory) ?? DATA_DIRECTORY;
-      const datasetName = outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name;
-      const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
-      const datasetManifestPath = await this.createVisibleDatasetManifestRelativePath(
+
+      if (isIntegralBundleExtension(outputExtension)) {
+        const nextDatasetId = createOpaqueId("DTS");
+        const datasetName = outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name;
+        const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
+        const datasetManifestPath = await this.createVisibleDatasetManifestRelativePath(
+          manifestDirectoryRelativePath,
+          datasetName,
+          nextDatasetId
+        );
+        const datasetAbsolutePath = this.resolveWorkspacePath(datasetDataPath);
+        const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
+        const metadata: DatasetMetadata = {
+          createdAt: createdAt.toISOString(),
+          createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
+          dataPath: datasetDataPath,
+          datasetId: nextDatasetId,
+          displayName: datasetName,
+          entityType: "dataset",
+          hash: "",
+          id: nextDatasetId,
+          kind:
+            outputSlot.format?.trim() ||
+            outputSlot.producedKind?.trim() ||
+            `${resolvedBlock["block-type"]}.${outputSlot.name}`,
+          name: datasetName,
+          path: datasetManifestPath,
+          provenance: "derived",
+          representation: "dataset-json",
+          visibility: "visible"
+        };
+        const manifest: DatasetManifest = {
+          dataPath: datasetDataPath,
+          datasetId: nextDatasetId,
+          kind: metadata.kind,
+          name: datasetName
+        };
+
+        await fs.mkdir(datasetAbsolutePath, { recursive: true });
+        await fs.mkdir(path.dirname(datasetManifestAbsolutePath), { recursive: true });
+        await fs.writeFile(datasetManifestAbsolutePath, JSON.stringify(manifest, null, 2), "utf8");
+        metadata.hash = await this.computeManagedDataHash(
+          datasetManifestAbsolutePath,
+          metadata.representation
+        );
+        await this.writeDatasetMetadata(nextDatasetId, metadata);
+        await this.writeDatasetNote(metadata);
+
+        const datasetSummary = await this.readDatasetSummary(nextDatasetId);
+        outputDatasetMap.set(outputSlot.name, datasetSummary);
+        outputPaths[outputSlot.name] = datasetAbsolutePath;
+        continue;
+      }
+
+      const outputRelativePath = await this.createVisibleOutputFileRelativePath(
         manifestDirectoryRelativePath,
-        datasetName,
-        nextDatasetId
+        outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name,
+        outputExtension
       );
-      const datasetAbsolutePath = this.resolveWorkspacePath(datasetDataPath);
-      const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
-      const metadata: DatasetMetadata = {
-        createdAt: createdAt.toISOString(),
-        createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
-        dataPath: datasetDataPath,
-        datasetId: nextDatasetId,
-        displayName: datasetName,
-        entityType: "dataset",
-        hash: "",
-        id: nextDatasetId,
-        kind: outputSlot.producedKind?.trim() || `${resolvedBlock["block-type"]}.${outputSlot.name}`,
-        name: datasetName,
-        path: datasetManifestPath,
-        provenance: "derived",
-        representation: "dataset-json",
-        visibility: "visible"
-      };
-      const manifest: DatasetManifest = {
-        dataPath: datasetDataPath,
-        datasetId: nextDatasetId,
-        kind: metadata.kind,
-        name: datasetName
-      };
-
-      await fs.mkdir(datasetAbsolutePath, { recursive: true });
-      await fs.mkdir(path.dirname(datasetManifestAbsolutePath), { recursive: true });
-      await fs.writeFile(datasetManifestAbsolutePath, JSON.stringify(manifest, null, 2), "utf8");
-      metadata.hash = await this.computeManagedDataHash(
-        datasetManifestAbsolutePath,
-        metadata.representation
-      );
-      await this.writeDatasetMetadata(nextDatasetId, metadata);
-      await this.writeDatasetNote(metadata);
-
-      const datasetSummary = await this.readDatasetSummary(nextDatasetId);
-      outputDatasetMap.set(outputSlot.name, datasetSummary);
-      outputPaths[outputSlot.name] = datasetAbsolutePath;
+      const outputAbsolutePath = this.resolveWorkspacePath(outputRelativePath);
+      await fs.mkdir(path.dirname(outputAbsolutePath), { recursive: true });
+      outputPaths[outputSlot.name] = outputAbsolutePath;
+      outputFileReferenceMap.set(outputSlot.name, toCanonicalWorkspaceTarget(outputRelativePath));
+      outputManagedFilePlanMap.set(outputSlot.name, {
+        displayName: outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name,
+        format: outputSlot.format?.trim() || null,
+        relativePath: outputRelativePath
+      });
     }
 
     const startedAt = new Date().toISOString();
@@ -858,6 +887,10 @@ export class IntegralWorkspaceService {
 
       await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
       await this.refreshOutputDatasetMetadata(outputDatasetMap);
+      await this.refreshOutputManagedFileMetadata(
+        outputManagedFilePlanMap,
+        sourceBlock.id ?? resolvedBlock.id ?? null
+      );
       await this.workspaceService.syncManagedDataNotes();
 
       throw new Error(
@@ -872,6 +905,10 @@ export class IntegralWorkspaceService {
 
     await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
     await this.refreshOutputDatasetMetadata(outputDatasetMap);
+    await this.refreshOutputManagedFileMetadata(
+      outputManagedFilePlanMap,
+      sourceBlock.id ?? resolvedBlock.id ?? null
+    );
     await this.workspaceService.syncManagedDataNotes();
 
     const finishedAt = new Date().toISOString();
@@ -890,7 +927,12 @@ export class IntegralWorkspaceService {
       definition.outputSlots.map((slot) => {
         const datasetId = outputDatasetMap.get(slot.name)?.datasetId ?? null;
         const dataset = datasetId ? createdDatasetMap.get(datasetId) ?? null : null;
-        return [slot.name, dataset ? toCanonicalWorkspaceTarget(dataset.path) : null];
+        return [
+          slot.name,
+          dataset
+            ? toCanonicalWorkspaceTarget(dataset.path)
+            : outputFileReferenceMap.get(slot.name) ?? null
+        ];
       })
     );
 
@@ -928,11 +970,19 @@ export class IntegralWorkspaceService {
 
       const metadata = await this.resolveDatasetReferenceMetadata(inputReference);
 
-      if (!metadata) {
-        throw new Error(`input dataset が見つかりません: ${inputReference}`);
+      if (metadata) {
+        resolvedInputs[inputSlot.name] = metadata.datasetId;
+        continue;
       }
 
-      resolvedInputs[inputSlot.name] = metadata.datasetId;
+      const workspacePath =
+        resolveWorkspaceMarkdownTarget(inputReference) ?? normalizeRelativePath(inputReference);
+
+      if (workspacePath.length === 0 || (await this.resolveIfExists(workspacePath)) === null) {
+        throw new Error(`input path が見つかりません: ${inputReference}`);
+      }
+
+      resolvedInputs[inputSlot.name] = toCanonicalWorkspaceTarget(workspacePath);
     }
 
     return {
@@ -1012,19 +1062,22 @@ export class IntegralWorkspaceService {
     };
   }
 
-  private async writeOriginalDataMetadata(originalDataId: string, metadata: OriginalDataMetadata): Promise<void> {
+  private async writeDatasetMetadata(datasetId: string, metadata: DatasetMetadata): Promise<void> {
     await fs.mkdir(this.resolveStoreMetadataRootPath(), { recursive: true });
     await fs.writeFile(
-      path.join(this.resolveStoreMetadataRootPath(), `${originalDataId}.json`),
+      path.join(this.resolveStoreMetadataRootPath(), `${datasetId}.json`),
       JSON.stringify(metadata, null, 2),
       "utf8"
     );
   }
 
-  private async writeDatasetMetadata(datasetId: string, metadata: DatasetMetadata): Promise<void> {
+  private async writeManagedFileMetadata(
+    managedFileId: string,
+    metadata: ManagedFileMetadata
+  ): Promise<void> {
     await fs.mkdir(this.resolveStoreMetadataRootPath(), { recursive: true });
     await fs.writeFile(
-      path.join(this.resolveStoreMetadataRootPath(), `${datasetId}.json`),
+      path.join(this.resolveStoreMetadataRootPath(), `${managedFileId}.json`),
       JSON.stringify(metadata, null, 2),
       "utf8"
     );
@@ -1052,8 +1105,8 @@ export class IntegralWorkspaceService {
       force: true
     });
 
-    if (metadata.entityType === "original-data") {
-      await this.removeOriginalDataReferencesFromDatasets(metadata.originalDataId);
+    if (metadata.entityType === "managed-file") {
+      await this.removeManagedFileReferencesFromDatasets(metadata.id);
     }
 
     if (syncManagedDataNotes) {
@@ -1061,10 +1114,10 @@ export class IntegralWorkspaceService {
     }
   }
 
-  private async removeOriginalDataReferencesFromDatasets(originalDataId: string): Promise<void> {
-    const normalizedOriginalDataId = originalDataId.trim();
+  private async removeManagedFileReferencesFromDatasets(managedFileId: string): Promise<void> {
+    const normalizedManagedFileId = managedFileId.trim();
 
-    if (normalizedOriginalDataId.length === 0) {
+    if (normalizedManagedFileId.length === 0) {
       return;
     }
 
@@ -1077,13 +1130,13 @@ export class IntegralWorkspaceService {
 
       const manifest = await this.readDatasetManifest(metadata.path);
 
-      if (!manifest?.memberIds?.includes(normalizedOriginalDataId)) {
+      if (!manifest?.memberIds?.includes(normalizedManagedFileId)) {
         continue;
       }
 
       const nextManifest: DatasetManifest = {
         ...manifest,
-        memberIds: manifest.memberIds.filter((memberId) => memberId !== normalizedOriginalDataId)
+        memberIds: manifest.memberIds.filter((memberId) => memberId !== normalizedManagedFileId)
       };
 
       await this.writeDatasetManifest(metadata.path, nextManifest);
@@ -1101,12 +1154,12 @@ export class IntegralWorkspaceService {
     }
   }
 
-  private async autoRegisterWorkspaceOriginalData(
+  private async autoRegisterWorkspaceManagedFiles(
     workspaceEntries: readonly TrackableWorkspaceEntry[],
     reservedManagedPaths: ReservedManagedPath[]
   ): Promise<number> {
     const candidates = workspaceEntries.filter((entry) =>
-      isAutoRegisterableOriginalDataEntry(entry, reservedManagedPaths)
+      isAutoRegisterableManagedFileEntry(entry, reservedManagedPaths)
     );
 
     if (candidates.length === 0) {
@@ -1114,9 +1167,21 @@ export class IntegralWorkspaceService {
     }
 
     for (const candidate of candidates) {
-      const metadata = await this.registerOriginalDataPath(candidate.absolutePath, {
-        syncManagedDataNotes: false
-      });
+      const normalizedPath = normalizeRelativePath(candidate.relativePath);
+      const metadata: ManagedFileMetadata = {
+        createdAt: new Date().toISOString(),
+        createdByBlockId: null,
+        displayName: path.posix.basename(normalizedPath),
+        entityType: "managed-file",
+        format: inferManagedFileFormatId(normalizedPath),
+        hash: candidate.hash,
+        id: createOpaqueId("FL"),
+        path: normalizedPath,
+        representation: candidate.kind,
+        visibility: inferVisibilityFromPath(normalizedPath, candidate.kind)
+      };
+
+      await this.writeManagedFileMetadata(metadata.id, metadata);
       reserveManagedPath(reservedManagedPaths, metadata.path, metadata.representation);
     }
 
@@ -1124,7 +1189,7 @@ export class IntegralWorkspaceService {
   }
 
   private async applyTrackedPathResolution(
-    metadata: OriginalDataMetadata | DatasetMetadata,
+    metadata: DatasetMetadata | ManagedFileMetadata,
     selectedPath: string
   ): Promise<void> {
     const absolutePath = this.resolveWorkspacePath(selectedPath);
@@ -1142,16 +1207,7 @@ export class IntegralWorkspaceService {
 
     const nextPath = normalizeRelativePath(selectedPath);
 
-    if (metadata.entityType === "original-data") {
-      const nextMetadata: OriginalDataMetadata = {
-        ...metadata,
-        hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
-        path: nextPath,
-        visibility: inferVisibilityFromPath(nextPath, metadata.representation)
-      };
-
-      await this.writeOriginalDataMetadata(nextMetadata.originalDataId, nextMetadata);
-    } else {
+    if (metadata.entityType === "dataset") {
       const nextMetadata: DatasetMetadata = {
         ...metadata,
         hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
@@ -1161,6 +1217,15 @@ export class IntegralWorkspaceService {
 
       await this.refreshDatasetManifestFields(nextMetadata);
       await this.writeDatasetMetadata(nextMetadata.datasetId, nextMetadata);
+    } else {
+      const nextMetadata: ManagedFileMetadata = {
+        ...metadata,
+        hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
+        path: nextPath,
+        visibility: inferVisibilityFromPath(nextPath, metadata.representation)
+      };
+
+      await this.writeManagedFileMetadata(nextMetadata.id, nextMetadata);
     }
 
     const hasChanges = await this.reconcileManagedDataMetadata();
@@ -1184,12 +1249,12 @@ export class IntegralWorkspaceService {
     ]);
   }
 
-  private async readOriginalDataMetadata(originalDataId: string): Promise<OriginalDataMetadata | null> {
+  private async readManagedFileMetadata(managedFileId: string): Promise<ManagedFileMetadata | null> {
     const rawMetadata = await readJsonFile<unknown>(
-      path.join(this.resolveStoreMetadataRootPath(), `${originalDataId}.json`)
+      path.join(this.resolveStoreMetadataRootPath(), `${managedFileId}.json`)
     );
 
-    return normalizeOriginalDataMetadata(rawMetadata);
+    return normalizeManagedFileMetadata(rawMetadata);
   }
 
   private async readManagedDataMetadataList(): Promise<ManagedDataMetadata[]> {
@@ -1200,7 +1265,10 @@ export class IntegralWorkspaceService {
         .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
         .map(async (entry) => {
           const rawMetadata = await readJsonFile<unknown>(path.join(metadataRootPath, entry.name));
-          return normalizeOriginalDataMetadata(rawMetadata) ?? normalizeDatasetMetadata(rawMetadata);
+          return (
+            normalizeManagedFileMetadata(rawMetadata) ??
+            normalizeDatasetMetadata(rawMetadata)
+          );
         })
     );
 
@@ -1226,7 +1294,7 @@ export class IntegralWorkspaceService {
     return mutations.some((mutation) => mutation.kind !== "modify");
   }
 
-  private async findOriginalDataMetadataByPath(relativePath: string): Promise<OriginalDataMetadata | null> {
+  private async findManagedFileMetadataByPath(relativePath: string): Promise<ManagedFileMetadata | null> {
     const metadataRootPath = this.resolveStoreMetadataRootPath();
     const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
     const normalizedRelativePath = normalizeRelativePath(relativePath);
@@ -1237,7 +1305,7 @@ export class IntegralWorkspaceService {
       }
 
       const rawMetadata = await readJsonFile<unknown>(path.join(metadataRootPath, entry.name));
-      const metadata = normalizeOriginalDataMetadata(rawMetadata);
+      const metadata = normalizeManagedFileMetadata(rawMetadata);
 
       if (metadata && normalizeRelativePath(metadata.path) === normalizedRelativePath) {
         return metadata;
@@ -1255,22 +1323,11 @@ export class IntegralWorkspaceService {
     return normalizeDatasetMetadata(rawMetadata);
   }
 
-  private async readOriginalDataSummaries(): Promise<IntegralOriginalDataSummary[]> {
-    const metadataRootPath = this.resolveStoreMetadataRootPath();
-    const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
-    const summaries = await Promise.all(
-      entries
-        .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
-        .map(async (entry) => {
-          const rawMetadata = await readJsonFile<unknown>(path.join(metadataRootPath, entry.name));
-          const metadata = normalizeOriginalDataMetadata(rawMetadata);
+  private async readManagedFileSummaries(): Promise<IntegralManagedFileSummary[]> {
+    const metadataList = await this.readManagedDataMetadataList();
 
-          return metadata ? this.toOriginalDataSummary(metadata) : null;
-        })
-    );
-
-    return summaries
-      .filter((summary): summary is IntegralOriginalDataSummary => summary !== null)
+    return metadataList
+      .map((metadata) => this.toManagedFileSummary(metadata))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -1317,7 +1374,6 @@ export class IntegralWorkspaceService {
       memberIds: metadata.memberIds,
       name: metadata.name,
       path: metadata.path,
-      provenance: metadata.provenance,
       representation: metadata.representation,
       renderableCount,
       visibility: metadata.visibility
@@ -1422,22 +1478,37 @@ export class IntegralWorkspaceService {
       .sort((left, right) => left.relativePath.localeCompare(right.relativePath, "ja"));
   }
 
-  private async toOriginalDataSummary(
-    metadata: OriginalDataMetadata
-  ): Promise<IntegralOriginalDataSummary> {
+  private toManagedFileSummary(metadata: ManagedDataMetadata): IntegralManagedFileSummary {
+    if (metadata.entityType === "dataset") {
+      return {
+        createdAt: metadata.createdAt,
+        createdByBlockId: metadata.createdByBlockId,
+        displayName: metadata.name,
+        entityType: metadata.entityType,
+        format: metadata.kind,
+        hash: metadata.hash,
+        id: metadata.datasetId,
+        path: metadata.path,
+        representation: metadata.representation,
+        visibility: metadata.visibility
+      };
+    }
+
     return {
       createdAt: metadata.createdAt,
+      createdByBlockId: metadata.createdByBlockId,
       displayName: metadata.displayName,
+      entityType: metadata.entityType,
+      format: metadata.format,
       hash: metadata.hash,
-      originalDataId: metadata.originalDataId,
+      id: metadata.id,
       path: metadata.path,
-      provenance: metadata.provenance,
       representation: metadata.representation,
       visibility: metadata.visibility
     };
   }
 
-  private resolveOriginalDataContentPath(metadata: OriginalDataMetadata): string {
+  private resolveManagedFileContentPath(metadata: ManagedFileMetadata): string {
     return this.resolveWorkspacePath(metadata.path);
   }
 
@@ -1447,57 +1518,57 @@ export class IntegralWorkspaceService {
       (!normalizedRelative.startsWith("..") && !path.isAbsolute(normalizedRelative));
   }
 
-  private async registerOriginalDataPath(
+  private async registerManagedFilePath(
     sourcePath: string,
     options: {
       syncManagedDataNotes?: boolean;
     } = {}
-  ): Promise<OriginalDataMetadata> {
+  ): Promise<ManagedFileMetadata> {
     const { syncManagedDataNotes = true } = options;
     const rootPath = this.getRootPath();
     const resolvedSourcePath = path.resolve(sourcePath);
     const sourceStats = await fs.stat(resolvedSourcePath);
-    const representation: OriginalDataRepresentation = sourceStats.isDirectory()
+    const representation: ManagedFileRepresentation = sourceStats.isDirectory()
       ? "directory"
       : "file";
     const sourceInsideWorkspace = this.isWorkspacePath(rootPath, resolvedSourcePath);
 
     if (sourceInsideWorkspace) {
-      this.assertRegisterableOriginalDataPath(rootPath, resolvedSourcePath);
+      this.assertRegisterableManagedFilePath(rootPath, resolvedSourcePath);
     }
 
-    const originalDataId = createOpaqueId("ORD");
-    const visiblePath = await this.resolveOriginalDataVisiblePath(
+    const managedFileId = createOpaqueId("FL");
+    const visiblePath = await this.resolveManagedFileVisiblePath(
       rootPath,
       resolvedSourcePath,
-      originalDataId,
+      managedFileId,
       representation
     );
     const visibleAbsolutePath = this.resolveWorkspacePath(visiblePath);
 
     if (!sourceInsideWorkspace) {
       await fs.mkdir(path.dirname(visibleAbsolutePath), { recursive: true });
-      await this.copyOriginalDataIntoWorkspace(
+      await this.copyManagedFileIntoWorkspace(
         resolvedSourcePath,
         visibleAbsolutePath,
         representation
       );
     }
 
-    const metadata: OriginalDataMetadata = {
+    const metadata: ManagedFileMetadata = {
       createdAt: new Date().toISOString(),
       displayName: path.basename(resolvedSourcePath),
-      entityType: "original-data",
+      createdByBlockId: null,
+      entityType: "managed-file",
+      format: inferManagedFileFormatId(visiblePath),
       hash: await this.computeManagedDataHash(visibleAbsolutePath, representation),
-      id: originalDataId,
-      originalDataId,
+      id: managedFileId,
       path: visiblePath,
-      provenance: "source",
       representation,
       visibility: inferVisibilityFromPath(visiblePath, representation)
     };
 
-    await this.writeOriginalDataMetadata(originalDataId, metadata);
+    await this.writeManagedFileMetadata(managedFileId, metadata);
 
     if (syncManagedDataNotes) {
       await this.workspaceService.syncManagedDataNotes();
@@ -1506,25 +1577,25 @@ export class IntegralWorkspaceService {
     return metadata;
   }
 
-  private assertRegisterableOriginalDataPath(rootPath: string, absolutePath: string): void {
+  private assertRegisterableManagedFilePath(rootPath: string, absolutePath: string): void {
     const normalizedRelative = path.relative(rootPath, absolutePath);
 
     if (normalizedRelative.length === 0) {
-      throw new Error("ワークスペース root 自体は元データ登録できません。");
+      throw new Error("ワークスペース root 自体は managed file 登録できません。");
     }
 
     const topLevelSegment = normalizedRelative.split(path.sep).filter(Boolean)[0] ?? "";
 
     if (topLevelSegment === STORE_DIRECTORY) {
-      throw new Error("system 管理ディレクトリ配下は元データ登録できません。");
+      throw new Error("system 管理ディレクトリ配下は managed file 登録できません。");
     }
   }
 
-  private async resolveOriginalDataVisiblePath(
+  private async resolveManagedFileVisiblePath(
     rootPath: string,
     sourceAbsolutePath: string,
-    originalDataId: string,
-    representation: OriginalDataRepresentation
+    managedFileId: string,
+    representation: ManagedFileRepresentation
   ): Promise<string> {
     if (this.isWorkspacePath(rootPath, sourceAbsolutePath)) {
       return path.relative(rootPath, sourceAbsolutePath).split(path.sep).join("/");
@@ -1542,15 +1613,15 @@ export class IntegralWorkspaceService {
 
     return `${DATA_DIRECTORY}/${createVisibleAliasEntryName(
       path.basename(sourceAbsolutePath),
-      originalDataId,
+      managedFileId,
       representation
     )}`;
   }
 
-  private async copyOriginalDataIntoWorkspace(
+  private async copyManagedFileIntoWorkspace(
     sourcePath: string,
     destinationPath: string,
-    representation: OriginalDataRepresentation
+    representation: ManagedFileRepresentation
   ): Promise<void> {
     if (representation === "directory") {
       await fs.cp(sourcePath, destinationPath, { force: false, recursive: true });
@@ -1563,7 +1634,7 @@ export class IntegralWorkspaceService {
   private async createVisibleAlias(
     targetPath: string,
     aliasPath: string,
-    representation: OriginalDataRepresentation
+    representation: ManagedFileRepresentation
   ): Promise<void> {
     if (representation === "directory") {
       await fs.symlink(targetPath, aliasPath, "junction");
@@ -1601,6 +1672,83 @@ export class IntegralWorkspaceService {
     }
   }
 
+  private async createVisibleOutputFileRelativePath(
+    directoryRelativePath: string,
+    fileNameStem: string,
+    extension: string
+  ): Promise<string> {
+    const normalizedDirectoryRelativePath = normalizeRelativePath(directoryRelativePath);
+    const outputsRootPath = this.resolveWorkspacePath(
+      normalizedDirectoryRelativePath.length > 0 ? normalizedDirectoryRelativePath : "."
+    );
+    await fs.mkdir(outputsRootPath, { recursive: true });
+
+    const normalizedExtension = normalizeIntegralSlotExtension(extension) ?? "";
+    const trimmedStem = fileNameStem.trim();
+    const bareStem = normalizedExtension.length > 0 &&
+      trimmedStem.toLowerCase().endsWith(normalizedExtension)
+      ? trimmedStem.slice(0, -normalizedExtension.length)
+      : trimmedStem;
+    const preferredStem = sanitizeFileStem(bareStem) || "output";
+    let serial = 0;
+
+    while (true) {
+      const suffix = serial === 0 ? "" : `_${serial}`;
+      const relativePath = normalizeRelativePath(
+        `${normalizedDirectoryRelativePath}/${preferredStem}${suffix}${normalizedExtension}`
+      );
+
+      if (!(await pathExists(this.resolveWorkspacePath(relativePath)))) {
+        return relativePath;
+      }
+
+      serial += 1;
+    }
+  }
+
+  private async resolveInputExecutionPath(
+    inputReference: string,
+    inputSlot: IntegralSlotDefinition
+  ): Promise<string> {
+    const datasetMetadata = await this.resolveDatasetReferenceMetadata(inputReference);
+
+    if (datasetMetadata) {
+      return this.resolveDatasetReadablePath(datasetMetadata);
+    }
+
+    const workspacePath =
+      resolveWorkspaceMarkdownTarget(inputReference) ?? normalizeRelativePath(inputReference);
+
+    if (workspacePath.length === 0) {
+      throw new Error(`input path が不正です: ${inputReference}`);
+    }
+
+    const absolutePath = this.resolveWorkspacePath(workspacePath);
+    const stats = await fs.stat(absolutePath).catch(() => null);
+
+    if (!stats) {
+      throw new Error(`input path が見つかりません: ${inputReference}`);
+    }
+
+    const allowedExtensions = normalizeIntegralSlotExtensions(inputSlot.extensions);
+    const directExtension = normalizeIntegralSlotExtension(inputSlot.extension);
+    const expectedExtensions = Array.from(
+      new Set([...(allowedExtensions ?? []), ...(directExtension ? [directExtension] : [])])
+    );
+
+    if (expectedExtensions.length > 0 && stats.isFile()) {
+      const actualExtension = path.extname(absolutePath).toLowerCase();
+
+      if (!expectedExtensions.includes(actualExtension)) {
+        throw new Error(
+          `input slot '${inputSlot.name}' は ${expectedExtensions.join(", ")} のみ受け付けます: ${inputReference}`
+        );
+      }
+    }
+
+    return absolutePath;
+  }
+
   private async resolveDatasetReadablePath(metadata: DatasetMetadata): Promise<string> {
     const manifest = await this.readDatasetManifest(metadata.path);
 
@@ -1622,22 +1770,22 @@ export class IntegralWorkspaceService {
     const usedEntryNames = new Set<string>();
 
     for (const memberId of memberIds) {
-      const originalDataMetadata = await this.readOriginalDataMetadata(memberId);
+      const managedFileMetadata = await this.readManagedFileMetadata(memberId);
 
-      if (originalDataMetadata === null) {
+      if (managedFileMetadata === null) {
         continue;
       }
 
       const entryName = createUniqueSourceMemberEntryName(
-        originalDataMetadata.displayName,
+        managedFileMetadata.displayName,
         memberId,
         usedEntryNames
       );
 
       await this.createVisibleAlias(
-        this.resolveOriginalDataContentPath(originalDataMetadata),
+        this.resolveManagedFileContentPath(managedFileMetadata),
         path.join(stagingRootPath, entryName),
-        originalDataMetadata.representation
+        managedFileMetadata.representation
       );
     }
 
@@ -1697,19 +1845,19 @@ export class IntegralWorkspaceService {
   }
 
   private async readDatasetManifestMember(
-    originalDataId: string
+    managedFileId: string
   ): Promise<WorkspaceDatasetManifestMember> {
-    const normalizedOriginalDataId = originalDataId.trim();
+    const normalizedManagedFileId = managedFileId.trim();
     const metadata =
-      normalizedOriginalDataId.length > 0
-        ? await this.readOriginalDataMetadata(normalizedOriginalDataId)
+      normalizedManagedFileId.length > 0
+        ? await this.readManagedFileMetadata(normalizedManagedFileId)
         : null;
 
     return {
       displayName:
         metadata?.displayName ??
-        (normalizedOriginalDataId.length > 0 ? normalizedOriginalDataId : "(unknown)"),
-      originalDataId: normalizedOriginalDataId,
+        (normalizedManagedFileId.length > 0 ? normalizedManagedFileId : "(unknown)"),
+      managedFileId: normalizedManagedFileId,
       relativePath: metadata?.path ?? null,
       representation: metadata?.representation ?? null
     };
@@ -1734,7 +1882,7 @@ export class IntegralWorkspaceService {
 
   private async computeManagedDataHash(
     absolutePath: string,
-    representation: OriginalDataRepresentation | DatasetRepresentation
+    representation: DatasetRepresentation | ManagedFileRepresentation
   ): Promise<string> {
     if (representation === "directory") {
       return computeDirectoryHash(absolutePath);
@@ -1761,11 +1909,53 @@ export class IntegralWorkspaceService {
     }
   }
 
+  private async refreshOutputManagedFileMetadata(
+    outputManagedFilePlanMap: ReadonlyMap<
+      string,
+      {
+        displayName: string;
+        format: string | null;
+        relativePath: string;
+      }
+    >,
+    createdByBlockId: string | null
+  ): Promise<void> {
+    for (const plan of outputManagedFilePlanMap.values()) {
+      const existingPath = await this.resolveIfExists(plan.relativePath);
+
+      if (!existingPath) {
+        continue;
+      }
+
+      const stats = await fs.stat(existingPath);
+
+      if (!stats.isFile() && !stats.isDirectory()) {
+        continue;
+      }
+
+      const existingMetadata = await this.findManagedFileMetadataByPath(plan.relativePath);
+      const nextMetadata: ManagedFileMetadata = {
+        createdAt: existingMetadata?.createdAt ?? new Date().toISOString(),
+        createdByBlockId,
+        displayName: plan.displayName,
+        entityType: "managed-file",
+        format: plan.format,
+        hash: await this.computeManagedDataHash(existingPath, stats.isDirectory() ? "directory" : "file"),
+        id: existingMetadata?.id ?? createOpaqueId("FL"),
+        path: plan.relativePath,
+        representation: stats.isDirectory() ? "directory" : "file",
+        visibility: inferVisibilityFromPath(plan.relativePath, stats.isDirectory() ? "directory" : "file")
+      };
+
+      await this.writeManagedFileMetadata(nextMetadata.id, nextMetadata);
+    }
+  }
+
   private async reconcileManagedDataMetadata(): Promise<boolean> {
     const metadataRootPath = this.resolveStoreMetadataRootPath();
     const entries = await fs.readdir(metadataRootPath, { withFileTypes: true });
     const workspaceEntries = await collectTrackableWorkspaceEntries(this.getRootPath());
-    const originalDataMetadataList: OriginalDataMetadata[] = [];
+    const managedFileMetadataList: ManagedFileMetadata[] = [];
     const datasetMetadataList: DatasetMetadata[] = [];
     const claimedPaths = new Set<string>();
     const reservedManagedPaths: ReservedManagedPath[] = [];
@@ -1779,10 +1969,10 @@ export class IntegralWorkspaceService {
 
       const filePath = path.join(metadataRootPath, entry.name);
       const rawMetadata = await readJsonFile<unknown>(filePath);
-      const originalDataMetadata = normalizeOriginalDataMetadata(rawMetadata);
+      const managedFileMetadata = normalizeManagedFileMetadata(rawMetadata);
 
-      if (originalDataMetadata) {
-        originalDataMetadataList.push(originalDataMetadata);
+      if (managedFileMetadata) {
+        managedFileMetadataList.push(managedFileMetadata);
         continue;
       }
 
@@ -1794,14 +1984,14 @@ export class IntegralWorkspaceService {
       datasetMetadataList.push(datasetMetadata);
     }
 
-    for (const metadata of [...originalDataMetadataList, ...datasetMetadataList]) {
+    for (const metadata of [...managedFileMetadataList, ...datasetMetadataList]) {
       if (await this.resolveIfExists(metadata.path)) {
         claimedPaths.add(metadata.path);
       }
     }
 
-    for (const metadata of originalDataMetadataList) {
-      const reconciled = await this.reconcileOriginalDataMetadata(
+    for (const metadata of managedFileMetadataList) {
+      const reconciled = await this.reconcileManagedFileMetadata(
         metadata,
         workspaceEntries,
         claimedPaths
@@ -1818,8 +2008,8 @@ export class IntegralWorkspaceService {
         );
       }
 
-      if (!areOriginalDataMetadataEqual(metadata, reconciled.metadata)) {
-        await this.writeOriginalDataMetadata(reconciled.metadata.originalDataId, reconciled.metadata);
+      if (!areManagedFileMetadataEqual(metadata, reconciled.metadata)) {
+        await this.writeManagedFileMetadata(reconciled.metadata.id, reconciled.metadata);
         hasChanges = true;
       }
     }
@@ -1848,7 +2038,7 @@ export class IntegralWorkspaceService {
       }
     }
 
-    const autoRegisteredCount = await this.autoRegisterWorkspaceOriginalData(
+    const autoRegisteredCount = await this.autoRegisterWorkspaceManagedFiles(
       workspaceEntries,
       reservedManagedPaths
     );
@@ -1867,12 +2057,12 @@ export class IntegralWorkspaceService {
     return hasChanges;
   }
 
-  private async reconcileOriginalDataMetadata(
-    metadata: OriginalDataMetadata,
+  private async reconcileManagedFileMetadata(
+    metadata: ManagedFileMetadata,
     workspaceEntries: readonly TrackableWorkspaceEntry[],
     claimedPaths: Set<string>
-  ): Promise<ReconcileMetadataResult<OriginalDataMetadata>> {
-    const nextMetadata: OriginalDataMetadata = {
+  ): Promise<ReconcileMetadataResult<ManagedFileMetadata>> {
+    const nextMetadata: ManagedFileMetadata = {
       ...metadata
     };
     const currentVisiblePath = await this.resolveIfExists(metadata.path);
@@ -2250,7 +2440,7 @@ function normalizeOutputConfigForSlot(
   return normalizeIntegralBlockOutputConfig(value, slotName, latestOutputReference);
 }
 
-function createOpaqueId(prefix: "ORD" | "BLK" | "DTS"): string {
+function createOpaqueId(prefix: "ORD" | "BLK" | "DTS" | "FL"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 
@@ -2302,12 +2492,14 @@ function parsePythonCallableSource(relativePath: string, content: string): Pytho
       functionName;
     const description =
       parsePythonStringLiteral(extractPythonKeywordSource(decoratorSource, "description")) ?? "";
-    const inputSlots = normalizeDiscoveredSlotNames(
-      parsePythonStringArrayLiteral(extractPythonKeywordSource(decoratorSource, "inputs"))
-    ).map((name) => ({ name }));
-    const outputSlots = normalizeDiscoveredSlotNames(
-      parsePythonStringArrayLiteral(extractPythonKeywordSource(decoratorSource, "outputs"))
-    ).map((name) => ({ name }));
+    const inputSlots = parsePythonSlotDefinitions(
+      extractPythonKeywordSource(decoratorSource, "inputs"),
+      "input"
+    );
+    const outputSlots = parsePythonSlotDefinitions(
+      extractPythonKeywordSource(decoratorSource, "outputs"),
+      "output"
+    );
 
     summaries.push({
       blockType: `${relativePath}:${functionName}`,
@@ -2440,21 +2632,278 @@ function parsePythonStringArrayLiteral(value: string | null): string[] {
     return [];
   }
 
-  const trimmed = value.trim();
-
-  if (trimmed === "[]") {
-    return [];
-  }
-
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-    return [];
-  }
-
-  const items = trimmed.slice(1, -1).match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/gu) ?? [];
+  const items = splitTopLevelPythonItems(value, "[", "]");
 
   return items
     .map((item) => parsePythonStringLiteral(item))
     .filter((item): item is string => item !== null);
+}
+
+function parsePythonSlotDefinitions(
+  value: string | null,
+  direction: "input" | "output"
+): IntegralSlotDefinition[] {
+  const slotDefinitions: IntegralSlotDefinition[] = [];
+  const seen = new Set<string>();
+
+  for (const item of splitTopLevelPythonItems(value, "[", "]")) {
+    const slotDefinition = parsePythonSlotDefinition(item, direction);
+
+    if (!slotDefinition) {
+      continue;
+    }
+
+    const normalizedKey = slotDefinition.name.toLowerCase();
+
+    if (seen.has(normalizedKey)) {
+      continue;
+    }
+
+    seen.add(normalizedKey);
+    slotDefinitions.push(slotDefinition);
+  }
+
+  return slotDefinitions;
+}
+
+function parsePythonSlotDefinition(
+  value: string,
+  direction: "input" | "output"
+): IntegralSlotDefinition | null {
+  const normalizedString = parsePythonStringLiteral(value);
+
+  if (normalizedString !== null) {
+    const slotName = normalizeDiscoveredSlotNames([normalizedString])[0] ?? null;
+    return slotName ? { name: slotName } : null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+
+  const name = parsePythonStringLiteral(extractPythonMappingValue(trimmed, "name"));
+  const normalizedName = name ? normalizeDiscoveredSlotNames([name])[0] ?? null : null;
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  const directExtension = normalizeIntegralSlotExtension(
+    parsePythonStringLiteral(extractPythonMappingValue(trimmed, "extension"))
+  );
+  const listedExtensions = normalizeIntegralSlotExtensions(
+    parsePythonStringArrayLiteral(extractPythonMappingValue(trimmed, "extensions"))
+  );
+  const normalizedExtensions = Array.from(
+    new Set([...(listedExtensions ?? []), ...(directExtension ? [directExtension] : [])])
+  );
+  const formatValue =
+    parsePythonStringLiteral(extractPythonMappingValue(trimmed, "format")) ??
+    parsePythonStringLiteral(extractPythonMappingValue(trimmed, "kind"));
+
+  return {
+    acceptedKinds:
+      direction === "input" && formatValue ? [formatValue] : undefined,
+    extension: direction === "output" ? directExtension ?? normalizedExtensions[0] : undefined,
+    extensions: normalizedExtensions.length > 0 ? normalizedExtensions : undefined,
+    format: formatValue ?? undefined,
+    name: normalizedName,
+    producedKind: direction === "output" && formatValue ? formatValue : undefined
+  };
+}
+
+function splitTopLevelPythonItems(
+  value: string | null,
+  openToken: string,
+  closeToken: string
+): string[] {
+  if (!value) {
+    return [];
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed === `${openToken}${closeToken}`) {
+    return [];
+  }
+
+  if (!trimmed.startsWith(openToken) || !trimmed.endsWith(closeToken)) {
+    return [];
+  }
+
+  const source = trimmed.slice(openToken.length, -closeToken.length);
+  const items: string[] = [];
+  let startIndex = 0;
+  let quote: '"' | "'" | null = null;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source.charAt(index);
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (character === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (character === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+
+    if (character === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+
+    if (character === "," && bracketDepth === 0 && braceDepth === 0 && parenDepth === 0) {
+      const item = source.slice(startIndex, index).trim();
+
+      if (item.length > 0) {
+        items.push(item);
+      }
+
+      startIndex = index + 1;
+    }
+  }
+
+  const tail = source.slice(startIndex).trim();
+
+  if (tail.length > 0) {
+    items.push(tail);
+  }
+
+  return items;
+}
+
+function extractPythonMappingValue(source: string, key: string): string | null {
+  const match = new RegExp(`(?:["']${escapeRegExp(key)}["']|${escapeRegExp(key)})\\s*:`, "u").exec(source);
+
+  if (!match || match.index === undefined) {
+    return null;
+  }
+
+  let index = match.index + match[0].length;
+
+  while (index < source.length && /\s/u.test(source.charAt(index))) {
+    index += 1;
+  }
+
+  const startIndex = index;
+  let quote: '"' | "'" | null = null;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let escaped = false;
+
+  for (; index < source.length; index += 1) {
+    const character = source.charAt(index);
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (character === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (character === "}") {
+      if (braceDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+        return source.slice(startIndex, index).trim().replace(/,$/u, "");
+      }
+
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+
+    if (character === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+
+    if (character === "," && bracketDepth === 0 && braceDepth === 0 && parenDepth === 0) {
+      return source.slice(startIndex, index).trim();
+    }
+  }
+
+  return source.slice(startIndex).trim().replace(/,$/u, "");
 }
 
 function normalizeDiscoveredSlotNames(slotNames: string[]): string[] {
@@ -2514,38 +2963,38 @@ function createDatasetObjectRelativePath(datasetId: string): string {
 
 function createUniqueSourceMemberEntryName(
   originalName: string,
-  originalDataId: string,
+  managedFileId: string,
   usedEntryNames: Set<string>
 ): string {
   const trimmedName = originalName.trim();
-  const baseName = trimmedName.length > 0 ? trimmedName : originalDataId;
+  const baseName = trimmedName.length > 0 ? trimmedName : managedFileId;
 
   if (!usedEntryNames.has(baseName)) {
     usedEntryNames.add(baseName);
     return baseName;
   }
 
-  const nextName = `${baseName}_${originalDataId}`;
+  const nextName = `${baseName}_${managedFileId}`;
   usedEntryNames.add(nextName);
   return nextName;
 }
 
 function createVisibleAliasEntryName(
   originalName: string,
-  originalDataId: string,
-  representation: OriginalDataRepresentation
+  managedFileId: string,
+  representation: ManagedFileRepresentation
 ): string {
   const trimmedName = originalName.trim();
 
   if (representation === "directory") {
-    const baseName = trimmedName.length > 0 ? trimmedName : originalDataId;
-    return `${baseName}_${originalDataId}`;
+    const baseName = trimmedName.length > 0 ? trimmedName : managedFileId;
+    return `${baseName}_${managedFileId}`;
   }
 
   const extension = path.extname(trimmedName);
   const baseName = extension.length > 0 ? trimmedName.slice(0, -extension.length) : trimmedName;
-  const normalizedBaseName = baseName.length > 0 ? baseName : originalDataId;
-  return `${normalizedBaseName}_${originalDataId}${extension}`;
+  const normalizedBaseName = baseName.length > 0 ? baseName : managedFileId;
+  return `${normalizedBaseName}_${managedFileId}${extension}`;
 }
 
 function sanitizeFileStem(value: string): string {
@@ -2759,41 +3208,6 @@ async function collectDirectoryHashEntries(directoryPath: string, basePath = dir
   return hashedEntries;
 }
 
-function normalizeOriginalDataMetadata(value: unknown): OriginalDataMetadata | null {
-  if (!isJsonRecord(value)) {
-    return null;
-  }
-
-  if (
-    value.entityType === "original-data" &&
-    typeof value.id === "string" &&
-    typeof value.displayName === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.path === "string" &&
-    typeof value.hash === "string" &&
-    (value.representation === "file" || value.representation === "directory") &&
-    (value.visibility === "visible" || value.visibility === "hidden") &&
-    (value.provenance === "source" || value.provenance === "derived")
-  ) {
-    const originalDataId = value.id.trim();
-
-    return {
-      createdAt: value.createdAt,
-      displayName: value.displayName,
-      entityType: "original-data",
-      hash: value.hash,
-      id: originalDataId,
-      originalDataId,
-      path: normalizeRelativePath(value.path),
-      provenance: value.provenance,
-      representation: value.representation,
-      visibility: value.visibility
-    };
-  }
-
-  return null;
-}
-
 function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
   if (!isJsonRecord(value)) {
     return null;
@@ -2848,20 +3262,55 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
   return null;
 }
 
-function areOriginalDataMetadataEqual(
-  left: OriginalDataMetadata,
-  right: OriginalDataMetadata
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | null {
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  if (
+    value.entityType === "managed-file" &&
+    typeof value.id === "string" &&
+    typeof value.displayName === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.path === "string" &&
+    typeof value.hash === "string" &&
+    (value.representation === "file" || value.representation === "directory") &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    (value.createdByBlockId === null ||
+      value.createdByBlockId === undefined ||
+      typeof value.createdByBlockId === "string") &&
+    (value.format === null || value.format === undefined || typeof value.format === "string")
+  ) {
+    const managedFileId = value.id.trim();
+
+    return {
+      createdAt: value.createdAt,
+      createdByBlockId: value.createdByBlockId ?? null,
+      displayName: value.displayName,
+      entityType: "managed-file",
+      format: value.format ?? null,
+      hash: value.hash,
+      id: managedFileId,
+      path: normalizeRelativePath(value.path),
+      representation: value.representation,
+      visibility: value.visibility
+    };
+  }
+
+  return null;
 }
 
 function areDatasetMetadataEqual(left: DatasetMetadata, right: DatasetMetadata): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function areManagedFileMetadataEqual(left: ManagedFileMetadata, right: ManagedFileMetadata): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function inferVisibilityFromPath(
   relativePath: string,
-  representation: OriginalDataRepresentation | DatasetRepresentation
+  representation: DatasetRepresentation | ManagedFileRepresentation
 ): ManagedDataVisibility {
   const normalizedPath = normalizeRelativePath(relativePath);
 
@@ -2924,7 +3373,7 @@ function doWorkspacePathsOverlap(left: string, right: string): boolean {
 function findUniqueMatchingPathByHash(
   entries: readonly TrackableWorkspaceEntry[],
   targetHash: string,
-  representation: OriginalDataRepresentation | DatasetRepresentation,
+  representation: DatasetRepresentation | ManagedFileRepresentation,
   claimedPaths: ReadonlySet<string>
 ): TrackableWorkspaceEntry | null {
   if (targetHash.trim().length === 0) {
@@ -2944,7 +3393,7 @@ function findUniqueMatchingPathByHash(
 
 function findTrackingCandidatePaths(
   entries: readonly TrackableWorkspaceEntry[],
-  metadata: OriginalDataMetadata | DatasetMetadata,
+  metadata: DatasetMetadata | ManagedFileMetadata,
   claimedPaths: ReadonlySet<string>
 ): TrackableWorkspaceEntry[] {
   const candidateNames = collectTrackingCandidateNames(metadata);
@@ -2963,7 +3412,7 @@ function findTrackingCandidatePaths(
 }
 
 function collectTrackingCandidateNames(
-  metadata: OriginalDataMetadata | DatasetMetadata
+  metadata: DatasetMetadata | ManagedFileMetadata
 ): Set<string> {
   const candidateNames = new Set<string>();
   const recordedBaseName = path.posix.basename(metadata.path);
@@ -2972,11 +3421,12 @@ function collectTrackingCandidateNames(
     candidateNames.add(recordedBaseName);
   }
 
-  if (metadata.entityType === "original-data") {
+  if (metadata.entityType === "managed-file") {
     const displayName = metadata.displayName.trim();
 
     if (displayName.length > 0) {
       candidateNames.add(displayName);
+      candidateNames.add(path.posix.basename(displayName));
     }
 
     return candidateNames;
@@ -2999,14 +3449,14 @@ function collectTrackingCandidateNames(
 
 function doesEntryMatchRepresentation(
   entry: TrackableWorkspaceEntry,
-  representation: OriginalDataRepresentation | DatasetRepresentation
+  representation: DatasetRepresentation | ManagedFileRepresentation
 ): boolean {
   return (representation === "directory" && entry.kind === "directory") ||
     (representation !== "directory" && entry.kind === "file");
 }
 
 function buildRelinkTrackingIssue(
-  metadata: OriginalDataMetadata | DatasetMetadata,
+  metadata: DatasetMetadata | ManagedFileMetadata,
   candidatePaths: readonly TrackableWorkspaceEntry[]
 ): IntegralManagedDataTrackingIssue {
   return {
@@ -3024,7 +3474,7 @@ function buildRelinkTrackingIssue(
 }
 
 function buildMissingTrackingIssue(
-  metadata: OriginalDataMetadata | DatasetMetadata
+  metadata: DatasetMetadata | ManagedFileMetadata
 ): IntegralManagedDataTrackingIssue {
   return {
     candidatePaths: [],
@@ -3041,7 +3491,7 @@ function buildMissingTrackingIssue(
 function reserveManagedPath(
   reservedManagedPaths: ReservedManagedPath[],
   relativePath: string,
-  representation: OriginalDataRepresentation | DatasetRepresentation
+  representation: DatasetRepresentation | ManagedFileRepresentation
 ): void {
   const normalizedPath = normalizeRelativePath(relativePath);
 
@@ -3071,7 +3521,7 @@ function reserveTrackingIssueCandidates(
   }
 }
 
-function isAutoRegisterableOriginalDataEntry(
+function isAutoRegisterableManagedFileEntry(
   entry: TrackableWorkspaceEntry,
   reservedManagedPaths: readonly ReservedManagedPath[]
 ): boolean {
@@ -3082,10 +3532,6 @@ function isAutoRegisterableOriginalDataEntry(
   const normalizedRelativePath = normalizeRelativePath(entry.relativePath);
 
   if (normalizedRelativePath.length === 0) {
-    return false;
-  }
-
-  if (path.posix.extname(normalizedRelativePath).toLowerCase() === ".md") {
     return false;
   }
 
@@ -3101,6 +3547,20 @@ function isAutoRegisterableOriginalDataEntry(
   }
 
   return !isReservedManagedPath(normalizedRelativePath, reservedManagedPaths);
+}
+
+function inferManagedFileFormatId(relativePath: string): string | null {
+  const extension = path.posix.extname(normalizeRelativePath(relativePath)).toLowerCase();
+
+  if (extension.length === 0) {
+    return null;
+  }
+
+  if (extension === ".idts") {
+    return "bundle/idts";
+  }
+
+  return `ext/${extension.slice(1)}`;
 }
 
 function isReservedManagedPath(
