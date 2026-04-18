@@ -48,6 +48,14 @@ import {
   type IntegralJsonBlock
 } from "./integralBlockRegistry";
 
+interface IntegralCodeBlockFeatureOptions {
+  onExecuteBlockResult?: (payload: {
+    previousBlockSource: string;
+    result: ExecuteIntegralBlockResult;
+  }) => void;
+  sourceNotePath?: string | null;
+}
+
 type MarkdownCodeNode = {
   lang?: string | null;
   type?: string;
@@ -139,16 +147,21 @@ const integralNotesBlockSchema = $nodeSchema(INTEGRAL_NOTES_NODE_ID, () => ({
   }
 }));
 
-const INTEGRAL_NOTES_VIEW = $view(
-  integralNotesBlockSchema.node,
-  (): NodeViewConstructor => (node, view, getPos) =>
-    new IntegralNotesBlockView(node, view, getPos)
-);
+function createIntegralNotesView(options: IntegralCodeBlockFeatureOptions) {
+  return $view(
+    integralNotesBlockSchema.node,
+    (): NodeViewConstructor => (node, view, getPos) =>
+      new IntegralNotesBlockView(node, view, getPos, options)
+  );
+}
 
-export function installIntegralCodeBlockFeature(editor: Crepe): void {
+export function installIntegralCodeBlockFeature(
+  editor: Crepe,
+  options: IntegralCodeBlockFeatureOptions = {}
+): void {
   editor.editor.use(standardCodeBlockSchema);
   editor.editor.use(integralNotesBlockSchema);
-  editor.editor.use(INTEGRAL_NOTES_VIEW);
+  editor.editor.use(createIntegralNotesView(options));
 }
 
 class IntegralNotesBlockView implements NodeView {
@@ -162,7 +175,8 @@ class IntegralNotesBlockView implements NodeView {
   constructor(
     public node: ProseNode,
     public view: EditorView,
-    public getPos: () => number | undefined
+    public getPos: () => number | undefined,
+    private readonly options: IntegralCodeBlockFeatureOptions
   ) {
     this.dom = document.createElement("div");
     this.dom.dataset.integralCodeBlock = "true";
@@ -232,6 +246,7 @@ class IntegralNotesBlockView implements NodeView {
 
     const rawText = readIntegralNodeValue(this.node);
     const parsed = parseIntegralDraft(rawText);
+    this.dom.dataset.integralBlockId = parsed.block?.id ?? "";
 
     this.root.render(
       <IntegralBlockPanel
@@ -362,7 +377,8 @@ class IntegralNotesBlockView implements NodeView {
 
     try {
       const result = await window.integralNotes.executeIntegralBlock({
-        block: parsed.block
+        block: parsed.block,
+        sourceNotePath: this.options.sourceNotePath ?? null
       });
 
       if (this.destroyed) {
@@ -370,7 +386,15 @@ class IntegralNotesBlockView implements NodeView {
       }
 
       this.runState = toRunState(result);
-      this.applyTextChange(serializeIntegralBlockContent(result.block));
+
+      if (this.options.onExecuteBlockResult) {
+        this.options.onExecuteBlockResult({
+          previousBlockSource: rawText,
+          result
+        });
+      } else {
+        this.applyTextChange(serializeIntegralBlockContent(result.block));
+      }
     } catch (error) {
       if (this.destroyed) {
         return;

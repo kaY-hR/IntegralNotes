@@ -85,7 +85,13 @@ class PcaResult:
         {"name": "source", "extensions": [".json"], "format": "chromatogram/json"},
     ],
     outputs=[
-        {"name": "report", "extension": ".idts", "format": "bundle/pca-report"},
+        {
+            "name": "report",
+            "extension": ".idts",
+            "format": "bundle/pca-report",
+            "auto_insert_to_work_note": True,
+            "project_to_inputs": ["source"],
+        },
     ],
 )
 def main(

@@ -7,6 +7,7 @@ const FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/gu;
 const MARKDOWN_LINK_PATTERN = /(!?\[[^\]\n]*\])\(([^)\n]+)\)/gu;
 const EXTERNAL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/u;
 const EMBED_HEIGHT_FRAGMENT_PATTERN = /#integral-embed-height=(\d+)$/u;
+const BLOCK_FRAGMENT_PATTERN = /^#(BLK-[A-Za-z0-9_-]+)$/u;
 
 export function toCanonicalWorkspaceTarget(relativePath: string): string {
   const normalized = normalizeWorkspaceRelativePath(relativePath);
@@ -45,6 +46,17 @@ export function withWorkspaceEmbedHeight(target: string, height: number | null):
   return `${normalizedTarget}#integral-embed-height=${Math.round(height)}`;
 }
 
+export function extractWorkspaceBlockId(target: string): string | null {
+  const { metadataSuffix } = splitWorkspaceMarkdownTarget(target);
+  const match = metadataSuffix.match(BLOCK_FRAGMENT_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  return match[1] ?? null;
+}
+
 export function resolveWorkspaceMarkdownTarget(target: string): string | null {
   const { pathTarget } = splitWorkspaceMarkdownTarget(target);
   const trimmed = pathTarget.trim();
@@ -54,7 +66,6 @@ export function resolveWorkspaceMarkdownTarget(target: string): string | null {
     trimmed.startsWith("#") ||
     trimmed.startsWith("//") ||
     trimmed.includes("?") ||
-    trimmed.includes("#") ||
     EXTERNAL_SCHEME_PATTERN.test(trimmed)
   ) {
     return null;
@@ -156,7 +167,16 @@ function splitWorkspaceMarkdownTarget(target: string): {
   const trimmed = target.trim();
   const match = trimmed.match(EMBED_HEIGHT_FRAGMENT_PATTERN);
 
-  if (!match || match.index === undefined) {
+  if (match && match.index !== undefined) {
+    return {
+      metadataSuffix: trimmed.slice(match.index),
+      pathTarget: trimmed.slice(0, match.index)
+    };
+  }
+
+  const hashIndex = trimmed.indexOf("#");
+
+  if (hashIndex < 0) {
     return {
       metadataSuffix: "",
       pathTarget: trimmed
@@ -164,8 +184,8 @@ function splitWorkspaceMarkdownTarget(target: string): {
   }
 
   return {
-    metadataSuffix: trimmed.slice(match.index),
-    pathTarget: trimmed.slice(0, match.index)
+    metadataSuffix: trimmed.slice(hashIndex),
+    pathTarget: trimmed.slice(0, hashIndex)
   };
 }
 

@@ -78,9 +78,14 @@
   - `name`
   - `extension` または `extensions`
   - `format`
+- output slot では追加で次を定義できる
+  - `auto_insert_to_work_note`
+  - `project_to_inputs`
 - input slot では `extensions` によって選択可能な file suffix を表せる
 - output slot では `extension` によって生成される file suffix を表せる
 - `format` は slot が意味的に扱う file type を表す
+- `auto_insert_to_work_note` は、その output を block が置かれている作業 note へ `![]()` として自動挿入するかを表す
+- `project_to_inputs` は、その output をどの input の data-note へ provenance link と `![]()` 付きで追記するかを表す
 - MVP の基本契約は `1 slot = 1 path` とする
 - 複数 file を 1 slot で扱いたい場合は `.idts` bundle を使う
 
@@ -122,7 +127,13 @@
     ],
     outputs=[
         {"name": "score", "extension": ".csv", "format": "table/pca-score"},
-        {"name": "report", "extension": ".html", "format": "report/html"},
+        {
+            "name": "report",
+            "extension": ".html",
+            "format": "report/html",
+            "auto_insert_to_work_note": True,
+            "project_to_inputs": ["samples"],
+        },
     ],
 )
 ```
@@ -145,6 +156,9 @@
 - runner は `analysis-args.json` を読んで target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - 成功/失敗判定は exit code のみで行う
 - 実行成功後は output path に対応する managed file metadata を作成または更新する
+- output slot が `auto_insert_to_work_note = true` を持つ場合、app はその output を block 直下へ `![]()` として追記してよい
+- output slot が `project_to_inputs` を持つ場合、app は指定 input の data-note へ provenance link と `![]()` を追記してよい
+- note への自動反映は append-only とし、古い embed の整理は app ではなくユーザー操作に委ねてよい
 - generated file が持つべき最低限の情報は `createdByBlockId` と `formatId` でよい
 - 実行時の current working directory は workspace root を基本とする
 - `analysis-args.json` や log は `.store/.integral/runtime/` 配下へ置いてよい
@@ -179,6 +193,7 @@
 
 - 通常 note 本文では標準 Markdown link `[label](target)` を使って workspace 内 file へ link できる
 - 通常 note 本文では標準 Markdown image 記法 `![alt](target)` を使って画像や workspace file を埋め込める
+- block provenance のため、`[label](/path/to/note.md#BLK-1F8E2D0A)` のような `path + block id` link を許容してよい
 - 記法自体は path ベースのままとし、ID 記法にはしない
 - 外部 rename / move を追跡できた場合も、app は path 記法の source を更新する
 

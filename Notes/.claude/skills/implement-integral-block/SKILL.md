@@ -18,6 +18,8 @@ Only after that, inspect the current workspace examples that match the task:
 
 - `../../../demo_hello_report.py`
 - `../../../demo_dataset_report.py`
+- `../../../src/lc_text_to_chromatogram_json.py`
+- `../../../src/chromatogram_pca.py`
 - `../../../scripts/integral/__init__.py`
 - `../../../scripts/integral/README.md`
 
@@ -33,7 +35,10 @@ Only after that, inspect the current workspace examples that match the task:
 - Prefer new scripts inside `../../../scripts/` when the block should import `from integral import integral_block` without extra path setup.
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
 - If the user wants the result to be viewable inside IntegralNotes, emit at least one renderable file such as `index.html`, `README.txt`, `*.json`, `*.csv`, or an image.
-- Do not invent decorator features that do not exist. The current SDK accepts `display_name`, `description`, `inputs`, and `outputs`, and slot items may be string shorthand or object form with `name`, `extension`/`extensions`, and `format`.
+- Use output slot metadata when it matches the UX goal:
+  - `auto_insert_to_work_note=True` for user-facing renderables that should appear right under the block
+  - `project_to_inputs=[...]` for outputs that should be appended to the referenced input data-note
+- Do not invent decorator features that do not exist. The current SDK accepts `display_name`, `description`, `inputs`, and `outputs`, and slot items may be string shorthand or object form with `name`, `extension`/`extensions`, `format`, and on output slots `auto_insert_to_work_note` / `project_to_inputs`.
 - Do not make the Python script depend on reading `analysis-args.json`. The runner handles that and calls the function with `inputs`, `outputs`, and `params`.
 
 ## Delivery Checklist
@@ -44,4 +49,5 @@ Before finishing, verify:
 - slot names in code match the decorator
 - invalid or missing paths fail clearly
 - output files are written to the assigned output path or inside the assigned bundle directory
+- output slot metadata matches the intended work-note / data-note behavior
 - the user can describe the block in note source as `run: relative/path.py:function`

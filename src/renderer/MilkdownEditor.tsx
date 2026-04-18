@@ -7,7 +7,10 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import type { IntegralBlockTypeDefinition } from "../shared/integral";
+import type {
+  ExecuteIntegralBlockResult,
+  IntegralBlockTypeDefinition
+} from "../shared/integral";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
@@ -18,16 +21,25 @@ import {
   getAvailableIntegralBlockTypes,
   initializeIntegralPluginRuntime
 } from "./integralPluginRuntime";
-import { createIntegralBlockMarkdown } from "./integralBlockRegistry";
+import {
+  INTEGRAL_BLOCK_LANGUAGE,
+  createIntegralBlockMarkdown,
+  parseIntegralBlockSource,
+  serializeIntegralBlockContent,
+  toIntegralCodeBlock
+} from "./integralBlockRegistry";
 import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
+  focusedBlockId?: string | null;
   initialValue: string;
   isActive: boolean;
   onChange: (markdown: string) => void;
-  onOpenWorkspaceFile: (relativePath: string) => void;
+  onFocusedBlockHandled?: () => void;
+  onOpenWorkspaceFile: (target: string) => void;
   onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot) => void;
   onWorkspaceLinkError: (message: string) => void;
+  relativePath: string;
   toolbar?: ReactNode;
   workspaceEntries: WorkspaceEntry[];
 }
@@ -59,26 +71,32 @@ interface AnalysisCompletionState {
 }
 
 export function MilkdownEditor({
+  focusedBlockId,
   initialValue,
   isActive,
   onChange,
+  onFocusedBlockHandled,
   onOpenWorkspaceFile,
   onWorkspaceSnapshotChanged,
   onWorkspaceLinkError,
+  relativePath,
   toolbar,
   workspaceEntries
 }: MilkdownEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Crepe | null>(null);
   const onChangeRef = useRef(onChange);
+  const onFocusedBlockHandledRef = useRef(onFocusedBlockHandled);
   const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
   const onWorkspaceSnapshotChangedRef = useRef(onWorkspaceSnapshotChanged);
   const onWorkspaceLinkErrorRef = useRef(onWorkspaceLinkError);
   const isActiveRef = useRef(isActive);
   const lastSyncedMarkdownRef = useRef(initialValue);
+  const focusedBlockIdRef = useRef(focusedBlockId ?? null);
   const linkCompletionRef = useRef<LinkCompletionState | null>(null);
   const analysisCompletionRef = useRef<AnalysisCompletionState | null>(null);
   const completionPanelRef = useRef<HTMLDivElement | null>(null);
+  const focusClearTimerRef = useRef<number | null>(null);
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
@@ -88,6 +106,10 @@ export function MilkdownEditor({
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    onFocusedBlockHandledRef.current = onFocusedBlockHandled;
+  }, [onFocusedBlockHandled]);
 
   useEffect(() => {
     onOpenWorkspaceFileRef.current = onOpenWorkspaceFile;
@@ -122,6 +144,10 @@ export function MilkdownEditor({
   useEffect(() => {
     analysisCompletionRef.current = analysisCompletion;
   }, [analysisCompletion]);
+
+  useEffect(() => {
+    focusedBlockIdRef.current = focusedBlockId ?? null;
+  }, [focusedBlockId]);
 
   useEffect(() => {
     const completionPanel = completionPanelRef.current;
@@ -205,7 +231,27 @@ export function MilkdownEditor({
         defaultValue: initialValue
       });
 
-      installIntegralCodeBlockFeature(editor);
+      installIntegralCodeBlockFeature(editor, {
+        onExecuteBlockResult: ({ previousBlockSource, result }) => {
+          const nextMarkdown = applyIntegralExecutionResultToMarkdown(
+            lastSyncedMarkdownRef.current,
+            previousBlockSource,
+            result
+          );
+
+          if (nextMarkdown === null) {
+            onWorkspaceLinkErrorRef.current("実行結果を現在のノートへ反映できませんでした。");
+            return;
+          }
+
+          editor?.editor.action((ctx) => {
+            replaceAll(nextMarkdown)(ctx);
+          });
+          lastSyncedMarkdownRef.current = nextMarkdown;
+          onChangeRef.current(nextMarkdown);
+        },
+        sourceNotePath: relativePath
+      });
       installWorkspaceEmbedFeature(editor, {
         uploadImage: handleImageUpload
       });
@@ -240,6 +286,9 @@ export function MilkdownEditor({
       });
 
       editorRef.current = editor;
+      window.setTimeout(() => {
+        focusPendingIntegralBlock();
+      }, 0);
     })();
 
     return () => {
@@ -249,8 +298,13 @@ export function MilkdownEditor({
         editorRef.current = null;
         void editor.destroy();
       }
+
+      if (focusClearTimerRef.current !== null) {
+        window.clearTimeout(focusClearTimerRef.current);
+        focusClearTimerRef.current = null;
+      }
     };
-  }, []);
+  }, [relativePath]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -432,7 +486,7 @@ export function MilkdownEditor({
       event.preventDefault();
       event.stopPropagation();
 
-      onOpenWorkspaceFileRef.current(relativePath);
+      onOpenWorkspaceFileRef.current(rawTarget);
     };
 
     rootElement.addEventListener("keydown", handleEditorKeyDown, true);
@@ -555,6 +609,61 @@ export function MilkdownEditor({
 
     setAnalysisCompletion(null);
   };
+
+  const focusPendingIntegralBlock = (): void => {
+    const blockId = focusedBlockIdRef.current?.trim() ?? "";
+    const rootElement = rootRef.current;
+
+    if (!blockId || !rootElement || !editorRef.current) {
+      return;
+    }
+
+    clearFocusedIntegralBlocks(rootElement);
+
+    const selectorBlockId =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(blockId)
+        : blockId.replace(/["\\]/gu, "\\$&");
+    const blockElement = rootElement.querySelector<HTMLElement>(
+      `[data-integral-block-id="${selectorBlockId}"]`
+    );
+
+    if (!blockElement) {
+      onFocusedBlockHandledRef.current?.();
+      return;
+    }
+
+    blockElement.classList.add("integral-code-block--focused");
+    blockElement.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+
+    if (focusClearTimerRef.current !== null) {
+      window.clearTimeout(focusClearTimerRef.current);
+    }
+
+    focusClearTimerRef.current = window.setTimeout(() => {
+      blockElement.classList.remove("integral-code-block--focused");
+      focusClearTimerRef.current = null;
+    }, 2200);
+
+    onFocusedBlockHandledRef.current?.();
+  };
+
+  useEffect(() => {
+    if (!focusedBlockId || !isActive) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      focusPendingIntegralBlock();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [focusedBlockId, initialValue, isActive]);
 
   return (
     <div className="editor-shell">
@@ -947,6 +1056,54 @@ function computePopupLayout(coords: { bottom: number; top: number }): { maxHeigh
     maxHeight,
     y: Math.max(margin, coords.top - maxHeight - offset)
   };
+}
+
+function clearFocusedIntegralBlocks(rootElement: HTMLElement): void {
+  for (const blockElement of rootElement.querySelectorAll<HTMLElement>(".integral-code-block--focused")) {
+    blockElement.classList.remove("integral-code-block--focused");
+  }
+}
+
+function applyIntegralExecutionResultToMarkdown(
+  markdown: string,
+  previousBlockSource: string,
+  result: ExecuteIntegralBlockResult
+): string | null {
+  const normalizedPreviousBlockSource = normalizeMarkdownForComparison(previousBlockSource);
+  const nextBlockMarkdown = toIntegralCodeBlock(serializeIntegralBlockContent(result.block));
+  const appendMarkdown = result.workNoteMarkdownToAppend?.trim() ?? "";
+  const nextBlockId = result.block.id?.trim() ?? "";
+  let hasReplaced = false;
+
+  const nextMarkdown = markdown.replace(
+    /```itg-notes\r?\n([\s\S]*?)\r?\n```/gu,
+    (fullMatch, blockSource) => {
+      if (hasReplaced) {
+        return fullMatch;
+      }
+
+      const rawBlockSource = typeof blockSource === "string" ? blockSource : "";
+      const parsed = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, rawBlockSource);
+      const parsedBlockId = parsed?.block.id?.trim() ?? "";
+      const matchesById =
+        nextBlockId.length > 0 && parsedBlockId.length > 0 && parsedBlockId === nextBlockId;
+      const matchesBySource =
+        normalizeMarkdownForComparison(rawBlockSource) === normalizedPreviousBlockSource;
+
+      if (!matchesById && !matchesBySource) {
+        return fullMatch;
+      }
+
+      hasReplaced = true;
+      return appendMarkdown.length > 0 ? `${nextBlockMarkdown}\n\n${appendMarkdown}` : nextBlockMarkdown;
+    }
+  );
+
+  return hasReplaced ? nextMarkdown : null;
+}
+
+function normalizeMarkdownForComparison(value: string): string {
+  return value.replace(/\r\n/gu, "\n").trim();
 }
 
 function toErrorMessage(error: unknown): string {

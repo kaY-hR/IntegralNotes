@@ -21,6 +21,8 @@ class IntegralSlotSpec:
     name: str
     extensions: tuple[str, ...] = ()
     format: str | None = None
+    auto_insert_to_work_note: bool = False
+    project_to_inputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +114,8 @@ def _normalize_slot(
         name=name,
         extensions=extensions,
         format=_normalize_optional_string(value.get("format")),
+        auto_insert_to_work_note=_normalize_bool(value.get("auto_insert_to_work_note")),
+        project_to_inputs=_normalize_slot_names(value.get("project_to_inputs")),
     )
 
 
@@ -157,6 +161,42 @@ def _normalize_extensions(value: Any) -> tuple[str, ...]:
             continue
 
         seen.add(normalized)
+        normalized_values.append(normalized)
+
+    return tuple(normalized_values)
+
+
+def _normalize_bool(value: Any) -> bool:
+    if value is None:
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    raise ValueError("auto_insert_to_work_note must be a boolean.")
+
+
+def _normalize_slot_names(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+
+    if isinstance(value, str):
+        normalized = _normalize_slot_name(value, field_name="project_to_inputs")
+        return (normalized,)
+
+    if not isinstance(value, Sequence):
+        raise ValueError("project_to_inputs must be a string or a sequence of strings.")
+
+    normalized_values: list[str] = []
+    seen = set()
+
+    for candidate in value:
+        normalized = _normalize_slot_name(candidate, field_name="project_to_inputs")
+
+        if normalized.lower() in seen:
+            continue
+
+        seen.add(normalized.lower())
         normalized_values.append(normalized)
 
     return tuple(normalized_values)

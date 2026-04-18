@@ -1053,6 +1053,22 @@ textarea:focus-visible {
   border-radius: 4px;
 }
 
+.editor-surface .milkdown .integral-code-block--focused {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(15, 108, 189, 0.3), 0 0 0 8px rgba(15, 108, 189, 0.08);
+  animation: integral-block-focus-pulse 1.2s ease-out 1;
+}
+
+@keyframes integral-block-focus-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(15, 108, 189, 0.26);
+  }
+
+  100% {
+    box-shadow: 0 0 0 2px rgba(15, 108, 189, 0.3), 0 0 0 8px rgba(15, 108, 189, 0.08);
+  }
+}
+
 .editor-surface .milkdown .ProseMirror [data-integral-code-block="true"].ProseMirror-selectednode {
   background: transparent;
   outline: none;

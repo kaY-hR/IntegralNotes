@@ -34,6 +34,8 @@ import type {
 } from "../shared/workspace";
 import type { InstalledPluginDefinition } from "../shared/plugins";
 import {
+  extractWorkspaceBlockId,
+  resolveWorkspaceMarkdownTarget,
   type WorkspacePathChange,
   rewriteWorkspaceMarkdownReferences
 } from "../shared/workspaceLinks";
@@ -876,6 +878,9 @@ export function App(): JSX.Element {
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
   const [selectedEntryPaths, setSelectedEntryPaths] = useState<Set<string>>(new Set());
   const [selectedTabId, setSelectedTabId] = useState<string | undefined>(undefined);
+  const [pendingFocusedBlockByPath, setPendingFocusedBlockByPath] = useState<Record<string, string>>(
+    {}
+  );
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [statusMessage, setStatusMessage] = useState("ワークスペースを読み込み中...");
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
@@ -1527,13 +1532,13 @@ export function App(): JSX.Element {
   useEffect(() => {
     const handleOpenWorkspaceFileEvent = (event: Event): void => {
       const customEvent = event as CustomEvent<string>;
-      const relativePath = `${customEvent.detail ?? ""}`.trim();
+      const rawTarget = `${customEvent.detail ?? ""}`.trim();
 
-      if (relativePath.length === 0) {
+      if (rawTarget.length === 0) {
         return;
       }
 
-      void openWorkspaceFile(relativePath);
+      void openWorkspaceTarget(rawTarget);
     };
     const handleOpenManagedDataNoteEvent = (event: Event): void => {
       const customEvent = event as CustomEvent<string>;
@@ -1739,8 +1744,50 @@ export function App(): JSX.Element {
     selectedEntryPaths
   ]);
 
+  const clearPendingFocusedBlock = (relativePath: string): void => {
+    setPendingFocusedBlockByPath((current) => {
+      if (!(relativePath in current)) {
+        return current;
+      }
+
+      const nextState = { ...current };
+      delete nextState[relativePath];
+      return nextState;
+    });
+  };
+
+  const openWorkspaceTarget = async (
+    rawTarget: string,
+    options?: OpenWorkspaceFileOptions
+  ): Promise<void> => {
+    const relativePath = resolveWorkspaceMarkdownTarget(rawTarget);
+
+    if (!relativePath) {
+      return;
+    }
+
+    const blockId = extractWorkspaceBlockId(rawTarget);
+
+    if (blockId) {
+      setPendingFocusedBlockByPath((current) => ({
+        ...current,
+        [relativePath]: blockId
+      }));
+    }
+
+    try {
+      await openWorkspaceFile(relativePath, options);
+    } catch (error) {
+      if (blockId) {
+        clearPendingFocusedBlock(relativePath);
+      }
+
+      throw error;
+    }
+  };
+
   const openNote = async (relativePath: string): Promise<void> => {
-    await openWorkspaceFile(relativePath);
+    await openWorkspaceTarget(relativePath);
   };
 
   const openManagedDataNote = async (targetId: string): Promise<void> => {
@@ -2858,14 +2905,18 @@ export function App(): JSX.Element {
 
       return (
         <MilkdownEditor
+          focusedBlockId={pendingFocusedBlockByPath[relativePath] ?? null}
           initialValue={tab.content}
           isActive={selectedTabPath === relativePath}
           key={`${relativePath}:${tab.editorMode}:${pluginCatalogRevision}`}
           onChange={(markdown) => {
             updateTabContent(relativePath, markdown);
           }}
-          onOpenWorkspaceFile={(relativePath) => {
-            void openWorkspaceFile(relativePath, {
+          onFocusedBlockHandled={() => {
+            clearPendingFocusedBlock(relativePath);
+          }}
+          onOpenWorkspaceFile={(target) => {
+            void openWorkspaceTarget(target, {
               openUnsupportedExternally: true
             });
           }}
@@ -2877,6 +2928,7 @@ export function App(): JSX.Element {
           onWorkspaceLinkError={(message) => {
             setStatusMessage(message);
           }}
+          relativePath={relativePath}
           toolbar={editorToolbar}
           workspaceEntries={visibleWorkspaceEntries}
         />

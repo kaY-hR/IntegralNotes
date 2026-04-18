@@ -25,7 +25,13 @@ from integral import integral_block
     ],
     outputs=[
         {"name": "score", "extension": ".csv", "format": "table/pca-score"},
-        {"name": "report", "extension": ".html", "format": "report/html"},
+        {
+            "name": "report",
+            "extension": ".html",
+            "format": "report/html",
+            "auto_insert_to_work_note": True,
+            "project_to_inputs": ["samples"],
+        },
     ],
 )
 def main(inputs, outputs, params):
@@ -39,6 +45,7 @@ def main(inputs, outputs, params):
 - `inputs`
 - `outputs`
 - slot ごとの `extension(s)` / `format`
+- output slot ごとの `auto_insert_to_work_note` / `project_to_inputs`
 
 ### 現行 scan 条件
 
@@ -111,6 +118,15 @@ slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` p
 - output slot には保存先 path を編集できる UI を表示する
 - `.idts` output の場合は manifest path を編集し、中身の hidden bundle directory は app が内部で確保する
 - 実行成功後は output slot ごとの実際の file path または `.idts` path を note source の `out:` へ書き戻す
+- output slot は追加で次を持てる
+  - `auto_insert_to_work_note`
+  - `project_to_inputs`
+
+### 5.1 note projection
+
+- `auto_insert_to_work_note = True` を持つ output は、block 実行成功後に block 直下へ `![]()` を追記してよい
+- `project_to_inputs = ["source"]` のような output は、指定 input の data-note 末尾へ provenance link と `![]()` を追記してよい
+- note への自動反映は append-only とし、古い embed の整理は app ではなくユーザー操作に委ねる
 
 ## 6. 実行準備
 
@@ -168,6 +184,7 @@ app は実行前に次を行う。
 - `.idts` output の中身が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
 - 実行成功後、app は output slot ごとの file path または visible `.idts` path を block source の `out:` に反映してよい
+- 実行元 note が分かる場合、app は provenance 用に `note-path#BLK-...` の deep link を生成して data-note へ追記してよい
 
 ## 9. decorator の import 契約
 

@@ -1,0 +1,15 @@
+---
+integralNoteType: "data-note"
+dataTargetType: "managed-file"
+managedDataId: "FL-FF5848DA"
+entityType: "managed-file"
+displayName: "__init__.py"
+representation: "file"
+path: "scripts/integral/__init__.py"
+hash: "sha256:B562CF9B792B10A246E3857B0BD37E32A708DBDE325AA4C5D5877F3F7410B1ED"
+visibility: "visible"
+createdAt: "2026-04-18T12:59:16.006Z"
+createdByBlockId: null
+format: "ext/py"
+---
+# __init__.py

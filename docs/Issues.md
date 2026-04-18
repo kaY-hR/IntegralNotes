@@ -775,10 +775,14 @@
 - 優先重み:7
 - 記載日時:2026-04-18-01:23(UTC+9)
 
-* block と `idts` の derive 関係を矢印で繋ぎ、処理の流れを可視化したい
-* 現在カーソルがある `md` や、その近くの block を起点にし、その block に関連するものだけを表示したい
-* block を click すると、その block がある `md` を開き、可能なら該当 block の位置まで scroll したい
-* `idts` node は、タイトルに `idts` file 名を出し、下側の content には所属する file 群を表示したい
+* block と file の derive / input-output 関係を矢印で繋ぎ、処理の流れを可視化したい
+* graph は sidebar view ではなく、Activity Bar の built-in item から main workspace の tab として開きたい
+* scope は workspace 全体ではなく、今開いている note 内の全 block、または今見ている file を起点にした chain にしたい
+* 現在 note 内 block から辿れる別 note の block / file は芋づる式に表示してよい
+* node は block / file を同程度の重みで扱い、内部 `json` も特別扱いせず普通の node として見せたい
+* first version は閲覧専用にし、既に実行済みの block の内容や接続を graph 上で編集するのは不可としたい
+* block を click すると、その block がある `md` を `note-path#BLK-...` で開き、可能なら該当 block の位置まで scroll / highlight したい
+* file node hover では embed と同様の preview を出せるとよいが、MVP では未実装でもよい
 
 ## [ ] 39. エクスプローラパネルを上下分割し、下半分に dataset treeview を表示したい
 - 優先重み:6
@@ -827,3 +831,50 @@
   - general-analysis runner の file path / `.idts` 混在対応
   - renderer の input/output UI を file path 中心へ更新
   - managed catalog を generic な managed file モデルへ寄せる
+
+## [ ] 43. 解析 block の input 割り当てを popup + filter の keyboard-first UX にしたい
+- 優先重み:7
+- 記載日時:2026-04-18-20:29(UTC+9)
+
+* 現状の解析 block の input 割り当ては button click と dialog / picker 中心で、`>` による block 挿入 popup と比べてキーボード主体の体験が弱い
+* 今回の論点は「解析 block 全体を GUI から外したい」ではなく、「input slot を popup + filter で素早く選びたい」に絞る
+* 方針として、input 割り当ての基本導線は block / plugin 個別 UI ではなく、app 共通の keyboard-first picker に寄せたい
+* picker は slot 制約に従って候補を絞り込める必要がある
+  - 少なくとも `extension(s)` / `format` / `acceptedKinds` を見て候補を出し分けたい
+* 候補一覧では、ユーザーが識別しやすい表示を優先したい
+  - 主表示は file 名または dataset 名
+  - 補助表示は relative path, format, kind など
+* ranking では、単なる名前一致だけでなく、今の作業文脈に近いものを上位に出したい
+  - 最近使った input
+  - 今開いている note に近い folder
+  - slot 制約により近い拡張子 / kind
+* block を `>` popup から挿入した直後、そのまま最初の未設定 input slot picker を開けると流れがよい
+* keyboard 操作は少なくとも次を自然に扱いたい
+  - `↑↓` で候補移動
+  - `Enter` で確定
+  - `Tab` / `Shift+Tab` で slot 間移動
+  - `Esc` で閉じる
+  - `Backspace` で現在割り当て解除
+* non-bundle slot と `.idts` slot で完全に別体験にせず、可能な限り同じ popup interaction に寄せたい
+* native file dialog や個別 plugin renderer は補助導線に留め、基本の input 割り当て体験は app 全体で一貫させたい
+
+## [x] 44. Python output slot から作業 note / data-note へ結果 embed を自動追記したい
+- 優先重み:8
+- 記載日時:2026-04-18-20:35(UTC+9)
+- 対応完了:2026-04-18-21:28(UTC+9)
+
+* 中間 `json` のような internal 生成物は明示 block として残しつつ、ユーザーには結果 `![]()` を中心に見せたい
+* そのため、Python callable の output slot には少なくとも次を宣言できるようにしたい
+  - `auto_insert_to_work_note: bool`
+  - `project_to_inputs: string[]`
+* `auto_insert_to_work_note = true` の output は、実行成功後に block 直下へ `![]()` を追記したい
+* `project_to_inputs = ["source"]` のような output は、指定 input の data-note 末尾へ provenance link と `![]()` を追記したい
+* note への自動反映は append-only でよく、古い embed は app が自動整理せず、不要ならユーザーが手で消せればよい
+* data-note 側の provenance link は、可能なら `[ExperimentA.md / BLK-1234](/Notes/ExperimentA.md#BLK-1234)` のような `path + block id` 形式にしたい
+* そのため、note 内 link 解決では `#BLK-...` を block deep link として扱い、対象 block があれば scroll / highlight、無ければ note を普通に開く挙動にしたい
+* output が app 内で直接表示できるかは事前判定せず、単に `![]()` を挿入し、既存の embed / data-note fallback 解決に委ねたい
+* 実装では、Python slot decorator / callable discovery / execute result に上記 metadata を通し、実行成功時に
+  - 作業 note の該当 block 直下へ `![]()` を挿入
+  - 指定 input の data-note 末尾へ provenance link + `![]()` を追記
+  - `path#BLK-...` link クリック時に note open + block scroll / highlight
+  を行うようにした

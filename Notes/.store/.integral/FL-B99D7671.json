@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-18T12:59:16.002Z",
+  "createdByBlockId": null,
+  "displayName": "README.md",
+  "entityType": "managed-file",
+  "format": "ext/md",
+  "hash": "sha256:1D30B290F08222B7B0DBD7EB09621EEFCEDB425725855E6FC7328BCB08072C34",
+  "id": "FL-B99D7671",
+  "path": "README.md",
+  "representation": "file",
+  "visibility": "visible"
+}

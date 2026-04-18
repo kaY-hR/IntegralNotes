@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-04-18T13:00:43.789Z",
+  "createdByBlockId": "BLK-5B6F8FF8",
+  "datasetId": "DTS-AD715C0F",
+  "displayName": "report",
+  "entityType": "dataset",
+  "hash": "sha256:289ED82F4B120A9B554044EB23FA93C4303E4F3E2993FEC5303740583767CBC8",
+  "id": "DTS-AD715C0F",
+  "kind": "bundle/pca-report",
+  "dataPath": ".store/objects/DTS-AD715C0F",
+  "name": "report",
+  "path": "Data/report.idts",
+  "provenance": "derived",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

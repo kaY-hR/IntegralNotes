@@ -27,7 +27,12 @@ Each slot item may be either:
 - string shorthand such as `"source"`
 - object form such as `{"name": "report", "extension": ".html", "format": "report/html"}`
 
-Do not add params schema or custom metadata to the decorator unless the task explicitly changes the SDK itself.
+On output slots, the SDK also supports:
+
+- `auto_insert_to_work_note`
+- `project_to_inputs`
+
+Do not add params schema or decorator metadata beyond what the SDK already supports unless the task explicitly changes the SDK itself.
 
 ## Discovery Contract
 
@@ -59,13 +64,25 @@ from integral import integral_block
 
 
 @integral_block(
-    display_name="Example Report",
+    display_name="Example Convert And Plot",
     description="Describe the block in one sentence.",
     inputs=[
-        {"name": "source", "extensions": [".json"], "format": "chromatogram/json"},
+        {"name": "source", "extensions": [".idts"], "format": "bundle/idts"},
     ],
     outputs=[
-        {"name": "report", "extension": ".html", "format": "report/html"},
+        {
+            "name": "json",
+            "extension": ".json",
+            "format": "chromatogram/json",
+            "project_to_inputs": ["source"],
+        },
+        {
+            "name": "plot",
+            "extension": ".html",
+            "format": "report/html",
+            "auto_insert_to_work_note": True,
+            "project_to_inputs": ["source"],
+        },
     ],
 )
 def main(
@@ -73,10 +90,12 @@ def main(
     outputs: dict[str, str | None],
     params: dict[str, Any] | None,
 ) -> None:
-    source_path = require_existing_file(inputs, "source")
-    report_path = require_output_file(outputs, "report")
+    source_root = require_existing_directory(inputs, "source")
+    json_path = require_output_file(outputs, "json")
+    plot_path = require_output_file(outputs, "plot")
     options = params or {}
-    report_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
     ...
 ```
 
@@ -125,6 +144,7 @@ The AI should reason from this source format first, then map it to Python implem
 - Convert optional `params` using `options = params or {}`.
 - For single-file output, create the parent directory with `output_path.parent.mkdir(...)`.
 - For `.idts` output, create the bundle directory with `output_root.mkdir(...)`.
+- Prefer emitting both a machine-friendly intermediate file and a human-friendly renderable in the same block when they naturally come from the same source data.
 - Emit stable filenames so the output is easy to inspect later.
 - Prefer UTF-8 text output.
 - If the block is meant for human inspection, generate at least one renderable file such as HTML or text.
@@ -138,4 +158,5 @@ The AI should reason from this source format first, then map it to Python implem
 - writing outside the assigned output path or bundle directory
 - adding blank lines or extra decorators that break callable discovery
 - treating the decorator as a place for runtime params schema
+- forgetting that work-note / data-note projection is controlled by output slot metadata, not by ad hoc Markdown writes from Python
 - putting new scripts outside `scripts/` when import simplicity matters

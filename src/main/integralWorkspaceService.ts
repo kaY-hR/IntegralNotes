@@ -598,7 +598,8 @@ export class IntegralWorkspaceService {
         logLines: [],
         startedAt: now,
         status: "success",
-        summary: "表示 block は実行不要です。"
+        summary: "表示 block は実行不要です。",
+        workNoteMarkdownToAppend: null
       };
     }
 
@@ -606,7 +607,12 @@ export class IntegralWorkspaceService {
       return this.executeExternalPluginBlock(resolvedBlock, definition);
     }
 
-    return this.executeGeneralAnalysisBlock(normalizedBlock, resolvedBlock, definition);
+    return this.executeGeneralAnalysisBlock(
+      normalizedBlock,
+      resolvedBlock,
+      definition,
+      request.sourceNotePath ?? null
+    );
   }
 
   private getRootPath(): string {
@@ -708,7 +714,8 @@ export class IntegralWorkspaceService {
   private async executeGeneralAnalysisBlock(
     sourceBlock: IntegralBlockDocument,
     resolvedBlock: IntegralBlockDocument,
-    definition: IntegralBlockTypeDefinition
+    definition: IntegralBlockTypeDefinition,
+    sourceNotePath: string | null
   ): Promise<ExecuteIntegralBlockResult> {
     if (definition.pluginId !== GENERAL_ANALYSIS_PLUGIN_ID) {
       throw new Error(`未対応の plugin 実行です: ${definition.pluginId}`);
@@ -936,6 +943,23 @@ export class IntegralWorkspaceService {
         ];
       })
     );
+    const workNoteMarkdownToAppend = buildWorkNoteProjectionMarkdown(
+      definition.outputSlots.flatMap((slot) =>
+        slot.autoInsertToWorkNote && outputReferences[slot.name]
+          ? [outputReferences[slot.name]].filter((value): value is string => value !== null)
+          : []
+      )
+    );
+
+    if (sourceNotePath && sourceBlock.id) {
+      await this.appendProjectedOutputsToDataNotes(
+        sourceNotePath,
+        sourceBlock.id,
+        definition.outputSlots,
+        resolvedBlock.inputs,
+        outputReferences
+      );
+    }
 
     return {
       block: {
@@ -951,7 +975,8 @@ export class IntegralWorkspaceService {
       logLines: [...splitLogLines(stdout), ...splitLogLines(stderr)],
       startedAt,
       status: "success",
-      summary: `${definition.title} を実行しました。`
+      summary: `${definition.title} を実行しました。`,
+      workNoteMarkdownToAppend
     };
   }
 
@@ -1059,8 +1084,94 @@ export class IntegralWorkspaceService {
       logLines: result.logLines,
       startedAt: result.startedAt,
       status: "success",
-      summary: result.summary
+      summary: result.summary,
+      workNoteMarkdownToAppend: null
     };
+  }
+
+  private async appendProjectedOutputsToDataNotes(
+    sourceNotePath: string,
+    sourceBlockId: string,
+    outputSlots: readonly IntegralSlotDefinition[],
+    resolvedInputs: Readonly<Record<string, string | null>>,
+    outputReferences: Readonly<Record<string, string | null>>
+  ): Promise<void> {
+    const projectionTargets = new Map<string, Set<string>>();
+
+    for (const outputSlot of outputSlots) {
+      const outputReference = outputReferences[outputSlot.name] ?? null;
+      const projectedInputSlots = outputSlot.projectToInputs ?? [];
+
+      if (!outputReference || projectedInputSlots.length === 0) {
+        continue;
+      }
+
+      for (const inputSlotName of projectedInputSlots) {
+        const inputReference = resolvedInputs[inputSlotName] ?? null;
+
+        if (!inputReference) {
+          continue;
+        }
+
+        const noteRelativePath =
+          await this.resolveProjectedManagedDataNoteRelativePath(inputReference);
+
+        if (!noteRelativePath) {
+          continue;
+        }
+
+        const projectedOutputs = projectionTargets.get(noteRelativePath) ?? new Set<string>();
+        projectedOutputs.add(outputReference);
+        projectionTargets.set(noteRelativePath, projectedOutputs);
+      }
+    }
+
+    for (const [noteRelativePath, projectedOutputs] of projectionTargets) {
+      const markdownToAppend = buildDataNoteProjectionMarkdown(
+        sourceNotePath,
+        sourceBlockId,
+        [...projectedOutputs]
+      );
+
+      if (!markdownToAppend) {
+        continue;
+      }
+
+      await this.appendMarkdownToNote(noteRelativePath, markdownToAppend);
+    }
+  }
+
+  private async resolveProjectedManagedDataNoteRelativePath(reference: string): Promise<string | null> {
+    const datasetMetadata = await this.resolveDatasetReferenceMetadata(reference);
+
+    if (datasetMetadata) {
+      return createManagedDataNoteRelativePath(datasetMetadata.datasetId);
+    }
+
+    const workspacePath = resolveWorkspaceMarkdownTarget(reference) ?? normalizeRelativePath(reference);
+
+    if (workspacePath.length === 0) {
+      return null;
+    }
+
+    const managedFileMetadata = await this.findManagedFileMetadataByPath(workspacePath);
+
+    if (
+      !managedFileMetadata ||
+      !supportsManagedFileDataNote(managedFileMetadata.path, managedFileMetadata.representation)
+    ) {
+      return null;
+    }
+
+    return createManagedDataNoteRelativePath(managedFileMetadata.id);
+  }
+
+  private async appendMarkdownToNote(relativePath: string, markdownToAppend: string): Promise<void> {
+    const note = await this.workspaceService.readNote(relativePath);
+    await this.workspaceService.saveNote(
+      relativePath,
+      appendMarkdownToNoteBody(note.content, markdownToAppend)
+    );
   }
 
   private async writeDatasetMetadata(datasetId: string, metadata: DatasetMetadata): Promise<void> {
@@ -2706,16 +2817,48 @@ function parsePythonSlotDefinition(
   const formatValue =
     parsePythonStringLiteral(extractPythonMappingValue(trimmed, "format")) ??
     parsePythonStringLiteral(extractPythonMappingValue(trimmed, "kind"));
+  const autoInsertToWorkNote =
+    direction === "output"
+      ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "auto_insert_to_work_note")) ??
+        false
+      : false;
+  const projectToInputs =
+    direction === "output"
+      ? normalizeDiscoveredSlotNames(
+          parsePythonStringArrayLiteral(extractPythonMappingValue(trimmed, "project_to_inputs"))
+        )
+      : [];
 
   return {
     acceptedKinds:
       direction === "input" && formatValue ? [formatValue] : undefined,
+    autoInsertToWorkNote: direction === "output" ? autoInsertToWorkNote : undefined,
     extension: direction === "output" ? directExtension ?? normalizedExtensions[0] : undefined,
     extensions: normalizedExtensions.length > 0 ? normalizedExtensions : undefined,
     format: formatValue ?? undefined,
     name: normalizedName,
-    producedKind: direction === "output" && formatValue ? formatValue : undefined
+    producedKind: direction === "output" && formatValue ? formatValue : undefined,
+    projectToInputs:
+      direction === "output" && projectToInputs.length > 0 ? projectToInputs : undefined
   };
+}
+
+function parsePythonBooleanLiteral(value: string | null): boolean | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed === "True") {
+    return true;
+  }
+
+  if (trimmed === "False") {
+    return false;
+  }
+
+  return null;
 }
 
 function splitTopLevelPythonItems(
@@ -3302,6 +3445,64 @@ function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | nul
   }
 
   return null;
+}
+
+function createManagedDataNoteRelativePath(targetId: string): string {
+  return `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/data-notes/${targetId.trim()}.md`;
+}
+
+function buildWorkNoteProjectionMarkdown(targets: readonly string[]): string | null {
+  const normalizedTargets = Array.from(
+    new Set(targets.map((target) => target.trim()).filter((target) => target.length > 0))
+  );
+
+  if (normalizedTargets.length === 0) {
+    return null;
+  }
+
+  return normalizedTargets.map((target) => `![](${target})`).join("\n\n");
+}
+
+function buildDataNoteProjectionMarkdown(
+  sourceNotePath: string,
+  blockId: string,
+  targets: readonly string[]
+): string | null {
+  const embedsMarkdown = buildWorkNoteProjectionMarkdown(targets);
+
+  if (!embedsMarkdown) {
+    return null;
+  }
+
+  return `${buildProvenanceLinkMarkdown(sourceNotePath, blockId)}\n\n${embedsMarkdown}`;
+}
+
+function buildProvenanceLinkMarkdown(sourceNotePath: string, blockId: string): string {
+  const normalizedPath = normalizeRelativePath(sourceNotePath);
+  const normalizedBlockId = blockId.trim();
+  const target = `${toCanonicalWorkspaceTarget(normalizedPath)}#${normalizedBlockId}`;
+  return `[${normalizedPath} / ${normalizedBlockId}](${target})`;
+}
+
+function appendMarkdownToNoteBody(existingBody: string, markdownToAppend: string): string {
+  const normalizedExistingBody = existingBody.replace(/\r\n/gu, "\n");
+  const normalizedMarkdownToAppend = markdownToAppend.trim();
+
+  if (normalizedMarkdownToAppend.length === 0) {
+    return normalizedExistingBody;
+  }
+
+  if (normalizedExistingBody.trim().length === 0) {
+    return `${normalizedMarkdownToAppend}\n`;
+  }
+
+  const separator = normalizedExistingBody.endsWith("\n\n")
+    ? ""
+    : normalizedExistingBody.endsWith("\n")
+      ? "\n"
+      : "\n\n";
+
+  return `${normalizedExistingBody}${separator}${normalizedMarkdownToAppend}\n`;
 }
 
 function supportsManagedFileDataNote(

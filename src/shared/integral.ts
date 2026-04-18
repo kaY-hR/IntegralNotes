@@ -6,11 +6,13 @@ import type {
 
 export interface IntegralSlotDefinition {
   acceptedKinds?: string[];
+  autoInsertToWorkNote?: boolean;
   extension?: string;
   extensions?: string[];
   format?: string;
   name: string;
   producedKind?: string;
+  projectToInputs?: string[];
 }
 
 export interface IntegralBlockOutputConfig {
@@ -148,6 +150,7 @@ export interface CreateDatasetResult {
 
 export interface ExecuteIntegralBlockRequest {
   block: IntegralBlockDocument;
+  sourceNotePath?: string | null;
 }
 
 export interface ExecuteIntegralBlockResult {
@@ -158,6 +161,7 @@ export interface ExecuteIntegralBlockResult {
   startedAt: string;
   status: "success";
   summary: string;
+  workNoteMarkdownToAppend: string | null;
 }
 
 const DEFAULT_OUTPUT_DIRECTORY = "/Data";

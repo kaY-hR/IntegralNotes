@@ -59,6 +59,7 @@ out:
   - 旧形式では未実行 slot は `auto`
   - 新形式では slot ごとに `dir`, `name`, `latest` を保持できる
   - `latest` には直近実行で生成された `.idts` path を保持してよい
+  - note への自動反映可否や投影先 input は block source ではなく block 定義側で持つ
 
 ## 3. internal normalized form
 
@@ -138,6 +139,30 @@ out:
 - 入力変更以外の source は極力安定に保つ
 - ただし `out:` には output slot ごとの `dir`, `name`, `latest` を書き戻してよい
 - run status と log 要約は hidden metadata ではなく UI state / runtime log で扱う
+
+## 5.5. note projection metadata
+
+作業 note や data-note への自動反映は block source には保存しない。  
+その情報は Python callable / plugin 定義の output slot 側 metadata として持つ。
+
+例:
+
+```python
+{
+    "name": "plot",
+    "extension": ".html",
+    "format": "report/html",
+    "auto_insert_to_work_note": True,
+    "project_to_inputs": ["source"],
+}
+```
+
+app はこの metadata を読み、実行成功後に
+
+- block 直下への `![]()`
+- data-note 末尾への provenance link + `![]()`
+
+を append-only で反映してよい。
 
 ## 6. block card 表示
 
