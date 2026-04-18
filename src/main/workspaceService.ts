@@ -1060,19 +1060,28 @@ export class WorkspaceService {
               path.join(metadataRootPath, entry.name)
             );
 
-              const managedFileMetadata = normalizeManagedFileNoteMetadata(metadata);
+            const managedFileMetadata = normalizeManagedFileNoteMetadata(metadata);
 
-              if (managedFileMetadata) {
-                const absolutePath = path.join(dataNoteRootPath, `${managedFileMetadata.id.trim()}.md`);
-                const existingContent = await readTextFileIfExists(absolutePath);
-
-                return {
-                  absolutePath,
-                  nextContent: buildManagedFileNoteMarkdown(managedFileMetadata, existingContent)
-                } satisfies ManagedDataNoteWritePlan;
+            if (managedFileMetadata) {
+              if (
+                !supportsManagedFileDataNote(
+                  managedFileMetadata.path,
+                  managedFileMetadata.representation
+                )
+              ) {
+                return null;
               }
 
-              const datasetMetadata = normalizeDatasetDataNoteMetadata(metadata);
+              const absolutePath = path.join(dataNoteRootPath, `${managedFileMetadata.id.trim()}.md`);
+              const existingContent = await readTextFileIfExists(absolutePath);
+
+              return {
+                absolutePath,
+                nextContent: buildManagedFileNoteMarkdown(managedFileMetadata, existingContent)
+              } satisfies ManagedDataNoteWritePlan;
+            }
+
+            const datasetMetadata = normalizeDatasetDataNoteMetadata(metadata);
 
             if (!datasetMetadata) {
               return null;
@@ -1562,6 +1571,17 @@ function normalizeRelativePath(relativePath: string): string {
     .split(/[\\/]+/u)
     .filter(Boolean)
     .join("/");
+}
+
+function supportsManagedFileDataNote(
+  relativePath: string,
+  representation: "directory" | "file"
+): boolean {
+  if (representation !== "file") {
+    return true;
+  }
+
+  return !path.posix.basename(normalizeRelativePath(relativePath)).toLowerCase().endsWith(".md");
 }
 
 function collapseNestedRelativePaths(relativePaths: string[]): string[] {

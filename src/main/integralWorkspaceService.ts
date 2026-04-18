@@ -506,6 +506,7 @@ export class IntegralWorkspaceService {
       createdByBlockId: datasetMetadata.createdByBlockId,
       fileNames: relativeFilePaths,
       hash: datasetMetadata.hash,
+      hasDataNote: true,
       hasRenderableFiles: renderables.length > 0,
       kind: datasetMetadata.kind,
       memberIds: datasetMetadata.memberIds,
@@ -1369,6 +1370,7 @@ export class IntegralWorkspaceService {
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
       hash: metadata.hash,
+      hasDataNote: true,
       hasRenderableFiles: renderableCount > 0,
       kind: metadata.kind,
       memberIds: metadata.memberIds,
@@ -1487,6 +1489,7 @@ export class IntegralWorkspaceService {
         entityType: metadata.entityType,
         format: metadata.kind,
         hash: metadata.hash,
+        hasDataNote: true,
         id: metadata.datasetId,
         path: metadata.path,
         representation: metadata.representation,
@@ -1501,6 +1504,7 @@ export class IntegralWorkspaceService {
       entityType: metadata.entityType,
       format: metadata.format,
       hash: metadata.hash,
+      hasDataNote: supportsManagedFileDataNote(metadata.path, metadata.representation),
       id: metadata.id,
       path: metadata.path,
       representation: metadata.representation,
@@ -3298,6 +3302,17 @@ function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | nul
   }
 
   return null;
+}
+
+function supportsManagedFileDataNote(
+  relativePath: string,
+  representation: ManagedFileRepresentation
+): boolean {
+  if (representation !== "file") {
+    return true;
+  }
+
+  return !path.posix.basename(normalizeRelativePath(relativePath)).toLowerCase().endsWith(".md");
 }
 
 function areDatasetMetadataEqual(left: DatasetMetadata, right: DatasetMetadata): boolean {

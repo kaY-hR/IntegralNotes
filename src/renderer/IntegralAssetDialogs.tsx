@@ -120,17 +120,19 @@ export function DatasetPickerDialog({
                       </div>
                     </div>
                   </label>
-                  <button
-                    className="asset-picker__row-link asset-picker__row-link--note"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      requestOpenManagedDataNote(dataset.datasetId);
-                    }}
-                    type="button"
-                  >
-                    ノート
-                  </button>
+                  {dataset.hasDataNote ? (
+                    <button
+                      className="asset-picker__row-link asset-picker__row-link--note"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        requestOpenManagedDataNote(dataset.datasetId);
+                      }}
+                      type="button"
+                    >
+                      ノート
+                    </button>
+                  ) : null}
                 </div>
               ))
             ) : (
@@ -388,17 +390,19 @@ export function ManagedFileSelectionDialog({
                           </div>
                         </div>
                       </label>
-                      <button
-                        className="asset-picker__row-link asset-picker__row-link--note"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          requestOpenManagedDataNote(entry.id);
-                        }}
-                        type="button"
-                      >
-                        ノート
-                      </button>
+                      {entry.hasDataNote ? (
+                        <button
+                          className="asset-picker__row-link asset-picker__row-link--note"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            requestOpenManagedDataNote(entry.id);
+                          }}
+                          type="button"
+                        >
+                          ノート
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })

@@ -362,7 +362,9 @@ function findManagedDataTargetById(
     return null;
   }
 
-  const managedFile = catalog.managedFiles.find((entry) => entry.id === normalizedTargetId);
+  const managedFile = catalog.managedFiles.find(
+    (entry) => entry.id === normalizedTargetId && entry.hasDataNote
+  );
 
   if (managedFile) {
     return {
@@ -421,6 +423,10 @@ function findManagedDataTargetForPath(
   };
 
   for (const entry of catalog.managedFiles) {
+    if (!entry.hasDataNote) {
+      continue;
+    }
+
     collectMatch(entry.displayName, entry.id, entry.path, entry.representation);
   }
 
@@ -1739,6 +1745,11 @@ export function App(): JSX.Element {
 
   const openManagedDataNote = async (targetId: string): Promise<void> => {
     const managedDataTarget = findManagedDataTargetById(assetCatalog, targetId);
+
+    if (!managedDataTarget) {
+      setStatusMessage("対応する data-note はありません。");
+      return;
+    }
 
     await openWorkspaceFile(createManagedDataNoteRelativePath(targetId), {
       tabNameOverride: managedDataTarget

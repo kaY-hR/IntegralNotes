@@ -1178,6 +1178,10 @@ function findManagedDataTargetForPath(
   };
 
   for (const entry of catalog.managedFiles) {
+    if (!entry.hasDataNote) {
+      continue;
+    }
+
     collectMatch(entry.displayName, entry.id, entry.path, entry.representation);
   }
 

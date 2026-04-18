@@ -68,6 +68,7 @@ export interface IntegralManagedFileSummary {
   entityType: IntegralManagedDataEntityType;
   format: string | null;
   hash: string;
+  hasDataNote: boolean;
   id: string;
   path: string;
   representation: IntegralManagedFileRepresentation;
@@ -79,6 +80,7 @@ export interface IntegralDatasetSummary {
   createdByBlockId: string | null;
   datasetId: string;
   hash: string;
+  hasDataNote: boolean;
   hasRenderableFiles: boolean;
   kind: string;
   memberIds?: string[];

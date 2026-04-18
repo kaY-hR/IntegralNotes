@@ -550,7 +550,7 @@ function IntegralBlockPanel({
 
     const managedFile = resolveManagedFile(reference);
 
-    if (!managedFile) {
+    if (!managedFile || !managedFile.hasDataNote) {
       return;
     }
 
@@ -596,7 +596,8 @@ function IntegralBlockPanel({
   if (isDisplayBlock) {
     const sourceDatasetRef = parsed.block.inputs.source ?? null;
     const sourceDatasetId = resolveDatasetId(sourceDatasetRef);
-    const hasSourceNote = sourceDatasetId !== null;
+    const sourceManagedData = resolveManagedFile(sourceDatasetRef);
+    const hasSourceNote = sourceManagedData?.hasDataNote === true;
 
     return (
       <div className={`integral-code-block integral-code-block--display${selected ? " integral-code-block--selected" : ""}`}>
@@ -675,7 +676,7 @@ function IntegralBlockPanel({
                   </div>
                   {blockDefinition.executionMode === "manual" ? (
                     <div className="integral-slot-row__actions">
-                      {isAssigned && assignedManagedFile ? (
+                      {isAssigned && assignedManagedFile?.hasDataNote ? (
                         <button
                           className="integral-slot-row__link integral-slot-row__link--note"
                           onClick={() => {
@@ -776,7 +777,7 @@ function IntegralBlockPanel({
                       <span className="integral-output-slot-row__suffix">{outputSuffix}</span>
                     </div>
 
-                    {outputManagedFile ? (
+                    {outputManagedFile?.hasDataNote ? (
                       <div className="integral-slot-row__actions">
                         <button
                           className="integral-slot-row__link integral-slot-row__link--note"

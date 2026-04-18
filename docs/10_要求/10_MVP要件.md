@@ -24,15 +24,16 @@
 
 ## 2. Data Note
 
-- `1 managed file = 1 data-note` を基本とする
+- `.md` を除く managed file と dataset に data-note を持たせる
 - data-note は `.store/.integral/data-notes/{id}.md` に置く system-managed Markdown とする
 - app は data-note を file path ではなく target ID で開く
 - ユーザーは data-note の本文だけを編集できる
-- managed file を管理対象から外したときは、対応する metadata と data-note も削除する
+- data-note 対象の managed data を管理対象から外したときは、対応する metadata と data-note も削除する
 
 ## 3. Markdown Note
 
 - `cwd` 配下の `.md` は managed file として追跡する
+- `.md` managed file 自体には data-note を作らない
 - frontmatter がある場合、app は frontmatter を保持し、editor / viewer には本文だけを渡す
 - 保存時は本文だけを更新し、frontmatter は壊さず保持する
 - `見たまま編集` と `body-only raw text` を切り替えられる
