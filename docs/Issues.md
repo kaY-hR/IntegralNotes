@@ -762,3 +762,43 @@
   - `src/renderer/integralCodeBlockFeature.tsx`, `src/renderer/styles.css` を更新し、Python 実行 block の `Inputs` / `Outputs` section 分離、folder picker、dataset 名 textarea、`.idts` suffix 表示を追加した
   - `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` の関連文書を新仕様へ更新した
   - `npm run build` が通ることを確認した
+
+## [ ] 37. Obsidian 風のグラフビュー plugin を作りたい
+- 優先重み:6
+- 記載日時:2026-04-18-01:23(UTC+9)
+
+* Obsidian の graph view のような可視化 plugin を作りたい
+* plugin は Activity Bar に存在し、click すると main workspace の tab として開かれてほしい
+* graph の node / edge 表現や interaction は、Obsidian の graph view を参考にしつつ IntegralNotes の workspace 文脈に合わせて設計したい
+
+## [ ] 38. block と idts の derive 関係を矢印で可視化する plugin を作りたい
+- 優先重み:7
+- 記載日時:2026-04-18-01:23(UTC+9)
+
+* block と `idts` の derive 関係を矢印で繋ぎ、処理の流れを可視化したい
+* 現在カーソルがある `md` や、その近くの block を起点にし、その block に関連するものだけを表示したい
+* block を click すると、その block がある `md` を開き、可能なら該当 block の位置まで scroll したい
+* `idts` node は、タイトルに `idts` file 名を出し、下側の content には所属する file 群を表示したい
+
+## [ ] 39. エクスプローラパネルを上下分割し、下半分に dataset treeview を表示したい
+- 優先重み:6
+- 記載日時:2026-04-18-01:23(UTC+9)
+
+* エクスプローラパネルを上下に分割し、下半分に dataset 用の treeview を表示したい
+* 最上位には dataset の file 名を並べ、各 dataset を展開すると配下に所属 file 群が並ぶ構成にしたい
+* 下側 treeview で file を click すると、上側の explorer でもその file が選択状態になってほしい
+* その際、対象 file が所属する folder は自動的に unfold された状態にしたい
+
+## [ ] 40. `Ctrl+W` で現在のタブを閉じたい
+- 優先重み:8
+- 記載日時:2026-04-18-01:23(UTC+9)
+
+* `Ctrl+W` を押したとき、現在の tab を閉じる挙動にしたい
+* 現状は `Ctrl+W` を押すとソフト自体が停止してしまうため、この挙動を修正したい
+
+## [ ] 41. エクスプローラパネルに「全てたたむ」button が欲しい
+- 優先重み:4
+- 記載日時:2026-04-18-01:23(UTC+9)
+
+* エクスプローラパネルに `全てたたむ` button を追加したい
+* icon は `[-]` のような VS Code と同じ系統のものにしたい
