@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 export interface ActivityBarItem {
   icon: ReactNode;
   id: string;
+  isActive?: boolean;
   title: string;
 }
 
@@ -21,7 +22,7 @@ export function ActivityBar({
     <nav aria-label="Sidebar navigation" className="activity-bar">
       <div className="activity-bar__items">
         {items.map((item) => {
-          const selected = item.id === activeItemId;
+          const selected = item.isActive ?? item.id === activeItemId;
 
           return (
             <button

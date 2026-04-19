@@ -4,6 +4,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -46,6 +47,7 @@ import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
 import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
 import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
+import { findWorkspaceToolPlugin, workspaceToolPlugins } from "./workspaceToolPlugins";
 import { RawMarkdownEditor } from "./RawMarkdownEditor";
 import { SearchSidebarView, type SearchSidebarState } from "./SearchSidebarView";
 import { SidebarPluginManagerView } from "./SidebarPluginManagerView";
@@ -104,6 +106,7 @@ const MAIN_TABSET_ID = "editor-main";
 const BUILTIN_EXPLORER_SIDEBAR_VIEW_ID = "builtin:explorer";
 const BUILTIN_SEARCH_SIDEBAR_VIEW_ID = "builtin:search";
 const BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID = "builtin:plugins";
+const WORKSPACE_TOOL_TAB_ID_PREFIX = "workspace-tool::";
 const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
 const TREE_DRAG_MIME = "application/x-integralnotes-workspace-selection";
@@ -225,6 +228,18 @@ function toRelativePathFromTabId(tabId: string): string | undefined {
   }
 
   return tabId.slice("note::".length);
+}
+
+function toWorkspaceToolTabId(toolId: string): string {
+  return `${WORKSPACE_TOOL_TAB_ID_PREFIX}${toolId}`;
+}
+
+function toWorkspaceToolIdFromTabId(tabId: string): string | undefined {
+  if (!tabId.startsWith(WORKSPACE_TOOL_TAB_ID_PREFIX)) {
+    return undefined;
+  }
+
+  return tabId.slice(WORKSPACE_TOOL_TAB_ID_PREFIX.length);
 }
 
 function findEntryByPath(entries: WorkspaceEntry[], relativePath: string): WorkspaceEntry | undefined {
@@ -878,6 +893,7 @@ export function App(): JSX.Element {
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
   const [selectedEntryPaths, setSelectedEntryPaths] = useState<Set<string>>(new Set());
   const [selectedTabId, setSelectedTabId] = useState<string | undefined>(undefined);
+  const [lastFocusedWorkspaceTabPath, setLastFocusedWorkspaceTabPath] = useState<string | null>(null);
   const [pendingFocusedBlockByPath, setPendingFocusedBlockByPath] = useState<Record<string, string>>(
     {}
   );
@@ -924,6 +940,7 @@ export function App(): JSX.Element {
   const selectedEntries = findEntriesByPaths(visibleWorkspaceEntries, selectedEntryPaths);
   const selectedTabPath = selectedTabId ? toRelativePathFromTabId(selectedTabId) : undefined;
   const activeTab = selectedTabPath ? openTabs[selectedTabPath] : undefined;
+  const activeWorkspaceContextPath = selectedTabPath ?? lastFocusedWorkspaceTabPath;
   const activeTrackingIssue = trackingDialogDismissed ? null : (trackingIssues[0] ?? null);
   const hasBlockingDialog =
     activeTrackingIssue !== null ||
@@ -934,6 +951,16 @@ export function App(): JSX.Element {
   useEffect(() => {
     openTabsRef.current = openTabs;
   }, [openTabs]);
+
+  const openMarkdownContentOverrides = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.values(openTabs)
+          .filter((tab): tab is OpenMarkdownTab => isMarkdownTab(tab))
+          .map((tab) => [tab.relativePath, tab.content] as const)
+      ),
+    [openTabs]
+  );
 
   useEffect(() => {
     document.body.classList.toggle("integral-dialog-open", hasBlockingDialog);
@@ -967,7 +994,16 @@ export function App(): JSX.Element {
       }
     }
 
+    for (const toolPlugin of workspaceToolPlugins) {
+      const tabId = toWorkspaceToolTabId(toolPlugin.id);
+
+      if (model.getNodeById(tabId)) {
+        model.doAction(FlexLayout.Actions.deleteTab(tabId));
+      }
+    }
+
     setOpenTabs({});
+    setLastFocusedWorkspaceTabPath(null);
     setSelectedTabId(undefined);
   };
 
@@ -1336,6 +1372,49 @@ export function App(): JSX.Element {
   const openPluginManager = (): void => {
     selectSidebarView(BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID);
     void refreshInstalledPluginState();
+  };
+
+  const openWorkspaceToolPlugin = (toolId: string): void => {
+    const toolPlugin = findWorkspaceToolPlugin(toolId);
+
+    if (!toolPlugin) {
+      setStatusMessage(`workspace tool plugin が見つかりません: ${toolId}`);
+      return;
+    }
+
+    const tabId = toWorkspaceToolTabId(toolPlugin.id);
+
+    if (model.getNodeById(tabId)) {
+      model.doAction(FlexLayout.Actions.selectTab(tabId));
+      setSelectedTabId(tabId);
+      setStatusMessage(`${toolPlugin.tabTitle} を表示中`);
+      return;
+    }
+
+    const activeTabsetId =
+      model.getActiveTabset()?.getId() ?? model.getNodeById(MAIN_TABSET_ID)?.getId() ?? MAIN_TABSET_ID;
+
+    model.doAction(
+      FlexLayout.Actions.addNode(
+        {
+          type: "tab",
+          id: tabId,
+          component: "editor",
+          name: toolPlugin.tabTitle,
+          config: {
+            kind: "workspace-tool",
+            toolId: toolPlugin.id
+          }
+        },
+        activeTabsetId,
+        FlexLayout.DockLocation.CENTER,
+        -1,
+        true
+      )
+    );
+
+    setSelectedTabId(tabId);
+    setStatusMessage(`${toolPlugin.tabTitle} を開きました`);
   };
 
   const openDataRegistrationDialog = (): void => {
@@ -1848,6 +1927,7 @@ export function App(): JSX.Element {
 
       model.doAction(FlexLayout.Actions.selectTab(tabId));
       setSelectedTabId(tabId);
+      setLastFocusedWorkspaceTabPath(relativePath);
       setStatusMessage(
         isMarkdownTab(existingTab)
           ? `${tabNameOverride ?? existingTab.name} を編集中`
@@ -1896,6 +1976,7 @@ export function App(): JSX.Element {
       );
 
       setSelectedTabId(tabId);
+      setLastFocusedWorkspaceTabPath(relativePath);
       setStatusMessage(`${nextTab.name} を開きました`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
@@ -2821,6 +2902,7 @@ export function App(): JSX.Element {
       setSelectedTabId(nextTabId);
 
       if (relativePath) {
+        setLastFocusedWorkspaceTabPath(relativePath);
         syncTreeSelectionForPath(relativePath);
       }
 
@@ -2832,12 +2914,56 @@ export function App(): JSX.Element {
 
       if (nextTabId) {
         setSelectedTabId(nextTabId);
+        const relativePath = toRelativePathFromTabId(nextTabId);
+
+        if (relativePath) {
+          setLastFocusedWorkspaceTabPath(relativePath);
+        }
       }
     }
   };
 
   const editorFactory = (node: FlexLayout.TabNode): JSX.Element => {
-    const relativePath = node.getConfig()?.relativePath as string | undefined;
+    const nodeConfig = node.getConfig() as
+      | {
+          kind?: string;
+          relativePath?: string;
+          toolId?: string;
+        }
+      | undefined;
+    const toolId =
+      nodeConfig?.kind === "workspace-tool" ? nodeConfig.toolId : toWorkspaceToolIdFromTabId(node.getId());
+
+    if (toolId) {
+      const toolPlugin = findWorkspaceToolPlugin(toolId);
+
+      if (!toolPlugin) {
+        return (
+          <div className="editor-empty">
+            対応する workspace tool plugin が見つかりません。
+          </div>
+        );
+      }
+
+      return toolPlugin.render({
+        assetCatalog,
+        contextRelativePath: activeWorkspaceContextPath ?? null,
+        noteOverrides: openMarkdownContentOverrides,
+        onOpenWorkspaceFile: (relativePath) => {
+          void openWorkspaceFile(relativePath, {
+            openUnsupportedExternally: true
+          });
+        },
+        onOpenWorkspaceTarget: (target) => {
+          void openWorkspaceTarget(target, {
+            openUnsupportedExternally: true
+          });
+        },
+        workspaceEntries: workspace?.entries ?? []
+      });
+    }
+
+    const relativePath = nodeConfig?.relativePath;
 
     if (!relativePath) {
       return <div className="editor-empty">ファイルを選択してください。</div>;
@@ -3271,7 +3397,14 @@ export function App(): JSX.Element {
     icon: view.activityIcon,
     id: view.id,
     title: view.title
-  }));
+  })).concat(
+    workspaceToolPlugins.map((toolPlugin) => ({
+      icon: toolPlugin.activityIcon,
+      id: toolPlugin.id,
+      isActive: selectedTabId === toWorkspaceToolTabId(toolPlugin.id),
+      title: toolPlugin.title
+    }))
+  );
   const activeSidebarView =
     sidebarViewDefinitions.find((view) => view.id === activeSidebarViewId) ?? sidebarViewDefinitions[0];
 
@@ -3321,6 +3454,11 @@ export function App(): JSX.Element {
         activeItemId={activeSidebarView.id}
         items={activityBarItems}
         onSelect={(viewId) => {
+          if (findWorkspaceToolPlugin(viewId)) {
+            openWorkspaceToolPlugin(viewId);
+            return;
+          }
+
           selectSidebarView(viewId);
 
           if (viewId === BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID) {

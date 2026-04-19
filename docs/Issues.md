@@ -771,18 +771,32 @@
 * plugin は Activity Bar に存在し、click すると main workspace の tab として開かれてほしい
 * graph の node / edge 表現や interaction は、Obsidian の graph view を参考にしつつ IntegralNotes の workspace 文脈に合わせて設計したい
 
-## [ ] 38. block と idts の derive 関係を矢印で可視化する plugin を作りたい
+## [x] 38. process chain viewer で block / file chain を可視化したい
+- Status:completed
 - 優先重み:7
 - 記載日時:2026-04-18-01:23(UTC+9)
 
 * block と file の derive / input-output 関係を矢印で繋ぎ、処理の流れを可視化したい
-* graph は sidebar view ではなく、Activity Bar の built-in item から main workspace の tab として開きたい
+* graph は sidebar view ではなく、Activity Bar item から main workspace の tab として開きたい
 * scope は workspace 全体ではなく、今開いている note 内の全 block、または今見ている file を起点にした chain にしたい
 * 現在 note 内 block から辿れる別 note の block / file は芋づる式に表示してよい
 * node は block / file を同程度の重みで扱い、内部 `json` も特別扱いせず普通の node として見せたい
 * first version は閲覧専用にし、既に実行済みの block の内容や接続を graph 上で編集するのは不可としたい
 * block を click すると、その block がある `md` を `note-path#BLK-...` で開き、可能なら該当 block の位置まで scroll / highlight したい
 * file node hover では embed と同様の preview を出せるとよいが、MVP では未実装でもよい
+* 2026-04-18 実装:
+  - `src/renderer/workspaceToolPlugins.tsx` を追加し、process chain viewer を app core 直書きではなく optional な internal workspace-tool plugin として登録した
+  - `src/renderer/App.tsx`, `src/renderer/ActivityBar.tsx` を更新し、plugin item から main workspace tab を開けるようにした
+  - `src/renderer/ProcessChainViewer.tsx` を追加し、current note / file を起点に block / file graph を構築して表示するようにした
+  - graph は block input/output と `createdByBlockId` を元に note をまたいで chain を辿る
+  - block click は `note-path#BLK-...` を開き、file click は既存の workspace file open 導線へ流す
+  - `src/renderer/styles.css` を更新し、read-only graph viewer の UI を追加した
+  - `docs/10_要求/20_ユーザー体験.md`, `docs/30_設計/80_ActivityBarとSidebarView.md`, `docs/30_設計/85_ProcessChainViewer.md` を current 仕様へ更新した
+  - `npm run build` が通ることを確認した
+* 2026-04-19 調整:
+  - edge 接続点を `out = right`, `in = left` の fixed port に変更した
+  - note 起点の探索は full reachable graph ではなく、直系 ancestor / descendant だけを辿るようにした
+  - shared input を使っているだけの sibling / cousin branch は表示しないようにした
 
 ## [ ] 39. エクスプローラパネルを上下分割し、下半分に dataset treeview を表示したい
 - 優先重み:6
