@@ -73,6 +73,8 @@ edge:
 - file node:
   - 通常の workspace file open 導線を使う
   - unsupported file は既存仕様どおり外部アプリへ回してよい
+- node click で tab を開く場合も、viewer 自身の tab focus は維持してよい
+- つまり target は background open を基本とし、viewer が急に消えないようにする
 
 ## 初版でやること
 

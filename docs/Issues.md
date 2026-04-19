@@ -797,6 +797,7 @@
   - edge 接続点を `out = right`, `in = left` の fixed port に変更した
   - note 起点の探索は full reachable graph ではなく、直系 ancestor / descendant だけを辿るようにした
   - shared input を使っているだけの sibling / cousin branch は表示しないようにした
+  - node click で target tab を開くときは process chain viewer の focus を維持し、background open を基本にした
 
 ## [ ] 39. エクスプローラパネルを上下分割し、下半分に dataset treeview を表示したい
 - 優先重み:6

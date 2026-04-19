@@ -98,6 +98,7 @@ interface ManagedDataTarget {
 }
 
 interface OpenWorkspaceFileOptions {
+  preserveFocus?: boolean;
   openUnsupportedExternally?: boolean;
   tabNameOverride?: string;
 }
@@ -1898,10 +1899,13 @@ export function App(): JSX.Element {
   ): Promise<void> => {
     const existingTab = openTabs[relativePath];
     const tabId = toTabId(relativePath);
+    const preserveFocus = options?.preserveFocus ?? false;
     const openUnsupportedExternally = options?.openUnsupportedExternally ?? false;
     const tabNameOverride = options?.tabNameOverride;
 
-    syncTreeSelectionForPath(relativePath);
+    if (!preserveFocus) {
+      syncTreeSelectionForPath(relativePath);
+    }
 
     if (existingTab) {
       if (tabNameOverride && existingTab.name !== tabNameOverride) {
@@ -1925,13 +1929,17 @@ export function App(): JSX.Element {
         return;
       }
 
-      model.doAction(FlexLayout.Actions.selectTab(tabId));
-      setSelectedTabId(tabId);
-      setLastFocusedWorkspaceTabPath(relativePath);
+      if (!preserveFocus) {
+        model.doAction(FlexLayout.Actions.selectTab(tabId));
+        setSelectedTabId(tabId);
+        setLastFocusedWorkspaceTabPath(relativePath);
+      }
       setStatusMessage(
-        isMarkdownTab(existingTab)
-          ? `${tabNameOverride ?? existingTab.name} を編集中`
-          : `${tabNameOverride ?? existingTab.name} を表示中`
+        preserveFocus
+          ? `${tabNameOverride ?? existingTab.name} をバックグラウンドで開きました`
+          : isMarkdownTab(existingTab)
+            ? `${tabNameOverride ?? existingTab.name} を編集中`
+            : `${tabNameOverride ?? existingTab.name} を表示中`
       );
       return;
     }
@@ -1971,13 +1979,17 @@ export function App(): JSX.Element {
           activeTabsetId,
           FlexLayout.DockLocation.CENTER,
           -1,
-          true
+          !preserveFocus
         )
       );
 
-      setSelectedTabId(tabId);
-      setLastFocusedWorkspaceTabPath(relativePath);
-      setStatusMessage(`${nextTab.name} を開きました`);
+      if (!preserveFocus) {
+        setSelectedTabId(tabId);
+        setLastFocusedWorkspaceTabPath(relativePath);
+      }
+      setStatusMessage(
+        preserveFocus ? `${nextTab.name} をバックグラウンドで開きました` : `${nextTab.name} を開きました`
+      );
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
     }
@@ -2910,7 +2922,7 @@ export function App(): JSX.Element {
     }
 
     if (action.type === FlexLayout.Actions.ADD_NODE) {
-      const nextTabId = action.data.json?.id as string | undefined;
+      const nextTabId = findSelectedTabId(nextModel);
 
       if (nextTabId) {
         setSelectedTabId(nextTabId);
@@ -2951,11 +2963,13 @@ export function App(): JSX.Element {
         noteOverrides: openMarkdownContentOverrides,
         onOpenWorkspaceFile: (relativePath) => {
           void openWorkspaceFile(relativePath, {
+            preserveFocus: true,
             openUnsupportedExternally: true
           });
         },
         onOpenWorkspaceTarget: (target) => {
           void openWorkspaceTarget(target, {
+            preserveFocus: true,
             openUnsupportedExternally: true
           });
         },
