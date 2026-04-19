@@ -17,6 +17,7 @@ interface ManagedDataNoteMetadataBase {
   displayName: string;
   hash: string;
   id: string;
+  noteTargetId?: string;
   path: string;
   provenance?: ManagedDataProvenance;
   visibility: ManagedDataVisibility;
@@ -54,6 +55,7 @@ const COMMON_MANAGED_FRONTMATTER_KEYS = [
   "representation",
   "path",
   "hash",
+  "noteTargetId",
   "visibility",
   "provenance",
   "createdAt"
@@ -90,6 +92,7 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
     (value.createdByBlockId === null ||
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
+    (value.noteTargetId === undefined || typeof value.noteTargetId === "string") &&
     (value.memberIds === undefined ||
       (Array.isArray(value.memberIds) && value.memberIds.every((item) => typeof item === "string")))
   ) {
@@ -104,6 +107,7 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
       id: datasetId,
       kind: value.kind,
       memberIds: value.memberIds,
+      noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, datasetId),
       path: normalizeWorkspaceRelativePath(value.path),
       provenance: value.provenance,
       representation: value.representation,
@@ -131,8 +135,10 @@ export function normalizeManagedFileNoteMetadata(value: unknown): ManagedFileDat
     (value.createdByBlockId === null ||
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
+    (value.noteTargetId === undefined || typeof value.noteTargetId === "string") &&
     (value.format === null || value.format === undefined || typeof value.format === "string")
   ) {
+    const managedDataId = value.id.trim();
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
@@ -140,7 +146,8 @@ export function normalizeManagedFileNoteMetadata(value: unknown): ManagedFileDat
       entityType: "managed-file",
       format: value.format ?? null,
       hash: value.hash,
-      id: value.id.trim(),
+      id: managedDataId,
+      noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, managedDataId),
       path: normalizeWorkspaceRelativePath(value.path),
       representation: value.representation,
       visibility: value.visibility
@@ -172,6 +179,7 @@ export function buildDatasetDataNoteMarkdown(
     `representation: ${serializeYamlValue(metadata.representation)}`,
     `path: ${serializeYamlValue(metadata.path)}`,
     `hash: ${serializeYamlValue(metadata.hash)}`,
+    `noteTargetId: ${serializeYamlValue(normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id))}`,
     `visibility: ${serializeYamlValue(metadata.visibility)}`,
     `provenance: ${serializeYamlValue(metadata.provenance)}`,
     `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
@@ -209,6 +217,7 @@ export function buildManagedFileNoteMarkdown(
     `representation: ${serializeYamlValue(metadata.representation)}`,
     `path: ${serializeYamlValue(metadata.path)}`,
     `hash: ${serializeYamlValue(metadata.hash)}`,
+    `noteTargetId: ${serializeYamlValue(normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id))}`,
     `visibility: ${serializeYamlValue(metadata.visibility)}`,
     `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
     `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`,
@@ -459,6 +468,12 @@ function normalizeWorkspaceRelativePath(relativePath: string): string {
     .split(/[\\/]+/u)
     .filter(Boolean)
     .join("/");
+}
+
+function normalizeManagedDataNoteTargetId(value: unknown, fallbackId: string): string {
+  const fallback = fallbackId.trim();
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return candidate.length > 0 ? candidate : fallback;
 }
 
 function trimLeadingBlankLines(value: string): string {

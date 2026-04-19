@@ -881,9 +881,11 @@
 * 中間 `json` のような internal 生成物は明示 block として残しつつ、ユーザーには結果 `![]()` を中心に見せたい
 * そのため、Python callable の output slot には少なくとも次を宣言できるようにしたい
   - `auto_insert_to_work_note: bool`
-  - `project_to_inputs: string[]`
+  - `share_note_with_input: string`
+  - `embed_to_shared_note: bool`
 * `auto_insert_to_work_note = true` の output は、実行成功後に block 直下へ `![]()` を追記したい
-* `project_to_inputs = ["source"]` のような output は、指定 input の data-note 末尾へ provenance link と `![]()` を追記したい
+* `share_note_with_input = "source"` の output は、指定 input の data-note target を共有したい
+* `embed_to_shared_note = true` の output は、共有先 data-note 末尾へ provenance link と `![]()` を追記したい
 * note への自動反映は append-only でよく、古い embed は app が自動整理せず、不要ならユーザーが手で消せればよい
 * data-note 側の provenance link は、可能なら `[ExperimentA.md / BLK-1234](/Notes/ExperimentA.md#BLK-1234)` のような `path + block id` 形式にしたい
 * そのため、note 内 link 解決では `#BLK-...` を block deep link として扱い、対象 block があれば scroll / highlight、無ければ note を普通に開く挙動にしたい

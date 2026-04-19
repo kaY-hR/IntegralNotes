@@ -23,6 +23,7 @@ class IntegralSlotSpec:
     format: str | None = None
     auto_insert_to_work_note: bool = False
     project_to_inputs: tuple[str, ...] = ()
+    share_note_with_input: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,10 @@ def _normalize_slot(
         format=_normalize_optional_string(value.get("format")),
         auto_insert_to_work_note=_normalize_bool(value.get("auto_insert_to_work_note")),
         project_to_inputs=_normalize_slot_names(value.get("project_to_inputs")),
+        share_note_with_input=_normalize_optional_slot_name(
+            value.get("share_note_with_input"),
+            field_name="share_note_with_input",
+        ),
     )
 
 
@@ -200,3 +205,10 @@ def _normalize_slot_names(value: Any) -> tuple[str, ...]:
         normalized_values.append(normalized)
 
     return tuple(normalized_values)
+
+
+def _normalize_optional_slot_name(value: Any, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+
+    return _normalize_slot_name(value, field_name=field_name)

@@ -7,12 +7,13 @@ import type {
 export interface IntegralSlotDefinition {
   acceptedKinds?: string[];
   autoInsertToWorkNote?: boolean;
+  embedToSharedNote?: boolean;
   extension?: string;
   extensions?: string[];
   format?: string;
   name: string;
+  shareNoteWithInput?: string;
   producedKind?: string;
-  projectToInputs?: string[];
 }
 
 export interface IntegralBlockOutputConfig {
@@ -72,6 +73,7 @@ export interface IntegralManagedFileSummary {
   hash: string;
   hasDataNote: boolean;
   id: string;
+  noteTargetId?: string;
   path: string;
   representation: IntegralManagedFileRepresentation;
   visibility: IntegralManagedDataVisibility;
@@ -87,6 +89,7 @@ export interface IntegralDatasetSummary {
   kind: string;
   memberIds?: string[];
   name: string;
+  noteTargetId?: string;
   path: string;
   representation: IntegralDatasetRepresentation;
   renderableCount: number;
@@ -350,5 +353,3 @@ export function parseIntegralOutputManifestReference(
     name: fileName.slice(0, -".idts".length)
   };
 }
-
-

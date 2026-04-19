@@ -30,7 +30,8 @@ from integral import integral_block
             "extension": ".html",
             "format": "report/html",
             "auto_insert_to_work_note": True,
-            "project_to_inputs": ["samples"],
+            "share_note_with_input": "samples",
+            "embed_to_shared_note": True,
         },
     ],
 )
@@ -45,7 +46,7 @@ def main(inputs, outputs, params):
 - `inputs`
 - `outputs`
 - slot ごとの `extension(s)` / `format`
-- output slot ごとの `auto_insert_to_work_note` / `project_to_inputs`
+- output slot ごとの `auto_insert_to_work_note` / `share_note_with_input` / `embed_to_shared_note`
 
 ### 現行 scan 条件
 
@@ -120,12 +121,14 @@ slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` p
 - 実行成功後は output slot ごとの実際の file path または `.idts` path を note source の `out:` へ書き戻す
 - output slot は追加で次を持てる
   - `auto_insert_to_work_note`
-  - `project_to_inputs`
+  - `share_note_with_input`
+  - `embed_to_shared_note`
 
 ### 5.1 note projection
 
 - `auto_insert_to_work_note = True` を持つ output は、block 実行成功後に block 直下へ `![]()` を追記してよい
-- `project_to_inputs = ["source"]` のような output は、指定 input の data-note 末尾へ provenance link と `![]()` を追記してよい
+- `share_note_with_input = "source"` を持つ output は、`source` input 側の data-note target を共有してよい
+- `embed_to_shared_note = True` を持つ output は、共有先 data-note 末尾へ provenance link と `![]()` を追記してよい
 - note への自動反映は append-only とし、古い embed の整理は app ではなくユーザー操作に委ねる
 
 ## 6. 実行準備
