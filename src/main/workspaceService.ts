@@ -1072,6 +1072,15 @@ export class WorkspaceService {
                 return null;
               }
 
+              if (
+                normalizeManagedDataNoteTargetId(
+                  managedFileMetadata.noteTargetId,
+                  managedFileMetadata.id
+                ) !== managedFileMetadata.id
+              ) {
+                return null;
+              }
+
               const absolutePath = path.join(dataNoteRootPath, `${managedFileMetadata.id.trim()}.md`);
               const existingContent = await readTextFileIfExists(absolutePath);
 
@@ -1084,6 +1093,15 @@ export class WorkspaceService {
             const datasetMetadata = normalizeDatasetDataNoteMetadata(metadata);
 
             if (!datasetMetadata) {
+              return null;
+            }
+
+            if (
+              normalizeManagedDataNoteTargetId(
+                datasetMetadata.noteTargetId,
+                datasetMetadata.datasetId
+              ) !== datasetMetadata.datasetId
+            ) {
               return null;
             }
 
@@ -1584,6 +1602,12 @@ function supportsManagedFileDataNote(
   return !path.posix.basename(normalizeRelativePath(relativePath)).toLowerCase().endsWith(".md");
 }
 
+function normalizeManagedDataNoteTargetId(value: unknown, fallbackId: string): string {
+  const fallback = fallbackId.trim();
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return candidate.length > 0 ? candidate : fallback;
+}
+
 function collapseNestedRelativePaths(relativePaths: string[]): string[] {
   const normalized = Array.from(
     new Set(
@@ -1938,5 +1962,3 @@ async function readPluginViewerPayload(
 function escapeHtmlAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }
-
-

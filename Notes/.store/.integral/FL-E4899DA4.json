@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-19T08:36:24.076Z",
+  "createdByBlockId": null,
+  "displayName": "lc_text_to_chromatogram_json.py",
+  "entityType": "managed-file",
+  "format": "ext/py",
+  "hash": "sha256:E0B72FEF1C0532D8D56AD527DD9AFC84A535C045FA810C1CC778028C4CB47A82",
+  "id": "FL-E4899DA4",
+  "path": "src/lc_text_to_chromatogram_json.py",
+  "representation": "file",
+  "visibility": "visible"
+}

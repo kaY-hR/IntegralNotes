@@ -153,14 +153,15 @@ out:
     "extension": ".html",
     "format": "report/html",
     "auto_insert_to_work_note": True,
-    "project_to_inputs": ["source"],
+    "share_note_with_input": "source",
+    "embed_to_shared_note": True,
 }
 ```
 
 app はこの metadata を読み、実行成功後に
 
 - block 直下への `![]()`
-- data-note 末尾への provenance link + `![]()`
+- `share_note_with_input` で解決した共有先 data-note 末尾への provenance link + `![]()`
 
 を append-only で反映してよい。
 

@@ -91,6 +91,7 @@ class PcaResult:
             "format": "bundle/pca-report",
             "auto_insert_to_work_note": True,
             "project_to_inputs": ["source"],
+            "share_note_with_input": "source",
         },
     ],
 )

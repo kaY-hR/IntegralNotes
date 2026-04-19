@@ -1,0 +1,16 @@
+---
+integralNoteType: "data-note"
+dataTargetType: "managed-file"
+managedDataId: "FL-3ACD872D"
+entityType: "managed-file"
+displayName: "Output6.txt"
+representation: "file"
+path: "Data/LC_text_files/Output6.txt"
+hash: "sha256:71F8B29810F5E3466178EA8C6DBC1A9297F138635FB5623FDEFC09B537D91EC2"
+noteTargetId: "FL-3ACD872D"
+visibility: "visible"
+createdAt: "2026-04-19T08:36:23.998Z"
+createdByBlockId: null
+format: "ext/txt"
+---
+# Output6.txt
