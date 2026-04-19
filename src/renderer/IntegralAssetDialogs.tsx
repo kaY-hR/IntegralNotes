@@ -126,7 +126,7 @@ export function DatasetPickerDialog({
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        requestOpenManagedDataNote(dataset.datasetId);
+                        requestOpenManagedDataNote(dataset.noteTargetId ?? dataset.datasetId);
                       }}
                       type="button"
                     >

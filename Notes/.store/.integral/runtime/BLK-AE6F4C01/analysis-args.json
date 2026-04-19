@@ -1,0 +1,10 @@
+{
+  "inputs": {
+    "source": "C:\\Users\\shimadzu\\Desktop\\_Root\\10_Integral\\kaY-hR_IntegralNotes\\Notes\\.store\\.integral\\materialized-datasets\\DTS-54EC8B42"
+  },
+  "outputs": {
+    "json": "C:\\Users\\shimadzu\\Desktop\\_Root\\10_Integral\\kaY-hR_IntegralNotes\\Notes\\Data\\LC.json",
+    "plot": "C:\\Users\\shimadzu\\Desktop\\_Root\\10_Integral\\kaY-hR_IntegralNotes\\Notes\\Data\\LC-plot.html"
+  },
+  "params": {}
+}

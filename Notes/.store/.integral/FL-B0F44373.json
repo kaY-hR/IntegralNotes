@@ -1,0 +1,13 @@
+{
+  "createdAt": "2026-04-19T08:59:21.618Z",
+  "createdByBlockId": "BLK-AE6F4C01",
+  "displayName": "LC-plot",
+  "entityType": "managed-file",
+  "format": "report/html",
+  "hash": "sha256:B5D47B3321AD8B8D42F18E0732D73E59DE4A85550EA2D5004A2A428397EEB853",
+  "id": "FL-B0F44373",
+  "noteTargetId": "DTS-54EC8B42",
+  "path": "Data/LC-plot.html",
+  "representation": "file",
+  "visibility": "visible"
+}

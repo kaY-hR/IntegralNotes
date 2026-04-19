@@ -818,7 +818,8 @@ export class IntegralWorkspaceService {
             outputSlot.producedKind?.trim() ||
             `${resolvedBlock["block-type"]}.${outputSlot.name}`,
           noteTargetId:
-            this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs) ?? undefined,
+            (await this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs)) ??
+            undefined,
           name: datasetName,
           path: datasetManifestPath,
           provenance: "derived",
@@ -862,7 +863,8 @@ export class IntegralWorkspaceService {
         displayName: outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name,
         format: outputSlot.format?.trim() || null,
         noteTargetId:
-          this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs) ?? undefined,
+          (await this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs)) ??
+          undefined,
         relativePath: outputRelativePath
       });
     }
@@ -1195,10 +1197,10 @@ export class IntegralWorkspaceService {
     );
   }
 
-  private resolveOutputSlotSharedNoteTargetId(
+  private async resolveOutputSlotSharedNoteTargetId(
     outputSlot: IntegralSlotDefinition,
     resolvedInputs: Readonly<Record<string, string | null>>
-  ): string | null {
+  ): Promise<string | null> {
     const sharedInputSlotName = outputSlot.shareNoteWithInput?.trim() ?? "";
 
     if (sharedInputSlotName.length === 0) {
@@ -1211,7 +1213,25 @@ export class IntegralWorkspaceService {
       return null;
     }
 
-    return normalizeManagedDataNoteTargetId(inputReference, inputReference);
+    const datasetMetadata = await this.resolveDatasetReferenceMetadata(inputReference);
+
+    if (datasetMetadata) {
+      return normalizeManagedDataNoteTargetId(datasetMetadata.noteTargetId, datasetMetadata.datasetId);
+    }
+
+    const workspacePath = resolveWorkspaceMarkdownTarget(inputReference) ?? normalizeRelativePath(inputReference);
+
+    if (workspacePath.length === 0) {
+      return null;
+    }
+
+    const managedFileMetadata = await this.findManagedFileMetadataByPath(workspacePath);
+
+    if (!managedFileMetadata) {
+      return null;
+    }
+
+    return normalizeManagedDataNoteTargetId(managedFileMetadata.noteTargetId, managedFileMetadata.id);
   }
 
   private async appendMarkdownToNote(relativePath: string, markdownToAppend: string): Promise<void> {
@@ -2884,16 +2904,28 @@ function parsePythonSlotDefinition(
       ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "auto_insert_to_work_note")) ??
         false
       : false;
+  const legacyProjectToInputs =
+    direction === "output"
+      ? normalizeDiscoveredSlotNames(
+          parsePythonStringArrayLiteral(extractPythonMappingValue(trimmed, "project_to_inputs"))
+        )
+      : [];
+  const explicitEmbedToSharedNote =
+    direction === "output"
+      ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "embed_to_shared_note"))
+      : null;
   const embedToSharedNote =
     direction === "output"
-      ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "embed_to_shared_note")) ?? false
+      ? explicitEmbedToSharedNote ?? (legacyProjectToInputs.length > 0)
       : false;
-  const sharedNoteWithInput =
+  const explicitSharedNoteWithInput =
     direction === "output"
       ? normalizeDiscoveredSlotNames([
           parsePythonStringLiteral(extractPythonMappingValue(trimmed, "share_note_with_input")) ?? ""
         ])[0] ?? null
       : null;
+  const sharedNoteWithInput =
+    direction === "output" ? explicitSharedNoteWithInput ?? legacyProjectToInputs[0] ?? null : null;
 
   return {
     acceptedKinds:

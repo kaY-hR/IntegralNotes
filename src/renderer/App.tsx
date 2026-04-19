@@ -391,6 +391,17 @@ function findManagedDataTargetById(
     };
   }
 
+  const dataset = catalog.datasets.find(
+    (entry) => entry.datasetId === normalizedTargetId && entry.hasDataNote
+  );
+
+  if (dataset) {
+    return {
+      displayName: dataset.name,
+      targetId: dataset.noteTargetId ?? dataset.datasetId
+    };
+  }
+
   return null;
 }
 
@@ -453,6 +464,19 @@ function findManagedDataTargetForPath(
     );
   }
 
+  for (const entry of catalog.datasets) {
+    if (!entry.hasDataNote) {
+      continue;
+    }
+
+    collectMatch(
+      entry.name,
+      entry.noteTargetId ?? entry.datasetId,
+      entry.path,
+      entry.representation
+    );
+  }
+
   matches.sort((left, right) => {
     if (left.isExactMatch !== right.isExactMatch) {
       return left.isExactMatch ? -1 : 1;
@@ -506,7 +530,11 @@ function collectManagedDataTargetsForPaths(
   };
 
   for (const entry of catalog.managedFiles) {
-    collectMatches(entry.displayName, entry.id, entry.path, entry.representation);
+    collectMatches(entry.displayName, entry.noteTargetId ?? entry.id, entry.path, entry.representation);
+  }
+
+  for (const entry of catalog.datasets) {
+    collectMatches(entry.name, entry.noteTargetId ?? entry.datasetId, entry.path, entry.representation);
   }
 
   return Array.from(matches.values()).sort((left, right) =>
