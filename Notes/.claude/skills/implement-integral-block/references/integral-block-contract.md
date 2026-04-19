@@ -30,7 +30,8 @@ Each slot item may be either:
 On output slots, the SDK also supports:
 
 - `auto_insert_to_work_note`
-- `project_to_inputs`
+- `share_note_with_input`
+- `embed_to_shared_note`
 
 Do not add params schema or decorator metadata beyond what the SDK already supports unless the task explicitly changes the SDK itself.
 
@@ -74,14 +75,16 @@ from integral import integral_block
             "name": "json",
             "extension": ".json",
             "format": "chromatogram/json",
-            "project_to_inputs": ["source"],
+            "share_note_with_input": "source",
+            "embed_to_shared_note": True,
         },
         {
             "name": "plot",
             "extension": ".html",
             "format": "report/html",
             "auto_insert_to_work_note": True,
-            "project_to_inputs": ["source"],
+            "share_note_with_input": "source",
+            "embed_to_shared_note": True,
         },
     ],
 )

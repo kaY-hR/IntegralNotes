@@ -66,12 +66,12 @@ export type IntegralManagedFileRepresentation =
 
 export interface IntegralManagedFileSummary {
   createdAt: string;
+  canOpenDataNote: boolean;
   createdByBlockId: string | null;
   displayName: string;
   entityType: IntegralManagedDataEntityType;
   format: string | null;
   hash: string;
-  hasDataNote: boolean;
   id: string;
   noteTargetId?: string;
   path: string;
@@ -80,11 +80,11 @@ export interface IntegralManagedFileSummary {
 }
 
 export interface IntegralDatasetSummary {
+  canOpenDataNote: boolean;
   createdAt: string;
   createdByBlockId: string | null;
   datasetId: string;
   hash: string;
-  hasDataNote: boolean;
   hasRenderableFiles: boolean;
   kind: string;
   memberIds?: string[];

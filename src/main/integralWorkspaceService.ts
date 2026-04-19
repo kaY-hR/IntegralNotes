@@ -505,12 +505,12 @@ export class IntegralWorkspaceService {
     ).filter((renderable): renderable is IntegralRenderableFile => renderable !== null);
 
     return {
+      canOpenDataNote: true,
       datasetId: datasetMetadata.datasetId,
       createdAt: datasetMetadata.createdAt,
       createdByBlockId: datasetMetadata.createdByBlockId,
       fileNames: relativeFilePaths,
       hash: datasetMetadata.hash,
-      hasDataNote: true,
       hasRenderableFiles: renderables.length > 0,
       kind: datasetMetadata.kind,
       memberIds: datasetMetadata.memberIds,
@@ -1545,11 +1545,11 @@ export class IntegralWorkspaceService {
     ).length;
 
     return {
+      canOpenDataNote: true,
       datasetId: metadata.datasetId,
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
       hash: metadata.hash,
-      hasDataNote: true,
       hasRenderableFiles: renderableCount > 0,
       kind: metadata.kind,
       memberIds: metadata.memberIds,
@@ -1663,13 +1663,13 @@ export class IntegralWorkspaceService {
   private toManagedFileSummary(metadata: ManagedDataMetadata): IntegralManagedFileSummary {
     if (metadata.entityType === "dataset") {
       return {
+        canOpenDataNote: true,
         createdAt: metadata.createdAt,
         createdByBlockId: metadata.createdByBlockId,
         displayName: metadata.name,
         entityType: metadata.entityType,
         format: metadata.kind,
         hash: metadata.hash,
-        hasDataNote: true,
         id: metadata.datasetId,
         noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId),
         path: metadata.path,
@@ -1679,13 +1679,13 @@ export class IntegralWorkspaceService {
     }
 
     return {
+      canOpenDataNote: supportsManagedFileDataNote(metadata.path, metadata.representation),
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
       displayName: metadata.displayName,
       entityType: metadata.entityType,
       format: metadata.format,
       hash: metadata.hash,
-      hasDataNote: supportsManagedFileDataNote(metadata.path, metadata.representation),
       id: metadata.id,
       noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id),
       path: metadata.path,
@@ -2904,28 +2904,16 @@ function parsePythonSlotDefinition(
       ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "auto_insert_to_work_note")) ??
         false
       : false;
-  const legacyProjectToInputs =
-    direction === "output"
-      ? normalizeDiscoveredSlotNames(
-          parsePythonStringArrayLiteral(extractPythonMappingValue(trimmed, "project_to_inputs"))
-        )
-      : [];
-  const explicitEmbedToSharedNote =
-    direction === "output"
-      ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "embed_to_shared_note"))
-      : null;
   const embedToSharedNote =
     direction === "output"
-      ? explicitEmbedToSharedNote ?? (legacyProjectToInputs.length > 0)
+      ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "embed_to_shared_note")) ?? false
       : false;
-  const explicitSharedNoteWithInput =
+  const sharedNoteWithInput =
     direction === "output"
       ? normalizeDiscoveredSlotNames([
           parsePythonStringLiteral(extractPythonMappingValue(trimmed, "share_note_with_input")) ?? ""
         ])[0] ?? null
       : null;
-  const sharedNoteWithInput =
-    direction === "output" ? explicitSharedNoteWithInput ?? legacyProjectToInputs[0] ?? null : null;
 
   return {
     acceptedKinds:

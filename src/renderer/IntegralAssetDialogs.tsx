@@ -120,7 +120,7 @@ export function DatasetPickerDialog({
                       </div>
                     </div>
                   </label>
-                  {dataset.hasDataNote ? (
+                  {dataset.canOpenDataNote ? (
                     <button
                       className="asset-picker__row-link asset-picker__row-link--note"
                       onClick={(event) => {
@@ -390,13 +390,13 @@ export function ManagedFileSelectionDialog({
                           </div>
                         </div>
                       </label>
-                      {entry.hasDataNote ? (
+                      {entry.canOpenDataNote ? (
                         <button
                           className="asset-picker__row-link asset-picker__row-link--note"
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            requestOpenManagedDataNote(entry.id);
+                            requestOpenManagedDataNote(entry.noteTargetId ?? entry.id);
                           }}
                           type="button"
                         >

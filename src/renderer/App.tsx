@@ -381,7 +381,9 @@ function findManagedDataTargetById(
   }
 
   const managedFile = catalog.managedFiles.find(
-    (entry) => entry.id === normalizedTargetId && entry.hasDataNote
+    (entry) =>
+      entry.canOpenDataNote &&
+      (entry.id === normalizedTargetId || (entry.noteTargetId ?? entry.id) === normalizedTargetId)
   );
 
   if (managedFile) {
@@ -392,7 +394,10 @@ function findManagedDataTargetById(
   }
 
   const dataset = catalog.datasets.find(
-    (entry) => entry.datasetId === normalizedTargetId && entry.hasDataNote
+    (entry) =>
+      entry.canOpenDataNote &&
+      (entry.datasetId === normalizedTargetId ||
+        (entry.noteTargetId ?? entry.datasetId) === normalizedTargetId)
   );
 
   if (dataset) {
@@ -452,7 +457,7 @@ function findManagedDataTargetForPath(
   };
 
   for (const entry of catalog.managedFiles) {
-    if (!entry.hasDataNote) {
+    if (!entry.canOpenDataNote) {
       continue;
     }
 
@@ -465,7 +470,7 @@ function findManagedDataTargetForPath(
   }
 
   for (const entry of catalog.datasets) {
-    if (!entry.hasDataNote) {
+    if (!entry.canOpenDataNote) {
       continue;
     }
 

@@ -1178,11 +1178,19 @@ function findManagedDataTargetForPath(
   };
 
   for (const entry of catalog.managedFiles) {
-    if (!entry.hasDataNote) {
+    if (!entry.canOpenDataNote) {
       continue;
     }
 
-    collectMatch(entry.displayName, entry.id, entry.path, entry.representation);
+    collectMatch(entry.displayName, entry.noteTargetId ?? entry.id, entry.path, entry.representation);
+  }
+
+  for (const entry of catalog.datasets) {
+    if (!entry.canOpenDataNote) {
+      continue;
+    }
+
+    collectMatch(entry.name, entry.noteTargetId ?? entry.datasetId, entry.path, entry.representation);
   }
 
   matches.sort((left, right) => {

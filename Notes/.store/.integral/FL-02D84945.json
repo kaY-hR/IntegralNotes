@@ -1,0 +1,13 @@
+{
+  "createdAt": "2026-04-19T09:50:03.771Z",
+  "createdByBlockId": "BLK-8B05AAE7",
+  "displayName": "LC",
+  "entityType": "managed-file",
+  "format": "chromatogram/json",
+  "hash": "sha256:54CF1F4D6FD7FB95FA3EB3F0E1306455ED26093E0B27FE7C6A5500777644F109",
+  "id": "FL-02D84945",
+  "noteTargetId": "DTS-28D76B56",
+  "path": "Data/LC.json",
+  "representation": "file",
+  "visibility": "visible"
+}

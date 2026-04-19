@@ -1,0 +1,24 @@
+{
+  "createdAt": "2026-04-19T09:49:40.681Z",
+  "createdByBlockId": null,
+  "datasetId": "DTS-28D76B56",
+  "displayName": "my-LC-Samples",
+  "entityType": "dataset",
+  "hash": "sha256:BE674BA0B593998E28FE8505E740322C010352BF2D26F3492072B47C5E21AEB0",
+  "id": "DTS-28D76B56",
+  "kind": "source-bundle",
+  "memberIds": [
+    "FL-8977F31C",
+    "FL-7CD178C9",
+    "FL-A3BC6190",
+    "FL-287B5C9E",
+    "FL-A7FED77B",
+    "FL-2DED2B51"
+  ],
+  "name": "my-LC-Samples",
+  "noteTargetId": "DTS-28D76B56",
+  "path": "Data/my-LC-Samples.idts",
+  "provenance": "source",
+  "representation": "dataset-json",
+  "visibility": "visible"
+}

@@ -90,8 +90,8 @@ class PcaResult:
             "extension": ".idts",
             "format": "bundle/pca-report",
             "auto_insert_to_work_note": True,
-            "project_to_inputs": ["source"],
             "share_note_with_input": "source",
+            "embed_to_shared_note": True,
         },
     ],
 )

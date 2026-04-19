@@ -1,0 +1,16 @@
+---
+integralNoteType: "data-note"
+dataTargetType: "managed-file"
+managedDataId: "FL-3AB9DCC8"
+entityType: "managed-file"
+displayName: "20260417-2007-972.png"
+representation: "file"
+path: "Data/20260417-2007-972.png"
+hash: "sha256:8D13426DD3BE24738F003FA11EB8B46B4D68CB6BE46958F2B727D351206B00AF"
+noteTargetId: "FL-3AB9DCC8"
+visibility: "visible"
+createdAt: "2026-04-19T09:49:22.617Z"
+createdByBlockId: null
+format: "ext/png"
+---
+# 20260417-2007-972.png

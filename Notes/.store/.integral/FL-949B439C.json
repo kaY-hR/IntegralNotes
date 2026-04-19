@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-19T09:49:22.648Z",
+  "createdByBlockId": null,
+  "displayName": "demo_hello_report.py",
+  "entityType": "managed-file",
+  "format": "ext/py",
+  "hash": "sha256:1271956D2DC5B662C3AF52AB0B06E27C6A3EB18D26B1410E44F207D4F0AC0284",
+  "id": "FL-949B439C",
+  "path": "demo_hello_report.py",
+  "representation": "file",
+  "visibility": "visible"
+}

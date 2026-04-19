@@ -27,16 +27,16 @@ from integral import integral_block
             "name": "json",
             "extension": ".json",
             "format": "chromatogram/json",
-            "project_to_inputs": ["source"],
             "share_note_with_input": "source",
+            "embed_to_shared_note": True,
         },
         {
             "name": "plot",
             "extension": ".html",
             "format": "report/html",
             "auto_insert_to_work_note": True,
-            "project_to_inputs": ["source"],
             "share_note_with_input": "source",
+            "embed_to_shared_note": True,
         },
     ],
 )

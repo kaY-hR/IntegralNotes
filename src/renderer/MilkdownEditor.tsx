@@ -234,7 +234,7 @@ export function MilkdownEditor({
       installIntegralCodeBlockFeature(editor, {
         onExecuteBlockResult: ({ previousBlockSource, result }) => {
           const nextMarkdown = applyIntegralExecutionResultToMarkdown(
-            lastSyncedMarkdownRef.current,
+            editor.getMarkdown(),
             previousBlockSource,
             result
           );

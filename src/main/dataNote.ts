@@ -245,10 +245,6 @@ export function extractDataNoteBody(markdown: string): string {
   return parsed.body;
 }
 
-export function hasDataNoteFrontmatter(markdown: string): boolean {
-  return isDataNoteFrontmatter(splitFrontmatterBlock(normalizeNewlines(markdown)).frontmatter);
-}
-
 export function replaceDataNoteBody(markdown: string, body: string): string {
   const normalizedMarkdown = normalizeNewlines(markdown);
   const parsed = splitFrontmatterBlock(normalizedMarkdown);

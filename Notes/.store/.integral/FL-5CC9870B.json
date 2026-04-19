@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-04-19T09:49:22.666Z",
+  "createdByBlockId": null,
+  "displayName": "chromatogram_pca.py",
+  "entityType": "managed-file",
+  "format": "ext/py",
+  "hash": "sha256:03B16F49F5491610F2462C11F40D685D65840343330F3DC9D2C73F1B49CA919C",
+  "id": "FL-5CC9870B",
+  "path": "src/chromatogram_pca.py",
+  "representation": "file",
+  "visibility": "visible"
+}
