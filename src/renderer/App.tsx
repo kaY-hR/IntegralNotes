@@ -387,7 +387,7 @@ function findManagedDataTargetById(
   if (managedFile) {
     return {
       displayName: managedFile.displayName,
-      targetId: managedFile.id
+      targetId: managedFile.noteTargetId ?? managedFile.id
     };
   }
 
@@ -445,7 +445,12 @@ function findManagedDataTargetForPath(
       continue;
     }
 
-    collectMatch(entry.displayName, entry.id, entry.path, entry.representation);
+    collectMatch(
+      entry.displayName,
+      entry.noteTargetId ?? entry.id,
+      entry.path,
+      entry.representation
+    );
   }
 
   matches.sort((left, right) => {
@@ -1878,7 +1883,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    await openWorkspaceFile(createManagedDataNoteRelativePath(targetId), {
+    await openWorkspaceFile(createManagedDataNoteRelativePath(managedDataTarget.targetId), {
       tabNameOverride: managedDataTarget
         ? createManagedDataNoteTabName(managedDataTarget.displayName)
         : undefined

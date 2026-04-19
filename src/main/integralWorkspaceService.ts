@@ -117,6 +117,7 @@ interface ManagedMetadataBase {
   displayName: string;
   hash: string;
   id: string;
+  noteTargetId?: string;
   path: string;
   visibility: ManagedDataVisibility;
 }
@@ -160,6 +161,7 @@ interface DatasetManifest {
   kind: string;
   memberIds?: string[];
   name: string;
+  noteTargetId?: string;
 }
 
 interface ReconcileMetadataResult<TMetadata> {
@@ -407,7 +409,8 @@ export class IntegralWorkspaceService {
       datasetId,
       kind: "source-bundle",
       memberIds,
-      name: datasetName
+      name: datasetName,
+      noteTargetId: datasetId
     };
     const manifestContent = JSON.stringify(manifest, null, 2);
     await fs.mkdir(path.dirname(manifestAbsolutePath), { recursive: true });
@@ -424,6 +427,7 @@ export class IntegralWorkspaceService {
       kind: "source-bundle",
       memberIds,
       name: datasetName,
+      noteTargetId: datasetId,
       path: manifestRelativePath,
       provenance: "source",
       representation: "dataset-json",
@@ -511,6 +515,10 @@ export class IntegralWorkspaceService {
       kind: datasetMetadata.kind,
       memberIds: datasetMetadata.memberIds,
       name: datasetMetadata.name,
+      noteTargetId: normalizeManagedDataNoteTargetId(
+        datasetMetadata.noteTargetId,
+        datasetMetadata.datasetId
+      ),
       path: datasetMetadata.path,
       representation: datasetMetadata.representation,
       renderableCount: renderables.length,
@@ -546,7 +554,9 @@ export class IntegralWorkspaceService {
       Promise.all(
         (manifest.memberIds ?? []).map((memberId) => this.readDatasetManifestMember(memberId))
       ),
-      this.readManagedDataNoteBody(manifest.datasetId)
+      this.readManagedDataNoteBody(
+        normalizeManagedDataNoteTargetId(manifest.noteTargetId, manifest.datasetId)
+      )
     ]);
 
     return {
@@ -558,7 +568,7 @@ export class IntegralWorkspaceService {
         datasetName: normalizeDatasetName(manifest.name, manifest.datasetId),
         members,
         noteMarkdown,
-        noteTargetId: manifest.datasetId
+        noteTargetId: normalizeManagedDataNoteTargetId(manifest.noteTargetId, manifest.datasetId)
       },
       kind: "dataset-json",
       modifiedAt: stats.mtime.toISOString(),
@@ -752,6 +762,7 @@ export class IntegralWorkspaceService {
       {
         displayName: string;
         format: string | null;
+        noteTargetId?: string;
         relativePath: string;
       }
     >();
@@ -806,6 +817,8 @@ export class IntegralWorkspaceService {
             outputSlot.format?.trim() ||
             outputSlot.producedKind?.trim() ||
             `${resolvedBlock["block-type"]}.${outputSlot.name}`,
+          noteTargetId:
+            this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs) ?? undefined,
           name: datasetName,
           path: datasetManifestPath,
           provenance: "derived",
@@ -816,7 +829,8 @@ export class IntegralWorkspaceService {
           dataPath: datasetDataPath,
           datasetId: nextDatasetId,
           kind: metadata.kind,
-          name: datasetName
+          name: datasetName,
+          noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, nextDatasetId)
         };
 
         await fs.mkdir(datasetAbsolutePath, { recursive: true });
@@ -847,6 +861,8 @@ export class IntegralWorkspaceService {
       outputManagedFilePlanMap.set(outputSlot.name, {
         displayName: outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name,
         format: outputSlot.format?.trim() || null,
+        noteTargetId:
+          this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs) ?? undefined,
         relativePath: outputRelativePath
       });
     }
@@ -1100,7 +1116,7 @@ export class IntegralWorkspaceService {
 
     for (const outputSlot of outputSlots) {
       const outputReference = outputReferences[outputSlot.name] ?? null;
-      const projectedInputSlots = outputSlot.projectToInputs ?? [];
+      const projectedInputSlots = this.resolveProjectedInputSlotNames(outputSlot);
 
       if (!outputReference || projectedInputSlots.length === 0) {
         continue;
@@ -1141,11 +1157,22 @@ export class IntegralWorkspaceService {
     }
   }
 
+  private resolveProjectedInputSlotNames(outputSlot: IntegralSlotDefinition): string[] {
+    if (outputSlot.embedToSharedNote !== true) {
+      return [];
+    }
+
+    const sharedTarget = outputSlot.shareNoteWithInput?.trim() ?? "";
+    return sharedTarget.length > 0 ? [sharedTarget] : [];
+  }
+
   private async resolveProjectedManagedDataNoteRelativePath(reference: string): Promise<string | null> {
     const datasetMetadata = await this.resolveDatasetReferenceMetadata(reference);
 
     if (datasetMetadata) {
-      return createManagedDataNoteRelativePath(datasetMetadata.datasetId);
+      return createManagedDataNoteRelativePath(
+        normalizeManagedDataNoteTargetId(datasetMetadata.noteTargetId, datasetMetadata.datasetId)
+      );
     }
 
     const workspacePath = resolveWorkspaceMarkdownTarget(reference) ?? normalizeRelativePath(reference);
@@ -1163,7 +1190,28 @@ export class IntegralWorkspaceService {
       return null;
     }
 
-    return createManagedDataNoteRelativePath(managedFileMetadata.id);
+    return createManagedDataNoteRelativePath(
+      normalizeManagedDataNoteTargetId(managedFileMetadata.noteTargetId, managedFileMetadata.id)
+    );
+  }
+
+  private resolveOutputSlotSharedNoteTargetId(
+    outputSlot: IntegralSlotDefinition,
+    resolvedInputs: Readonly<Record<string, string | null>>
+  ): string | null {
+    const sharedInputSlotName = outputSlot.shareNoteWithInput?.trim() ?? "";
+
+    if (sharedInputSlotName.length === 0) {
+      return null;
+    }
+
+    const inputReference = resolvedInputs[sharedInputSlotName] ?? null;
+
+    if (!inputReference) {
+      return null;
+    }
+
+    return normalizeManagedDataNoteTargetId(inputReference, inputReference);
   }
 
   private async appendMarkdownToNote(relativePath: string, markdownToAppend: string): Promise<void> {
@@ -1486,6 +1534,7 @@ export class IntegralWorkspaceService {
       kind: metadata.kind,
       memberIds: metadata.memberIds,
       name: metadata.name,
+      noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId),
       path: metadata.path,
       representation: metadata.representation,
       renderableCount,
@@ -1602,6 +1651,7 @@ export class IntegralWorkspaceService {
         hash: metadata.hash,
         hasDataNote: true,
         id: metadata.datasetId,
+        noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId),
         path: metadata.path,
         representation: metadata.representation,
         visibility: metadata.visibility
@@ -1617,6 +1667,7 @@ export class IntegralWorkspaceService {
       hash: metadata.hash,
       hasDataNote: supportsManagedFileDataNote(metadata.path, metadata.representation),
       id: metadata.id,
+      noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id),
       path: metadata.path,
       representation: metadata.representation,
       visibility: metadata.visibility
@@ -1922,7 +1973,8 @@ export class IntegralWorkspaceService {
       (manifest.memberIds !== undefined &&
         (!Array.isArray(manifest.memberIds) ||
           !manifest.memberIds.every((item) => typeof item === "string"))) ||
-      (manifest.dataPath !== undefined && typeof manifest.dataPath !== "string")
+      (manifest.dataPath !== undefined && typeof manifest.dataPath !== "string") ||
+      (manifest.noteTargetId !== undefined && typeof manifest.noteTargetId !== "string")
     ) {
       return null;
     }
@@ -1937,7 +1989,11 @@ export class IntegralWorkspaceService {
       memberIds: Array.isArray(manifest.memberIds)
         ? manifest.memberIds.map((item) => item.trim()).filter(Boolean)
         : undefined,
-      name: manifest.name
+      name: manifest.name,
+      noteTargetId:
+        typeof manifest.noteTargetId === "string" && manifest.noteTargetId.trim().length > 0
+          ? manifest.noteTargetId.trim()
+          : undefined
     };
   }
 
@@ -1957,6 +2013,10 @@ export class IntegralWorkspaceService {
     metadata.name = normalizeDatasetName(manifest.name, metadata.datasetId);
     metadata.displayName = metadata.name;
     metadata.kind = manifest.kind;
+    metadata.noteTargetId = normalizeManagedDataNoteTargetId(
+      manifest.noteTargetId,
+      metadata.datasetId
+    );
   }
 
   private async readDatasetManifestMember(
@@ -2030,6 +2090,7 @@ export class IntegralWorkspaceService {
       {
         displayName: string;
         format: string | null;
+        noteTargetId?: string;
         relativePath: string;
       }
     >,
@@ -2057,6 +2118,7 @@ export class IntegralWorkspaceService {
         format: plan.format,
         hash: await this.computeManagedDataHash(existingPath, stats.isDirectory() ? "directory" : "file"),
         id: existingMetadata?.id ?? createOpaqueId("FL"),
+        noteTargetId: plan.noteTargetId ?? existingMetadata?.noteTargetId,
         path: plan.relativePath,
         representation: stats.isDirectory() ? "directory" : "file",
         visibility: inferVisibilityFromPath(plan.relativePath, stats.isDirectory() ? "directory" : "file")
@@ -2822,12 +2884,16 @@ function parsePythonSlotDefinition(
       ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "auto_insert_to_work_note")) ??
         false
       : false;
-  const projectToInputs =
+  const embedToSharedNote =
     direction === "output"
-      ? normalizeDiscoveredSlotNames(
-          parsePythonStringArrayLiteral(extractPythonMappingValue(trimmed, "project_to_inputs"))
-        )
-      : [];
+      ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "embed_to_shared_note")) ?? false
+      : false;
+  const sharedNoteWithInput =
+    direction === "output"
+      ? normalizeDiscoveredSlotNames([
+          parsePythonStringLiteral(extractPythonMappingValue(trimmed, "share_note_with_input")) ?? ""
+        ])[0] ?? null
+      : null;
 
   return {
     acceptedKinds:
@@ -2838,8 +2904,9 @@ function parsePythonSlotDefinition(
     format: formatValue ?? undefined,
     name: normalizedName,
     producedKind: direction === "output" && formatValue ? formatValue : undefined,
-    projectToInputs:
-      direction === "output" && projectToInputs.length > 0 ? projectToInputs : undefined
+    shareNoteWithInput:
+      direction === "output" && sharedNoteWithInput ? sharedNoteWithInput : undefined,
+    embedToSharedNote: direction === "output" ? embedToSharedNote : undefined
   };
 }
 
@@ -3375,6 +3442,7 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
     (value.dataPath === undefined || typeof value.dataPath === "string") &&
+    (value.noteTargetId === undefined || typeof value.noteTargetId === "string") &&
     (value.memberIds === undefined ||
       (Array.isArray(value.memberIds) && value.memberIds.every((item) => typeof item === "string")))
   ) {
@@ -3399,6 +3467,7 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
           : undefined,
       memberIds: value.memberIds,
       name,
+      noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, datasetId),
       path: normalizeRelativePath(value.path),
       provenance: value.provenance,
       representation: value.representation,
@@ -3426,6 +3495,7 @@ function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | nul
     (value.createdByBlockId === null ||
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
+    (value.noteTargetId === undefined || typeof value.noteTargetId === "string") &&
     (value.format === null || value.format === undefined || typeof value.format === "string")
   ) {
     const managedFileId = value.id.trim();
@@ -3438,6 +3508,7 @@ function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | nul
       format: value.format ?? null,
       hash: value.hash,
       id: managedFileId,
+      noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, managedFileId),
       path: normalizeRelativePath(value.path),
       representation: value.representation,
       visibility: value.visibility
@@ -3449,6 +3520,12 @@ function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | nul
 
 function createManagedDataNoteRelativePath(targetId: string): string {
   return `${STORE_DIRECTORY}/${STORE_METADATA_DIRECTORY}/data-notes/${targetId.trim()}.md`;
+}
+
+function normalizeManagedDataNoteTargetId(value: unknown, fallbackId: string): string {
+  const fallback = fallbackId.trim();
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return candidate.length > 0 ? candidate : fallback;
 }
 
 function buildWorkNoteProjectionMarkdown(targets: readonly string[]): string | null {
@@ -3947,5 +4024,3 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
 function isMissingPathError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
-
-

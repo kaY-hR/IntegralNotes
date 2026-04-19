@@ -16,7 +16,12 @@ from integral import integral_block
         {"name": "source", "extensions": [".idts"], "format": "bundle/idts"},
     ],
     outputs=[
-        {"name": "report", "extension": ".idts", "format": "bundle/report-demo"},
+        {
+            "name": "report",
+            "extension": ".idts",
+            "format": "bundle/report-demo",
+            "share_note_with_input": "source",
+        },
     ],
 )
 def main(inputs: dict[str, str | None], outputs: dict[str, str | None], params: dict[str, Any] | None) -> None:
