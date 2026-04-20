@@ -1,4 +1,4 @@
 interface:
   display_name: "Implement Integral Block"
-  short_description: "IntegralNotes の解析 block 実装ガイド"
-  default_prompt: "Use $implement-integral-block to add or revise an IntegralNotes analysis block built with @integral_block."
+  short_description: "integral SDK ベースの block 実装ガイド"
+  default_prompt: "Use $implement-integral-block to add or revise a Python block built with @integral_block and `main(inputs, outputs, params)`."
