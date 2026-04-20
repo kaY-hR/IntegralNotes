@@ -3,6 +3,7 @@ docs/10_要求/IntegralNotes.prj.md
 Notes
 .vscode
 .codex
+.claude
 AGENTS.md
 scripts/.copyexclude
 scripts/.copyexport-manifest
