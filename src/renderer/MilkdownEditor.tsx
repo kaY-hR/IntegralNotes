@@ -23,7 +23,7 @@ import {
 } from "./integralPluginRuntime";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
-  createIntegralBlockMarkdown,
+  createInitialIntegralBlock,
   parseIntegralBlockSource,
   serializeIntegralBlockContent,
   toIntegralCodeBlock
@@ -100,6 +100,7 @@ export function MilkdownEditor({
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
+  const workspaceEntriesRef = useRef<WorkspaceEntry[]>(workspaceEntries);
   const [linkCompletion, setLinkCompletion] = useState<LinkCompletionState | null>(null);
   const [analysisCompletion, setAnalysisCompletion] = useState<AnalysisCompletionState | null>(null);
 
@@ -135,6 +136,7 @@ export function MilkdownEditor({
   useEffect(() => {
     const nextWorkspaceFiles = collectWorkspaceFileSuggestions(workspaceEntries);
     workspaceFilesRef.current = nextWorkspaceFiles;
+    workspaceEntriesRef.current = workspaceEntries;
   }, [workspaceEntries]);
 
   useEffect(() => {
@@ -232,6 +234,7 @@ export function MilkdownEditor({
       });
 
       installIntegralCodeBlockFeature(editor, {
+        getWorkspaceEntries: () => workspaceEntriesRef.current,
         onExecuteBlockResult: ({ previousBlockSource, result }) => {
           const nextMarkdown = applyIntegralExecutionResultToMarkdown(
             editor.getMarkdown(),
@@ -599,15 +602,68 @@ export function MilkdownEditor({
       return;
     }
 
+    const block = createInitialIntegralBlock(definition);
+    const blockMarkdown = toIntegralCodeBlock(serializeIntegralBlockContent(block));
+
     editor.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       const transaction = view.state.tr.delete(completionState.replaceFrom, completionState.replaceTo);
       transaction.setSelection(TextSelection.create(transaction.doc, completionState.replaceFrom));
       view.dispatch(transaction.scrollIntoView());
-      insert(createIntegralBlockMarkdown(definition))(ctx);
+      insert(blockMarkdown)(ctx);
     });
 
+    analysisCompletionRef.current = null;
     setAnalysisCompletion(null);
+    window.setTimeout(() => {
+      focusInsertedIntegralBlockField(block.id ?? "");
+    }, 0);
+  };
+
+  const focusInsertedIntegralBlockField = (blockId: string, attempt = 0): void => {
+    const rootElement = rootRef.current;
+
+    if (!blockId || !rootElement) {
+      return;
+    }
+
+    const blockElement = findIntegralBlockElement(rootElement, blockId);
+
+    if (!blockElement) {
+      if (attempt < 16) {
+        window.setTimeout(() => {
+          focusInsertedIntegralBlockField(blockId, attempt + 1);
+        }, 40);
+      }
+
+      return;
+    }
+
+    clearFocusedIntegralBlocks(rootElement);
+    blockElement.classList.add("integral-code-block--focused");
+    blockElement.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+
+    const focusTarget =
+      blockElement.querySelector<HTMLElement>('[data-integral-focus-target="primary"]') ??
+      blockElement.querySelector<HTMLElement>("input, textarea, button, select");
+
+    if (focusTarget) {
+      focusTarget.focus({
+        preventScroll: true
+      });
+    }
+
+    if (focusClearTimerRef.current !== null) {
+      window.clearTimeout(focusClearTimerRef.current);
+    }
+
+    focusClearTimerRef.current = window.setTimeout(() => {
+      blockElement.classList.remove("integral-code-block--focused");
+      focusClearTimerRef.current = null;
+    }, 2200);
   };
 
   const focusPendingIntegralBlock = (): void => {
@@ -619,14 +675,7 @@ export function MilkdownEditor({
     }
 
     clearFocusedIntegralBlocks(rootElement);
-
-    const selectorBlockId =
-      typeof CSS !== "undefined" && typeof CSS.escape === "function"
-        ? CSS.escape(blockId)
-        : blockId.replace(/["\\]/gu, "\\$&");
-    const blockElement = rootElement.querySelector<HTMLElement>(
-      `[data-integral-block-id="${selectorBlockId}"]`
-    );
+    const blockElement = findIntegralBlockElement(rootElement, blockId);
 
     if (!blockElement) {
       onFocusedBlockHandledRef.current?.();
@@ -1062,6 +1111,15 @@ function clearFocusedIntegralBlocks(rootElement: HTMLElement): void {
   for (const blockElement of rootElement.querySelectorAll<HTMLElement>(".integral-code-block--focused")) {
     blockElement.classList.remove("integral-code-block--focused");
   }
+}
+
+function findIntegralBlockElement(rootElement: HTMLElement, blockId: string): HTMLElement | null {
+  const selectorBlockId =
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(blockId)
+      : blockId.replace(/["\\]/gu, "\\$&");
+
+  return rootElement.querySelector<HTMLElement>(`[data-integral-block-id="${selectorBlockId}"]`);
 }
 
 function applyIntegralExecutionResultToMarkdown(

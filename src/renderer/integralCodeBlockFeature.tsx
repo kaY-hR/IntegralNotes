@@ -10,7 +10,14 @@ import type { Root } from "react-dom/client";
 
 import { codeBlockSchema } from "@milkdown/kit/preset/commonmark";
 import { $nodeSchema, $view } from "@milkdown/kit/utils";
-import { useEffect, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -26,8 +33,10 @@ import {
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
   normalizeIntegralBlockOutputConfig,
-  toIntegralOutputDirectoryRelativePath
+  normalizeIntegralOutputDirectory,
+  normalizeIntegralSlotExtensions
 } from "../shared/integral";
+import type { WorkspaceEntry } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
@@ -49,6 +58,7 @@ import {
 } from "./integralBlockRegistry";
 
 interface IntegralCodeBlockFeatureOptions {
+  getWorkspaceEntries?: () => WorkspaceEntry[];
   onExecuteBlockResult?: (payload: {
     previousBlockSource: string;
     result: ExecuteIntegralBlockResult;
@@ -73,6 +83,44 @@ type RunState = {
 type SlotDialogState = {
   slotName: string;
 } | null;
+
+type SlotFieldPickerState =
+  | {
+      acceptedKinds?: string[];
+      fieldKey: string;
+      kind: "input-dataset";
+      query: string;
+      selectedIndex: number;
+      slotName: string;
+    }
+  | {
+      extensions?: string[];
+      fieldKey: string;
+      kind: "input-file";
+      query: string;
+      selectedIndex: number;
+      slotName: string;
+    }
+  | {
+      fieldKey: string;
+      kind: "output-directory";
+      query: string;
+      selectedIndex: number;
+      slotName: string;
+    };
+
+interface PickerOption {
+  description: string;
+  label: string;
+  value: string;
+}
+
+interface PickerPopupLayout {
+  maxHeight: number;
+  width: number;
+  x: number;
+  y: number;
+}
 
 type ParsedIntegralDraft =
   | {
@@ -304,6 +352,7 @@ class IntegralNotesBlockView implements NodeView {
         parsed={parsed}
         runState={this.runState}
         selected={this.selected}
+        workspaceEntries={this.options.getWorkspaceEntries?.() ?? []}
       />
     );
   }
@@ -416,7 +465,8 @@ function IntegralBlockPanel({
   onRun,
   parsed,
   runState,
-  selected
+  selected,
+  workspaceEntries
 }: {
   onAssignInputReference: (slotName: string, inputReference: string | null) => void;
   onUpdateOutputConfig: (slotName: string, nextOutputConfig: IntegralBlockOutputConfig) => void;
@@ -425,14 +475,20 @@ function IntegralBlockPanel({
   parsed: ParsedIntegralDraft;
   runState: RunState;
   selected: boolean;
+  workspaceEntries: WorkspaceEntry[];
 }): JSX.Element {
   const [slotDialogState, setSlotDialogState] = useState<SlotDialogState>(null);
+  const [slotFieldPicker, setSlotFieldPicker] = useState<SlotFieldPickerState | null>(null);
+  const [slotFieldPickerLayout, setSlotFieldPickerLayout] = useState<PickerPopupLayout | null>(
+    null
+  );
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [assetCatalog, setAssetCatalog] = useState<IntegralAssetCatalog>({
     blockTypes: [],
     datasets: [],
     managedFiles: []
   });
+  const slotFieldRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
     if (!parsed.block) {
@@ -526,6 +582,14 @@ function IntegralBlockPanel({
     }
   }
 
+  const workspaceFiles = collectWorkspaceFileSuggestions(workspaceEntries);
+  const workspaceDirectories = collectWorkspaceDirectorySuggestions(workspaceEntries);
+
+  useEffect(() => {
+    setSlotFieldPicker(null);
+    setSlotFieldPickerLayout(null);
+  }, [parsed.block?.id]);
+
   const formatDatasetLabel = (datasetReference: string | null): string => {
     if (!datasetReference) {
       return "未設定";
@@ -539,38 +603,6 @@ function IntegralBlockPanel({
 
     const managedFile = resolveManagedFile(datasetReference);
     return managedFile?.displayName ?? datasetReference;
-  };
-
-  const selectInputReference = (slot: IntegralSlotDefinition, currentReference: string | null): void => {
-    const primaryExtension = getIntegralSlotPrimaryExtension(slot, ".idts");
-
-    if (isIntegralBundleExtension(primaryExtension)) {
-      setInlineError(null);
-      setSlotDialogState({ slotName: slot.name });
-      return;
-    }
-
-    setInlineError(null);
-    void window.integralNotes
-      .selectWorkspaceFile({
-        extensions: [slot.extension, ...(slot.extensions ?? [])].filter(
-          (value): value is string => typeof value === "string" && value.trim().length > 0
-        ),
-        initialRelativePath:
-          currentReference === null
-            ? null
-            : (resolveWorkspaceMarkdownTarget(currentReference) ?? currentReference)
-      })
-      .then((selectedRelativePath) => {
-        if (selectedRelativePath === null) {
-          return;
-        }
-
-        onAssignInputReference(slot.name, toCanonicalWorkspaceTarget(selectedRelativePath));
-      })
-      .catch((error) => {
-        setInlineError(formatErrorMessage(error));
-      });
   };
 
   const resolveManagedDataNoteTarget = (
@@ -616,6 +648,227 @@ function IntegralBlockPanel({
 
     requestOpenManagedDataNote(managedData.targetId);
   };
+
+  const toWorkspaceReferenceFieldValue = (reference: string | null): string => {
+    if (!reference) {
+      return "";
+    }
+
+    const dataset = resolveDataset(reference);
+
+    if (dataset) {
+      return toCanonicalWorkspaceTarget(dataset.path);
+    }
+
+    const managedFile = resolveManagedFile(reference);
+
+    if (managedFile) {
+      return toCanonicalWorkspaceTarget(managedFile.path);
+    }
+
+    const relativePath = resolveWorkspaceMarkdownTarget(reference);
+    return relativePath ? toCanonicalWorkspaceTarget(relativePath) : reference;
+  };
+
+  const toOutputDirectoryFieldValue = (directory: string): string => {
+    return normalizeIntegralOutputDirectory(directory) ?? directory;
+  };
+
+  const registerSlotFieldRef =
+    (fieldKey: string) =>
+    (element: HTMLElement | null): void => {
+      slotFieldRefs.current[fieldKey] = element;
+    };
+
+  const openSlotFieldPicker = (
+    nextPicker: Omit<SlotFieldPickerState, "selectedIndex">
+  ): void => {
+    setInlineError(null);
+    setSlotFieldPicker((current) => {
+      if (
+        current &&
+        current.fieldKey === nextPicker.fieldKey &&
+        current.kind === nextPicker.kind &&
+        current.slotName === nextPicker.slotName
+      ) {
+        return current;
+      }
+
+      return {
+        ...nextPicker,
+        selectedIndex: 0
+      };
+    });
+  };
+
+  const updateSlotFieldPickerQuery = (fieldKey: string, query: string): void => {
+    setSlotFieldPicker((current) => {
+      if (!current || current.fieldKey !== fieldKey) {
+        return current;
+      }
+
+      return {
+        ...current,
+        query,
+        selectedIndex: 0
+      };
+    });
+  };
+
+  const closeSlotFieldPicker = (fieldKey?: string): void => {
+    setSlotFieldPicker((current) => {
+      if (!current) {
+        return current;
+      }
+
+      if (fieldKey && current.fieldKey !== fieldKey) {
+        return current;
+      }
+
+      return null;
+    });
+  };
+
+  const handleSlotFieldBlur = (fieldKey: string): void => {
+    window.setTimeout(() => {
+      closeSlotFieldPicker(fieldKey);
+    }, 0);
+  };
+
+  const pickerOptions =
+    slotFieldPicker === null
+      ? []
+      : resolveSlotFieldPickerOptions({
+          assetCatalog,
+          slotFieldPicker,
+          toStoredDatasetReference,
+          workspaceDirectories,
+          workspaceFiles
+        });
+  const selectedSlotFieldOption =
+    pickerOptions.length === 0 || slotFieldPicker === null
+      ? null
+      : pickerOptions[Math.min(slotFieldPicker.selectedIndex, pickerOptions.length - 1)] ?? null;
+  const slotFieldPopupId =
+    parsed.block.id && slotFieldPicker
+      ? `integral-slot-picker-${parsed.block.id}-${slotFieldPicker.fieldKey}`
+      : undefined;
+
+  const commitSlotFieldPickerOption = (
+    option: PickerOption,
+    picker: SlotFieldPickerState | null = slotFieldPicker
+  ): void => {
+    if (!picker) {
+      return;
+    }
+
+    setInlineError(null);
+
+    if (picker.kind === "output-directory") {
+      const outputConfig = resolveOutputConfig(parsed.block, picker.slotName, parsed.block.outputs[picker.slotName] ?? null);
+      onUpdateOutputConfig(picker.slotName, {
+        ...outputConfig,
+        directory: option.value
+      });
+      closeSlotFieldPicker(picker.fieldKey);
+      return;
+    }
+
+    onAssignInputReference(picker.slotName, option.value);
+    closeSlotFieldPicker(picker.fieldKey);
+  };
+
+  const handleSlotFieldKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement>,
+    fieldKey: string
+  ): void => {
+    const picker = slotFieldPicker;
+
+    if (!picker || picker.fieldKey !== fieldKey) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSlotFieldPicker((current) =>
+        current && current.fieldKey === fieldKey
+          ? {
+              ...current,
+              selectedIndex:
+                pickerOptions.length === 0 ? 0 : (current.selectedIndex + 1) % pickerOptions.length
+            }
+          : current
+      );
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSlotFieldPicker((current) =>
+        current && current.fieldKey === fieldKey
+          ? {
+              ...current,
+              selectedIndex:
+                pickerOptions.length === 0
+                  ? 0
+                  : (current.selectedIndex - 1 + pickerOptions.length) % pickerOptions.length
+            }
+          : current
+      );
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (!selectedSlotFieldOption) {
+        return;
+      }
+
+      event.preventDefault();
+      commitSlotFieldPickerOption(selectedSlotFieldOption, picker);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSlotFieldPicker(fieldKey);
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (!slotFieldPicker) {
+      setSlotFieldPickerLayout(null);
+      return;
+    }
+
+    const updateLayout = (): void => {
+      const anchorElement = slotFieldRefs.current[slotFieldPicker.fieldKey];
+
+      if (!anchorElement) {
+        setSlotFieldPickerLayout(null);
+        return;
+      }
+
+      const rect = anchorElement.getBoundingClientRect();
+      const popupWidth = Math.min(Math.max(rect.width, 320), Math.max(320, window.innerWidth - 24));
+      const popupLayout = computeSlotFieldPopupLayout(rect);
+
+      setSlotFieldPickerLayout({
+        maxHeight: popupLayout.maxHeight,
+        width: popupWidth,
+        x: clampSlotFieldPopupCoordinate(rect.left, popupWidth, window.innerWidth),
+        y: popupLayout.y
+      });
+    };
+
+    updateLayout();
+    window.addEventListener("resize", updateLayout);
+    window.addEventListener("scroll", updateLayout, true);
+
+    return () => {
+      window.removeEventListener("resize", updateLayout);
+      window.removeEventListener("scroll", updateLayout, true);
+    };
+  }, [slotFieldPicker]);
 
   if (!parsed.block) {
     return (
@@ -714,137 +967,111 @@ function IntegralBlockPanel({
 
   const slotAssignments =
     blockDefinition.inputSlots.length > 0 || blockDefinition.outputSlots.length > 0 ? (
-      <div className="integral-slot-list">
-        {blockDefinition.inputSlots.length > 0 ? (
-          <section className="integral-slot-section">
-            <div className="integral-slot-section__header">
-              <strong>Inputs</strong>
-              <span>{blockDefinition.inputSlots.length} slots</span>
-            </div>
-            {blockDefinition.inputSlots.map((slot) => {
-              const assignedReference = parsed.block.inputs[slot.name] ?? null;
-              const assignedManagedData = resolveManagedDataNoteTarget(assignedReference);
-              const isAssigned = assignedReference !== null;
+      <>
+        <div className="integral-slot-list">
+          {blockDefinition.inputSlots.length > 0 ? (
+            <section className="integral-slot-section">
+              <div className="integral-slot-section__header">
+                <strong>Inputs</strong>
+                <span>{blockDefinition.inputSlots.length} slots</span>
+              </div>
+              {blockDefinition.inputSlots.map((slot, index) => {
+                const assignedReference = parsed.block.inputs[slot.name] ?? null;
+                const assignedManagedData = resolveManagedDataNoteTarget(assignedReference);
+                const fieldKey = `input:${slot.name}`;
+                const isBundleInput = isIntegralBundleExtension(
+                  getIntegralSlotPrimaryExtension(slot, ".idts")
+                );
+                const isPickerOpen = slotFieldPicker?.fieldKey === fieldKey;
+                const fieldValue = isPickerOpen
+                  ? slotFieldPicker.query
+                  : toWorkspaceReferenceFieldValue(assignedReference);
+                const placeholder = isBundleInput ? "dataset / .idts を選択" : "workspace file を選択";
 
-              return (
-                <div className="integral-slot-row" key={slot.name}>
-                  <div className="integral-slot-row__meta">
-                    <strong>{slot.name}</strong>
-                    <span className={isAssigned ? "integral-slot-row__assigned" : "integral-slot-row__unassigned"}>
-                      {formatDatasetLabel(assignedReference)}
-                    </span>
-                  </div>
-                  {blockDefinition.executionMode === "manual" ? (
-                    <div className="integral-slot-row__actions">
-                      {isAssigned && assignedManagedData?.canOpenDataNote ? (
+                return (
+                  <div className="integral-slot-row" key={slot.name}>
+                    <div className="integral-slot-row__meta">
+                      <strong>{slot.name}</strong>
+                    </div>
+
+                    {blockDefinition.executionMode === "manual" ? (
+                      <div className="integral-slot-row__field">
+                        <input
+                          aria-autocomplete="list"
+                          aria-controls={isPickerOpen ? slotFieldPopupId : undefined}
+                          aria-expanded={isPickerOpen}
+                          className="integral-slot-row__field-input"
+                          data-integral-focus-target={index === 0 ? "primary" : undefined}
+                          onBlur={() => {
+                            handleSlotFieldBlur(fieldKey);
+                          }}
+                          onChange={(event) => {
+                            updateSlotFieldPickerQuery(fieldKey, event.target.value);
+                          }}
+                          onFocus={(event) => {
+                            openSlotFieldPicker(
+                              isBundleInput
+                                ? {
+                                    acceptedKinds: slot.acceptedKinds,
+                                    fieldKey,
+                                    kind: "input-dataset",
+                                    query: toWorkspaceReferenceFieldValue(assignedReference),
+                                    slotName: slot.name
+                                  }
+                                : {
+                                    extensions: normalizeIntegralSlotExtensions([
+                                      slot.extension ?? "",
+                                      ...(slot.extensions ?? [])
+                                    ]),
+                                    fieldKey,
+                                    kind: "input-file",
+                                    query: toWorkspaceReferenceFieldValue(assignedReference),
+                                    slotName: slot.name
+                                  }
+                            );
+                            event.currentTarget.select();
+                          }}
+                          onKeyDown={(event) => {
+                            handleSlotFieldKeyDown(event, fieldKey);
+                          }}
+                          placeholder={placeholder}
+                          ref={registerSlotFieldRef(fieldKey)}
+                          spellCheck={false}
+                          type="text"
+                          value={fieldValue}
+                        />
+                        <span
+                          className={
+                            assignedReference
+                              ? "integral-slot-row__assigned"
+                              : "integral-slot-row__unassigned"
+                          }
+                        >
+                          {assignedReference ? formatDatasetLabel(assignedReference) : "未設定"}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="integral-slot-row__field">
+                        <span
+                          className={
+                            assignedReference
+                              ? "integral-slot-row__assigned"
+                              : "integral-slot-row__unassigned"
+                          }
+                        >
+                          {assignedReference ? formatDatasetLabel(assignedReference) : "未設定"}
+                        </span>
+                      </div>
+                    )}
+
+                    {assignedManagedData?.canOpenDataNote ? (
+                      <div className="integral-slot-row__actions">
                         <button
                           className="integral-slot-row__link integral-slot-row__link--note"
                           onClick={() => {
                             openManagedDataNote(assignedReference);
                           }}
-                          type="button"
-                        >
-                          ノート
-                        </button>
-                      ) : null}
-                      <button
-                        className="integral-code-block__button integral-code-block__button--ghost"
-                        onClick={() => {
-                          selectInputReference(slot, assignedReference);
-                        }}
-                        type="button"
-                      >
-                        {isAssigned
-                          ? "変更"
-                          : isIntegralBundleExtension(getIntegralSlotPrimaryExtension(slot, ".idts"))
-                            ? "データを割り当て"
-                            : "ファイルを割り当て"}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </section>
-        ) : null}
-
-        {blockDefinition.outputSlots.length > 0 ? (
-          <section className="integral-slot-section">
-            <div className="integral-slot-section__header">
-              <strong>Outputs</strong>
-              <span>{blockDefinition.outputSlots.length} slots</span>
-            </div>
-            {blockDefinition.outputSlots.map((slot) => {
-              const outputSuffix = getIntegralSlotPrimaryExtension(slot, ".idts") ?? ".idts";
-              const latestOutputReference = latestOutputMap.get(slot.name)?.datasetId ?? null;
-              const outputManagedData =
-                resolveManagedDataNoteTarget(latestOutputReference) ??
-                resolveManagedDataNoteTarget(parsed.block.outputs[slot.name] ?? null);
-              const outputReference = latestOutputReference ?? parsed.block.outputs[slot.name] ?? null;
-              const outputConfig = resolveOutputConfig(
-                parsed.block,
-                slot.name,
-                parsed.block.outputs[slot.name] ?? null
-              );
-
-              return (
-                <div className="integral-slot-row integral-slot-row--output integral-output-slot-row" key={slot.name}>
-                  <div className="integral-output-slot-row__main">
-                    <div className="integral-output-slot-row__slot">
-                      <strong>{slot.name}</strong>
-                    </div>
-
-                    <button
-                      className="integral-output-slot-row__directory"
-                      onClick={() => {
-                        void window.integralNotes
-                          .selectWorkspaceDirectory(resolveOutputDirectoryRelativePath(outputConfig.directory))
-                          .then((selectedDirectory) => {
-                            if (selectedDirectory === null) {
-                              return;
-                            }
-
-                            setInlineError(null);
-                            onUpdateOutputConfig(slot.name, {
-                              ...outputConfig,
-                              directory: selectedDirectory.length > 0 ? toCanonicalWorkspaceTarget(selectedDirectory) : "/"
-                            });
-                          })
-                          .catch((error) => {
-                            setInlineError(formatErrorMessage(error));
-                          });
-                      }}
-                      type="button"
-                    >
-                      <FolderBadgeIcon />
-                      <span>{formatOutputDirectoryLabel(outputConfig.directory)}</span>
-                    </button>
-
-                    <div className="integral-output-slot-row__name">
-                      <input
-                        className="integral-output-slot-row__name-input"
-                        onChange={(event) => {
-                          setInlineError(null);
-                          onUpdateOutputConfig(slot.name, {
-                            ...outputConfig,
-                            name: event.target.value
-                          });
-                        }}
-                        spellCheck={false}
-                        type="text"
-                        value={outputConfig.name}
-                      />
-                      <span className="integral-output-slot-row__suffix">{outputSuffix}</span>
-                    </div>
-
-                    {outputManagedData?.canOpenDataNote ? (
-                      <div className="integral-slot-row__actions">
-                        <button
-                          className="integral-slot-row__link integral-slot-row__link--note"
-                          onClick={() => {
-                            openManagedDataNote(outputReference);
-                          }}
-                          title={outputManagedData ? `最新: ${outputManagedData.displayName}` : undefined}
+                          tabIndex={-1}
                           type="button"
                         >
                           ノート
@@ -852,12 +1079,167 @@ function IntegralBlockPanel({
                       </div>
                     ) : null}
                   </div>
-                </div>
-              );
-            })}
-          </section>
-        ) : null}
-      </div>
+                );
+              })}
+            </section>
+          ) : null}
+
+          {blockDefinition.outputSlots.length > 0 ? (
+            <section className="integral-slot-section">
+              <div className="integral-slot-section__header">
+                <strong>Outputs</strong>
+                <span>{blockDefinition.outputSlots.length} slots</span>
+              </div>
+              {blockDefinition.outputSlots.map((slot, index) => {
+                const outputSuffix = getIntegralSlotPrimaryExtension(slot, ".idts") ?? ".idts";
+                const latestOutputReference = latestOutputMap.get(slot.name)?.datasetId ?? null;
+                const outputManagedData =
+                  resolveManagedDataNoteTarget(latestOutputReference) ??
+                  resolveManagedDataNoteTarget(parsed.block.outputs[slot.name] ?? null);
+                const outputReference = latestOutputReference ?? parsed.block.outputs[slot.name] ?? null;
+                const outputConfig = resolveOutputConfig(
+                  parsed.block,
+                  slot.name,
+                  parsed.block.outputs[slot.name] ?? null
+                );
+                const fieldKey = `output-dir:${slot.name}`;
+                const isPickerOpen = slotFieldPicker?.fieldKey === fieldKey;
+                const directoryFieldValue = isPickerOpen
+                  ? slotFieldPicker.query
+                  : toOutputDirectoryFieldValue(outputConfig.directory);
+
+                return (
+                  <div
+                    className="integral-slot-row integral-slot-row--output integral-output-slot-row"
+                    key={slot.name}
+                  >
+                    <div className="integral-output-slot-row__main">
+                      <div className="integral-output-slot-row__slot">
+                        <strong>{slot.name}</strong>
+                      </div>
+
+                      <label className="integral-output-slot-row__directory-field">
+                        <FolderBadgeIcon />
+                        <input
+                          aria-autocomplete="list"
+                          aria-controls={isPickerOpen ? slotFieldPopupId : undefined}
+                          aria-expanded={isPickerOpen}
+                          className="integral-output-slot-row__directory-input"
+                          data-integral-focus-target={
+                            blockDefinition.inputSlots.length === 0 && index === 0
+                              ? "primary"
+                              : undefined
+                          }
+                          onBlur={() => {
+                            handleSlotFieldBlur(fieldKey);
+                          }}
+                          onChange={(event) => {
+                            updateSlotFieldPickerQuery(fieldKey, event.target.value);
+                          }}
+                          onFocus={(event) => {
+                            openSlotFieldPicker({
+                              fieldKey,
+                              kind: "output-directory",
+                              query: toOutputDirectoryFieldValue(outputConfig.directory),
+                              slotName: slot.name
+                            });
+                            event.currentTarget.select();
+                          }}
+                          onKeyDown={(event) => {
+                            handleSlotFieldKeyDown(event, fieldKey);
+                          }}
+                          placeholder="/Data"
+                          ref={registerSlotFieldRef(fieldKey)}
+                          spellCheck={false}
+                          type="text"
+                          value={directoryFieldValue}
+                        />
+                      </label>
+
+                      <div className="integral-output-slot-row__name">
+                        <input
+                          className="integral-output-slot-row__name-input"
+                          onChange={(event) => {
+                            setInlineError(null);
+                            onUpdateOutputConfig(slot.name, {
+                              ...outputConfig,
+                              name: event.target.value
+                            });
+                          }}
+                          onFocus={() => {
+                            closeSlotFieldPicker(fieldKey);
+                          }}
+                          spellCheck={false}
+                          type="text"
+                          value={outputConfig.name}
+                        />
+                        <span className="integral-output-slot-row__suffix">{outputSuffix}</span>
+                      </div>
+
+                      {outputManagedData?.canOpenDataNote ? (
+                        <div className="integral-slot-row__actions">
+                          <button
+                            className="integral-slot-row__link integral-slot-row__link--note"
+                            onClick={() => {
+                              openManagedDataNote(outputReference);
+                            }}
+                            tabIndex={-1}
+                            title={outputManagedData ? `最新: ${outputManagedData.displayName}` : undefined}
+                            type="button"
+                          >
+                            ノート
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          ) : null}
+        </div>
+
+        {slotFieldPicker && slotFieldPickerLayout
+          ? createPortal(
+              <div
+                className="editor-link-completion integral-slot-picker"
+                id={slotFieldPopupId}
+                style={{
+                  left: `${slotFieldPickerLayout.x}px`,
+                  maxHeight: `${slotFieldPickerLayout.maxHeight}px`,
+                  top: `${slotFieldPickerLayout.y}px`,
+                  width: `${slotFieldPickerLayout.width}px`
+                }}
+              >
+                {pickerOptions.length > 0 ? (
+                  pickerOptions.map((option, index) => (
+                    <button
+                      className={`editor-link-completion__item${
+                        index === Math.min(slotFieldPicker.selectedIndex, pickerOptions.length - 1)
+                          ? " editor-link-completion__item--selected"
+                          : ""
+                      }`}
+                      key={`${slotFieldPicker.fieldKey}:${option.value}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        commitSlotFieldPickerOption(option);
+                      }}
+                      type="button"
+                    >
+                      <span className="editor-link-completion__name">{option.label}</span>
+                      <span className="editor-link-completion__path">{option.description}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="editor-link-completion__empty">
+                    {formatSlotFieldPickerEmptyMessage(slotFieldPicker)}
+                  </div>
+                )}
+              </div>,
+              document.body
+            )
+          : null}
+      </>
     ) : null;
 
   if (hasCustomRenderer) {
@@ -1046,18 +1428,223 @@ function resolveOutputConfig(
   );
 }
 
-function resolveOutputDirectoryRelativePath(directory: string): string | null {
-  return toIntegralOutputDirectoryRelativePath(directory);
-}
+function resolveSlotFieldPickerOptions({
+  assetCatalog,
+  slotFieldPicker,
+  toStoredDatasetReference,
+  workspaceDirectories,
+  workspaceFiles
+}: {
+  assetCatalog: IntegralAssetCatalog;
+  slotFieldPicker: SlotFieldPickerState;
+  toStoredDatasetReference: (datasetId: string) => string;
+  workspaceDirectories: string[];
+  workspaceFiles: string[];
+}): PickerOption[] {
+  const normalizedQuery = slotFieldPicker.query.trim().toLocaleLowerCase("ja");
 
-function formatOutputDirectoryLabel(directory: string): string {
-  const relativePath = resolveOutputDirectoryRelativePath(directory);
+  if (slotFieldPicker.kind === "input-dataset") {
+    const allowedKinds =
+      slotFieldPicker.acceptedKinds?.filter((value) => value.trim().length > 0) ?? [];
 
-  if (relativePath === null) {
-    return "/Data/";
+    return assetCatalog.datasets
+      .filter((dataset) => {
+        if (allowedKinds.length === 0) {
+          return true;
+        }
+
+        return allowedKinds.includes(dataset.kind);
+      })
+      .map((dataset) => ({
+        description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.kind ? `  ${dataset.kind}` : ""}`,
+        label: dataset.name,
+        value: toStoredDatasetReference(dataset.datasetId)
+      }))
+      .sort((left, right) => {
+        return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+      })
+      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
   }
 
-  return relativePath.length > 0 ? `/${relativePath}/` : "/";
+  if (slotFieldPicker.kind === "input-file") {
+    return workspaceFiles
+      .filter((relativePath) => {
+        if (!slotFieldPicker.extensions || slotFieldPicker.extensions.length === 0) {
+          return true;
+        }
+
+        const lowerPath = relativePath.toLocaleLowerCase("ja");
+        return slotFieldPicker.extensions.some((extension) => lowerPath.endsWith(extension));
+      })
+      .map((relativePath) => {
+        const segments = relativePath.split("/");
+        const name = segments[segments.length - 1] ?? relativePath;
+        const canonicalTarget = toCanonicalWorkspaceTarget(relativePath);
+
+        return {
+          description: canonicalTarget,
+          label: name,
+          value: canonicalTarget
+        };
+      })
+      .sort((left, right) => {
+        return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+      })
+      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
+  }
+
+  const directoryOptions = workspaceDirectories
+    .map((relativePath) => {
+      const normalizedDirectory =
+        relativePath.length > 0 ? toCanonicalWorkspaceTarget(relativePath) : "/";
+      const label = relativePath.length > 0 ? `/${relativePath}/` : "/";
+
+      return {
+        description: relativePath.length > 0 ? `cwd/${relativePath}` : "workspace root",
+        label,
+        value: normalizedDirectory
+      };
+    });
+  const typedDirectory = normalizeIntegralOutputDirectory(slotFieldPicker.query);
+
+  if (
+    typedDirectory &&
+    !directoryOptions.some((option) => option.value === typedDirectory)
+  ) {
+    directoryOptions.unshift({
+      description: "入力値をそのまま使う",
+      label: typedDirectory === "/" ? "/" : `${typedDirectory}/`,
+      value: typedDirectory
+    });
+  }
+
+  return directoryOptions
+    .sort((left, right) => {
+      return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+    })
+    .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
+}
+
+function collectWorkspaceFileSuggestions(entries: WorkspaceEntry[]): string[] {
+  const suggestions: string[] = [];
+
+  const visitEntries = (currentEntries: WorkspaceEntry[]): void => {
+    for (const entry of currentEntries) {
+      if (entry.kind === "file") {
+        suggestions.push(entry.relativePath);
+      }
+
+      if (entry.children) {
+        visitEntries(entry.children);
+      }
+    }
+  };
+
+  visitEntries(entries);
+  suggestions.sort((left, right) => left.localeCompare(right, "ja"));
+  return suggestions;
+}
+
+function collectWorkspaceDirectorySuggestions(entries: WorkspaceEntry[]): string[] {
+  const suggestions = new Set<string>([""]);
+
+  const visitEntries = (currentEntries: WorkspaceEntry[]): void => {
+    for (const entry of currentEntries) {
+      if (entry.kind === "directory") {
+        suggestions.add(entry.relativePath);
+      }
+
+      if (entry.children) {
+        visitEntries(entry.children);
+      }
+    }
+  };
+
+  visitEntries(entries);
+  return Array.from(suggestions).sort((left, right) => left.localeCompare(right, "ja"));
+}
+
+function scorePickerOption(option: PickerOption, normalizedQuery: string): number {
+  if (normalizedQuery.length === 0) {
+    return 0;
+  }
+
+  const lowerLabel = option.label.toLocaleLowerCase("ja");
+  const lowerDescription = option.description.toLocaleLowerCase("ja");
+
+  if (lowerLabel.startsWith(normalizedQuery)) {
+    return 0;
+  }
+
+  if (lowerLabel.includes(normalizedQuery)) {
+    return 1;
+  }
+
+  if (lowerDescription.startsWith(normalizedQuery)) {
+    return 2;
+  }
+
+  if (lowerDescription.includes(normalizedQuery)) {
+    return 3;
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+function formatSlotFieldPickerEmptyMessage(slotFieldPicker: SlotFieldPickerState): string {
+  if (slotFieldPicker.kind === "output-directory") {
+    return "一致する folder がありません。";
+  }
+
+  return slotFieldPicker.kind === "input-dataset"
+    ? "一致する dataset がありません。"
+    : "一致する file がありません。";
+}
+
+function clampSlotFieldPopupCoordinate(
+  value: number,
+  panelSize: number,
+  viewportSize: number
+): number {
+  return Math.max(12, Math.min(value, viewportSize - panelSize - 12));
+}
+
+function computeSlotFieldPopupLayout(coords: {
+  bottom: number;
+  top: number;
+}): {
+  maxHeight: number;
+  y: number;
+} {
+  const preferredMaxHeight = 320;
+  const margin = 12;
+  const offset = 8;
+  const minimumHeight = 96;
+  const availableBelow = Math.max(0, window.innerHeight - coords.bottom - margin);
+  const availableAbove = Math.max(0, coords.top - margin);
+  const openBelow = availableBelow >= minimumHeight || availableBelow >= availableAbove;
+
+  if (openBelow) {
+    const maxHeight = Math.max(
+      Math.min(preferredMaxHeight, availableBelow),
+      Math.min(preferredMaxHeight, availableAbove, minimumHeight)
+    );
+
+    return {
+      maxHeight,
+      y: Math.max(margin, coords.bottom + offset)
+    };
+  }
+
+  const maxHeight = Math.max(
+    Math.min(preferredMaxHeight, availableAbove),
+    Math.min(preferredMaxHeight, availableBelow, minimumHeight)
+  );
+
+  return {
+    maxHeight,
+    y: Math.max(margin, coords.top - maxHeight - offset)
+  };
 }
 
 function FolderBadgeIcon(): JSX.Element {
