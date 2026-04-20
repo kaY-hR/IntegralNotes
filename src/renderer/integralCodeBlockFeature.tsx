@@ -87,6 +87,7 @@ type SlotDialogState = {
 type SlotFieldPickerState =
   | {
       acceptedKinds?: string[];
+      extensions?: string[];
       fieldKey: string;
       kind: "input-dataset";
       query: string;
@@ -1013,6 +1014,10 @@ function IntegralBlockPanel({
                               isBundleInput
                                 ? {
                                     acceptedKinds: slot.acceptedKinds,
+                                    extensions: normalizeIntegralSlotExtensions([
+                                      slot.extension ?? "",
+                                      ...(slot.extensions ?? [])
+                                    ]),
                                     fieldKey,
                                     kind: "input-dataset",
                                     query: toWorkspaceReferenceFieldValue(assignedReference),
@@ -1446,14 +1451,20 @@ function resolveSlotFieldPickerOptions({
   if (slotFieldPicker.kind === "input-dataset") {
     const allowedKinds =
       slotFieldPicker.acceptedKinds?.filter((value) => value.trim().length > 0) ?? [];
+    const allowedExtensions =
+      slotFieldPicker.extensions?.filter((value) => value.trim().length > 0) ?? [];
 
     return assetCatalog.datasets
       .filter((dataset) => {
-        if (allowedKinds.length === 0) {
+        if (allowedKinds.length === 0 && allowedExtensions.length === 0) {
           return true;
         }
 
-        return allowedKinds.includes(dataset.kind);
+        const lowerPath = dataset.path.toLocaleLowerCase("ja");
+        const matchesKind = allowedKinds.includes(dataset.kind);
+        const matchesExtension = allowedExtensions.some((extension) => lowerPath.endsWith(extension));
+
+        return matchesKind || matchesExtension;
       })
       .map((dataset) => ({
         description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.kind ? `  ${dataset.kind}` : ""}`,

@@ -895,3 +895,28 @@
   - 指定 input の data-note 末尾へ provenance link + `![]()` を追記
   - `path#BLK-...` link クリック時に note open + block scroll / highlight
   を行うようにした
+
+## [ ] 45. `kind / format / extension` の責務と matching 規約を規格として整理したい
+- 優先重み:8
+- 記載日時:2026-04-20-13:07(UTC+9)
+
+* 現状は `slot.extensions`, `slot.format`, dataset / managed file の `kind`, output の `producedKind` がそれぞれ存在するが、どれを user-facing picker の filter に使うべきかがまだ曖昧
+* 実際に、Python input slot が `extensions: [".idts"], format: "bundle/idts"` を要求している一方、source bundle の実 dataset は `kind: "source-bundle"` を持っており、`kind` の完全一致だけでは候補が落ちるケースが出た
+* この問題は個別実装で都度吸収するより、まず仕様として次を明確にしたい
+  - `extension`: visible file / manifest の物理表現を表すのか
+  - `format`: slot が意味的に要求する data type を表すのか
+  - `kind`: runtime / provenance / viewer / grouping 用の内部分類なのか
+  - `source-bundle`, `bundle/idts`, `bundle/pca-report` のような値同士を、継承・互換・family としてどう扱うのか
+* 少なくとも input candidate の matching 規約として、次を決めたい
+  - file slot は `extension` を第一条件にするのか
+  - dataset slot は `kind` の exact match を要求するのか
+  - `kind` と `format` がズレる場合、`extension` 一致なら許可してよいのか
+  - `.idts` のような bundle manifest は、`kind` より `representation` / `extension` を優先すべきか
+* Python decorator / callable discovery 側でも、`format` をそのまま renderer の `acceptedKinds` に流す current 契約が妥当か再検討したい
+* docs 上の用語と実装上の field 名も一致させたい
+  - `docs/10_要求`
+  - `docs/20_アーキテクチャ`
+  - `docs/30_設計`
+  - `src/shared/integral.ts`
+  - `src/main/integralWorkspaceService.ts`
+* ゴールは、slot 定義を書いた人が「この input は何を受け付けるのか」を一意に説明でき、renderer / runtime / viewer が同じルールで判断できる状態にすること
