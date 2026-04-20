@@ -82,15 +82,15 @@ class PcaResult:
     display_name="Chromatogram PCA",
     description="Read one chromatogram JSON file, run PCA, and emit a report bundle.",
     inputs=[
-        {"name": "source", "extensions": [".json"], "format": "chromatogram/json"},
+        {"name": "LC-bundle-dataset", "extensions": [".json"], "format": "chromatogram/json"},
     ],
     outputs=[
         {
-            "name": "report",
+            "name": "PCA-Result",
             "extension": ".idts",
-            "format": "bundle/pca-report",
+            "format": "bundle/pca-result",
             "auto_insert_to_work_note": True,
-            "share_note_with_input": "source",
+            "share_note_with_input": "LC-bundle-dataset",
             "embed_to_shared_note": True,
         },
     ],
@@ -100,8 +100,8 @@ def main(
     outputs: dict[str, str | None],
     params: dict[str, Any] | None,
 ) -> None:
-    input_json_path = require_existing_file(inputs, "source")
-    report_root = require_output_directory(outputs, "report")
+    input_json_path = require_existing_file(inputs, "LC-bundle-dataset")
+    report_root = require_output_directory(outputs, "PCA-Result")
     options = params or {}
     chromatograms = load_chromatograms(input_json_path)
 

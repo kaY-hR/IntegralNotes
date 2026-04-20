@@ -20,22 +20,22 @@ from integral import integral_block
     display_name="LC Text To Chromatogram",
     description="Aggregate LabSolutions LC text exports from one bundle and emit both chromatogram JSON and an HTML plot.",
     inputs=[
-        {"name": "source", "extensions": [".idts"], "format": "bundle/idts"},
+        {"name": "ASCII text dataset", "extensions": [".idts"], "format": "bundle/idts"},
     ],
     outputs=[
         {
-            "name": "json",
+            "name": "LC-bundle-data",
             "extension": ".json",
             "format": "chromatogram/json",
-            "share_note_with_input": "source",
+            "share_note_with_input": "ASCII text dataset",
             "embed_to_shared_note": True,
         },
         {
-            "name": "plot",
+            "name": "LC-plot",
             "extension": ".html",
             "format": "report/html",
             "auto_insert_to_work_note": True,
-            "share_note_with_input": "source",
+            "share_note_with_input": "ASCII text dataset",
             "embed_to_shared_note": True,
         },
     ],
@@ -45,9 +45,9 @@ def main(
     outputs: dict[str, str | None],
     params: dict[str, Any] | None,
 ) -> None:
-    source_root = require_existing_directory(inputs, "source")
-    json_output_path = require_output_file(outputs, "json")
-    plot_output_path = require_output_file(outputs, "plot")
+    source_root = require_existing_directory(inputs, "ASCII text dataset")
+    json_output_path = require_output_file(outputs, "LC-bundle-data")
+    plot_output_path = require_output_file(outputs, "LC-plot")
     options = params or {}
     pattern = str(options.get("glob") or "*.txt")
     title = str(options.get("title") or "LC Chromatograms Overlay")
