@@ -1,7 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { ToolLoopAgent, createGateway, stepCountIs, type LanguageModel, type ToolSet } from "ai";
-import { promises as fs } from "node:fs";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 
 import type {
@@ -13,6 +13,16 @@ import type {
 import { WorkspaceService } from "./workspaceService";
 
 const AGENT_SKILLS_DESTINATION = ".integral-ai-skills";
+const MAX_WORKSPACE_FILE_COUNT = 5_000;
+const MAX_WORKSPACE_FILE_SIZE_BYTES = 1_000_000;
+const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
+  ".git",
+  ".integral-ai-skills",
+  "dist",
+  "dist-electron",
+  "node_modules",
+  "out"
+]);
 const TOOL_LOOP_MAX_STEPS = 8;
 const WORKSPACE_MOUNT_PATH = "/workspace";
 
@@ -133,30 +143,26 @@ export class AiAgentService {
       };
     }
 
-    const [{ experimental_createSkillTool, createBashTool }, { Bash, OverlayFs }] = await Promise.all([
-      importEsmModule<typeof import("bash-tool")>("bash-tool"),
-      importEsmModule<typeof import("just-bash")>("just-bash")
-    ]);
-    const overlay = new OverlayFs({
-      mountPoint: WORKSPACE_MOUNT_PATH,
-      root: workspaceRootPath
-    });
-    const bash = new Bash({
-      cwd: overlay.getMountPoint(),
-      fs: overlay
-    });
+    const { experimental_createSkillTool, createBashTool } =
+      await importEsmModule<typeof import("bash-tool")>("bash-tool");
     const skillsDirectoryPath = path.join(workspaceRootPath, ".codex", "skills");
-    const skillToolkit = (await directoryExists(skillsDirectoryPath))
-      ? await experimental_createSkillTool({
-          destination: AGENT_SKILLS_DESTINATION,
-          skillsDirectory: skillsDirectoryPath
-        })
-      : null;
+    const [workspaceFiles, skillToolkit] = await Promise.all([
+      collectWorkspaceFiles(workspaceRootPath),
+      (await directoryExists(skillsDirectoryPath))
+        ? experimental_createSkillTool({
+            destination: AGENT_SKILLS_DESTINATION,
+            skillsDirectory: skillsDirectoryPath
+          })
+        : Promise.resolve(null)
+    ]);
     const bashToolkit = await createBashTool({
       destination: WORKSPACE_MOUNT_PATH,
       extraInstructions: buildBashToolInstructions(skillToolkit?.instructions),
-      files: skillToolkit?.files,
-      sandbox: bash
+      files: {
+        ...workspaceFiles,
+        ...(skillToolkit?.files ?? {})
+      },
+      maxFiles: 0
     });
 
     return {
@@ -216,6 +222,7 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "Use relative paths from the current working directory unless an absolute mounted path is clearer.",
     "The bash runtime supports rg, find, grep, ls, head, tail, sed, jq, cat, and related Unix-style commands.",
     "When the user asks about files beyond the active excerpt, start with rg/find/ls/readFile instead of answering from memory.",
+    "Readable workspace files are preloaded into the sandbox for this request. Some locked, binary, or oversized files may be omitted.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
     "Do not tell the user that files were saved; instead describe preview changes or proposed edits."
   ];
@@ -234,6 +241,93 @@ async function directoryExists(targetPath: string): Promise<boolean> {
     return stats.isDirectory();
   } catch {
     return false;
+  }
+}
+
+async function collectWorkspaceFiles(workspaceRootPath: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  let loadedFileCount = 0;
+
+  const walk = async (currentDirectoryPath: string): Promise<void> => {
+    if (loadedFileCount >= MAX_WORKSPACE_FILE_COUNT) {
+      return;
+    }
+
+    let entries: Dirent[];
+
+    try {
+      entries = await fs.readdir(currentDirectoryPath, {
+        withFileTypes: true
+      });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (loadedFileCount >= MAX_WORKSPACE_FILE_COUNT) {
+        return;
+      }
+
+      const entryPath = path.join(currentDirectoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        if (SKIPPED_WORKSPACE_DIRECTORIES.has(entry.name)) {
+          continue;
+        }
+
+        await walk(entryPath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const relativePath = normalizeRelativeWorkspacePath(workspaceRootPath, entryPath);
+
+      if (!relativePath) {
+        continue;
+      }
+
+      const fileContent = await tryReadWorkspaceTextFile(entryPath);
+
+      if (fileContent === null) {
+        continue;
+      }
+
+      files[relativePath] = fileContent;
+      loadedFileCount += 1;
+    }
+  };
+
+  await walk(workspaceRootPath);
+  return files;
+}
+
+function normalizeRelativeWorkspacePath(
+  workspaceRootPath: string,
+  entryPath: string
+): string | null {
+  const relativePath = path.relative(workspaceRootPath, entryPath);
+
+  if (relativePath.length === 0 || relativePath.startsWith("..")) {
+    return null;
+  }
+
+  return relativePath.replace(/\\/gu, "/");
+}
+
+async function tryReadWorkspaceTextFile(filePath: string): Promise<string | null> {
+  try {
+    const buffer = await fs.readFile(filePath);
+
+    if (buffer.length > MAX_WORKSPACE_FILE_SIZE_BYTES || buffer.includes(0)) {
+      return null;
+    }
+
+    return buffer.toString("utf8");
+  } catch {
+    return null;
   }
 }
 
