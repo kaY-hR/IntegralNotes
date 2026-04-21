@@ -34,6 +34,7 @@ import { AiAgentService } from "./aiAgentService";
 import { AiChatService } from "./aiChatService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
+import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
@@ -156,7 +157,8 @@ const workspaceService = new WorkspaceService({
   initialRootPath: resolveInitialWorkspacePath(),
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
-const aiAgentService = new AiAgentService(workspaceService);
+const workspaceVisualRenderService = new WorkspaceVisualRenderService(workspaceService);
+const aiAgentService = new AiAgentService(workspaceService, workspaceVisualRenderService);
 const aiChatService = new AiChatService(
   aiAgentService,
   workspaceService,

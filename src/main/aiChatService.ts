@@ -153,11 +153,12 @@ export class AiChatService {
       availableModels: catalog.models,
       catalogRefreshedAt: catalog.refreshedAt,
       implementationMode: runtimeSelection.mode,
-      mcpEnabled: true,
+      mcpEnabled: false,
       modelCatalogSource: catalog.source,
       notes: [
         "Activity Bar から FlexLayout tab を開く UI は接続済みです。",
         "AI Gateway のモデル一覧は live fetch を試み、失敗時は fallback を使います。",
+        "MCP client registry はまだ未実装です。現時点では add / enable する UI はありません。",
         describeGatewayAuthSource(gatewayAuth.source),
         ...runtimeSelection.notes,
         ...byokNotes
@@ -326,7 +327,7 @@ export class AiChatService {
         directProvider,
         mode: "direct",
         notes: [
-          `chat 送信は ${describeDirectProviderLabel(directProvider.provider)} + ToolLoopAgent を使います。workspace 探索は bash-tool、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。`,
+          `chat 送信は ${describeDirectProviderLabel(directProvider.provider)} + ToolLoopAgent を使います。workspace 探索は bash-tool、image path は readWorkspaceImage、md/html の見た目確認は renderWorkspaceDocument、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。`,
           `${describeDirectProviderEnvKey(directProvider.provider)} を ${describeWorkspaceSecretSource(directProvider.source)} から使います。AI Gateway 認証は不要です。`
         ],
         providerLabel: describeDirectProviderLabel(directProvider.provider),
@@ -341,7 +342,7 @@ export class AiChatService {
         gatewayAuth,
         mode: "gateway",
         notes: [
-          "chat 送信は AI Gateway + ToolLoopAgent を使います。workspace 探索は bash-tool、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。",
+          "chat 送信は AI Gateway + ToolLoopAgent を使います。workspace 探索は bash-tool、image path は readWorkspaceImage、md/html の見た目確認は renderWorkspaceDocument、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。",
           providerOptions
             ? "選択中 model に対して provider-scoped BYOK credential も付与します。"
             : "選択中 model に対する provider-scoped BYOK credential は未検出です。"
@@ -418,7 +419,7 @@ function buildStubResponse(
 ): string {
   const lines = [
     "AI Chat runtime stub が応答しています。",
-    "現在は renderer -> preload -> main process の配線まで実装済みで、認証がある場合は direct provider または AI Gateway + ToolLoopAgent + bash-tool を使います。",
+    "現在は renderer -> preload -> main process の配線まで実装済みで、認証がある場合は direct provider または AI Gateway + ToolLoopAgent + bash-tool を使います。画像は readWorkspaceImage、md/html の視覚レンダリングは renderWorkspaceDocument を使えます。",
     "実行可能な credential が無いときだけ stub に落ちます。",
     "",
     `provider: ${status.providerLabel}`,

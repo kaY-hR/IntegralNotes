@@ -317,7 +317,7 @@ export function AIChatPanel({
             <span className="ai-chat-panel__pill">{runtimeModeLabel}</span>
             <span className="ai-chat-panel__pill">{status?.providerLabel ?? "runtime status loading"}</span>
             <span className="ai-chat-panel__pill">
-              MCP {status?.mcpEnabled ? "ready (design)" : "disabled"}
+              MCP {status?.mcpEnabled ? "connected" : "not wired"}
             </span>
           </div>
 

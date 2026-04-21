@@ -19,6 +19,7 @@ import type {
   AiChatMessageDiagnostics,
   AiChatToolTraceEntry
 } from "../shared/aiChat";
+import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
 const AGENT_SKILLS_DESTINATION = ".integral-ai-skills";
@@ -67,7 +68,10 @@ export type AiAgentExecutionRuntime =
     };
 
 export class AiAgentService {
-  constructor(private readonly workspaceService: WorkspaceService) {}
+  constructor(
+    private readonly workspaceService: WorkspaceService,
+    private readonly workspaceVisualRenderService: WorkspaceVisualRenderService
+  ) {}
 
   async submit({
     context,
@@ -93,9 +97,14 @@ export class AiAgentService {
     const result = await agent.generate({
       messages: history.map(toModelMessage).filter(isDefined)
     });
+    const toolTrace = buildToolTrace(result.steps);
     const text = result.text.trim();
+    const responseText =
+      text.length > 0
+        ? text
+        : buildFallbackAssistantText(toolTrace, result.finishReason ?? null);
 
-    if (text.length === 0) {
+    if (responseText.length === 0) {
       throw new Error("AI agent returned no assistant text.");
     }
 
@@ -104,9 +113,9 @@ export class AiAgentService {
         finishReason: result.finishReason ?? null,
         modelId: result.steps.at(-1)?.model.modelId ?? runtime.modelId,
         stepCount: result.steps.length,
-        toolTrace: buildToolTrace(result.steps)
+        toolTrace
       },
-      text
+      text: responseText
     };
   }
 
@@ -188,7 +197,8 @@ export class AiAgentService {
     });
     const persistentWorkspaceTools = createPersistentWorkspaceTools(
       workspaceRootPath,
-      this.workspaceService
+      this.workspaceService,
+      this.workspaceVisualRenderService
     );
 
     return {
@@ -218,7 +228,9 @@ function buildAgentInstructions(
     "Use tools when you need to inspect files instead of guessing.",
     "For repository, code, configuration, file, or implementation questions, inspect the workspace with tools before answering even if an active excerpt is available.",
     "If the task requires concrete file evidence, search the workspace first.",
+    "Always end with a short assistant answer after tool use. Never leave the final response empty.",
     "If you discover an image path and need to inspect the image itself, use readWorkspaceImage.",
+    "If markdown/html layout or embedded charts matter, use renderWorkspaceDocument to inspect the rendered page visually.",
     "If the user wants real workspace edits, use writeWorkspaceFile. bash/writeFile remains preview-only.",
     "Do not claim that real workspace files were saved unless the app explicitly tells you persistence happened.",
     ""
@@ -258,6 +270,7 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "When the user asks about files beyond the active excerpt, start with rg/find/ls/readFile instead of answering from memory.",
     "Workspace files are preloaded into the sandbox for this request. Text files include real content; binary or oversized files may appear as placeholder stubs so they remain discoverable via find/ls.",
     "Use readWorkspaceImage when you need to inspect an image file in the real workspace by path.",
+    "Use renderWorkspaceDocument when you need a visual rendering of a markdown/html/text workspace file, including embedded HTML charts.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
     "Use writeWorkspaceFile when you need to persist a real workspace text edit.",
     "Do not tell the user that files were saved; instead describe preview changes or proposed edits."
@@ -411,9 +424,41 @@ async function importEsmModule<T>(specifier: string): Promise<T> {
 
 function createPersistentWorkspaceTools(
   workspaceRootPath: string,
-  workspaceService: WorkspaceService
+  workspaceService: WorkspaceService,
+  workspaceVisualRenderService: WorkspaceVisualRenderService
 ): ToolSet {
   return {
+    renderWorkspaceDocument: tool({
+      description:
+        "Render a markdown/html/text workspace file in a hidden browser and return a screenshot for visual inspection. Use this when layout, charts, or rendered appearance matter.",
+      inputSchema: z.object({
+        path: z.string().min(1),
+        waitMs: z.number().int().min(0).max(5000).optional(),
+        width: z.number().int().min(640).max(2200).optional()
+      }),
+      execute: async ({ path: targetPath, waitMs, width }) => {
+        const relativePath = normalizeWorkspaceRelativePath(targetPath);
+
+        return workspaceVisualRenderService.renderWorkspaceDocument(relativePath, {
+          waitMs,
+          width
+        });
+      },
+      toModelOutput: ({ output }) => ({
+        type: "content",
+        value: [
+          {
+            text: `Workspace document rendered: ${output.path} (${output.sourceKind}, ${output.width}x${output.height}, ${output.renderReadiness})`,
+            type: "text"
+          },
+          {
+            data: output.base64Data,
+            mediaType: output.mediaType,
+            type: "image-data"
+          }
+        ]
+      })
+    }),
     readWorkspaceImage: tool({
       description:
         "Load an image file from the real workspace and send it back to the model for visual inspection. Use this when you discover an image path and need to examine the image contents.",
@@ -581,6 +626,14 @@ function determineToolTraceStatus(
     return output.exitCode === 0 ? "success" : "error";
   }
 
+  if (
+    toolName === "renderWorkspaceDocument" &&
+    isRecord(output) &&
+    typeof output.renderReadiness === "string"
+  ) {
+    return output.renderReadiness.startsWith("timeout:") ? "error" : "success";
+  }
+
   return "success";
 }
 
@@ -606,6 +659,18 @@ function summarizeToolInput(toolName: string, input: unknown): string {
 
   if (toolName === "readWorkspaceImage" && isRecord(input) && typeof input.path === "string") {
     return input.path;
+  }
+
+  if (toolName === "renderWorkspaceDocument" && isRecord(input) && typeof input.path === "string") {
+    const pathValue = input.path;
+    const widthValue =
+      typeof input.width === "number" && Number.isFinite(input.width) ? ` @${input.width}px` : "";
+    const waitValue =
+      typeof input.waitMs === "number" && Number.isFinite(input.waitMs)
+        ? ` wait ${input.waitMs}ms`
+        : "";
+
+    return `${pathValue}${widthValue}${waitValue}`;
   }
 
   return summarizeUnknownValue(input);
@@ -651,6 +716,21 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
     return `${output.path} | ${mediaType} | ${sizeBytes}`;
   }
 
+  if (toolName === "renderWorkspaceDocument" && isRecord(output) && typeof output.path === "string") {
+    const sourceKind =
+      typeof output.sourceKind === "string" ? output.sourceKind : "document";
+    const width =
+      typeof output.width === "number" && Number.isFinite(output.width) ? output.width : "?";
+    const height =
+      typeof output.height === "number" && Number.isFinite(output.height) ? output.height : "?";
+    const renderReadiness =
+      typeof output.renderReadiness === "string" && output.renderReadiness.trim().length > 0
+        ? output.renderReadiness.trim()
+        : "rendered";
+
+    return `${output.path} | ${sourceKind} | ${width}x${height} | ${renderReadiness}`;
+  }
+
   return summarizeUnknownValue(output);
 }
 
@@ -678,6 +758,36 @@ function truncateTraceText(value: string): string {
   }
 
   return `${normalized.slice(0, 177).trimEnd()}...`;
+}
+
+function buildFallbackAssistantText(
+  toolTrace: readonly AiChatToolTraceEntry[],
+  finishReason: string | null
+): string {
+  if (toolTrace.length === 0) {
+    return "";
+  }
+
+  const recentEntries = toolTrace.slice(-3);
+  const lines = [
+    "モデルの最終テキストが空だったため、tool 実行結果を要約します。"
+  ];
+
+  if (finishReason) {
+    lines.push(`finish: ${finishReason}`);
+  }
+
+  for (const entry of recentEntries) {
+    lines.push(`${entry.toolName}: ${entry.outputSummary}`);
+  }
+
+  const latestErrorEntry = [...toolTrace].reverse().find((entry) => entry.status === "error");
+
+  if (latestErrorEntry) {
+    lines.push(`latest error: ${latestErrorEntry.toolName}: ${latestErrorEntry.outputSummary}`);
+  }
+
+  return lines.join("\n");
 }
 
 function isDefined<T>(value: T | null | undefined): value is T {
