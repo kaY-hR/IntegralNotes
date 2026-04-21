@@ -1,10 +1,13 @@
 import { safeStorage } from "electron";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   AiChatContextSummary,
+  AiChatImageAttachment,
   AiChatModelOption,
+  AiChatMessage,
   AiChatStatus,
   SaveAiChatSettingsRequest,
   SubmitAiChatRequest,
@@ -67,6 +70,8 @@ type ResolvedAiRuntime =
     };
 
 const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
+const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"]);
+const MAX_IMAGE_ATTACHMENT_FILE_BYTES = 8_000_000;
 const WORKSPACE_ENV_FILENAMES = [".env.local", ".env"] as const;
 const FALLBACK_MODELS: AiChatModelOption[] = [
   {
@@ -202,27 +207,36 @@ export class AiChatService {
     const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
     const [status, settings] = await Promise.all([this.getStatus(), this.readPersistedSettings()]);
     const selectedModelId = status.selectedModelId ?? FALLBACK_MODELS[0]?.id ?? "openai/gpt-5.4";
+    const normalizedHistoryResult = await normalizeAiChatHistory(request.history, workspaceRootPath);
     const runtimeSelection = await this.resolveRuntimeSelection({
       modelId: selectedModelId,
       settings,
       workspaceRootPath
     });
-
-    return {
-      assistantMessage: {
-        createdAt: new Date().toISOString(),
-        id: createChatMessageId("assistant"),
-        role: "assistant",
-        ...(runtimeSelection.mode === "stub"
-          ? {
-              text: buildStubResponse(prompt, request.context, request.history.length, status)
-            }
-          : await this.submitWithAgentRuntime({
+    const assistantCreatedAt = new Date().toISOString();
+    const assistantMessage: AiChatMessage =
+      runtimeSelection.mode === "stub"
+        ? {
+            createdAt: assistantCreatedAt,
+            id: createChatMessageId("assistant"),
+            role: "assistant",
+            text: buildStubResponse(prompt, request.context, normalizedHistoryResult.history.length, status)
+          }
+        : {
+            createdAt: assistantCreatedAt,
+            id: createChatMessageId("assistant"),
+            role: "assistant",
+            ...(await this.submitWithAgentRuntime({
               context: request.context,
-              history: request.history,
+              history: normalizedHistoryResult.history,
               runtimeSelection
             }))
-      }
+          };
+    const toolMessages = buildToolMessages(assistantMessage);
+
+    return {
+      messages: [...toolMessages, assistantMessage],
+      userMessage: normalizedHistoryResult.updatedUserMessage
     };
   }
 
@@ -312,7 +326,7 @@ export class AiChatService {
         directProvider,
         mode: "direct",
         notes: [
-          `chat 送信は ${describeDirectProviderLabel(directProvider.provider)} + ToolLoopAgent を使います。workspace 探索は bash-tool、write は overlay preview 扱いです。`,
+          `chat 送信は ${describeDirectProviderLabel(directProvider.provider)} + ToolLoopAgent を使います。workspace 探索は bash-tool、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。`,
           `${describeDirectProviderEnvKey(directProvider.provider)} を ${describeWorkspaceSecretSource(directProvider.source)} から使います。AI Gateway 認証は不要です。`
         ],
         providerLabel: describeDirectProviderLabel(directProvider.provider),
@@ -327,7 +341,7 @@ export class AiChatService {
         gatewayAuth,
         mode: "gateway",
         notes: [
-          "chat 送信は AI Gateway + ToolLoopAgent を使います。workspace 探索は bash-tool、write は overlay preview 扱いです。",
+          "chat 送信は AI Gateway + ToolLoopAgent を使います。workspace 探索は bash-tool、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。",
           providerOptions
             ? "選択中 model に対して provider-scoped BYOK credential も付与します。"
             : "選択中 model に対する provider-scoped BYOK credential は未検出です。"
@@ -360,7 +374,7 @@ export class AiChatService {
     context: AiChatContextSummary;
     history: SubmitAiChatRequest["history"];
     runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
-  }): Promise<Pick<SubmitAiChatResult["assistantMessage"], "diagnostics" | "text">> {
+  }): Promise<Pick<AiChatMessage, "diagnostics" | "text">> {
     try {
       const result = await this.aiAgentService.submit({
         context,
@@ -441,7 +455,6 @@ function buildStubResponse(
   lines.push("");
   lines.push("現在の残タスク:");
   lines.push("- host command 実行");
-  lines.push("- persistent workspace write / patch apply");
   lines.push("- repo local skills の深い統合");
   lines.push("- generic MCP client registry");
 
@@ -663,6 +676,239 @@ function selectValidModelId(
   }
 
   return availableModels[0]?.id ?? null;
+}
+
+async function normalizeAiChatHistory(
+  history: AiChatMessage[],
+  workspaceRootPath: string | null
+): Promise<{
+  history: AiChatMessage[];
+  updatedUserMessage?: AiChatMessage;
+}> {
+  const latestUserMessageIndex = [...history].map((message) => message.role).lastIndexOf("user");
+
+  if (latestUserMessageIndex < 0) {
+    return { history };
+  }
+
+  const latestUserMessage = history[latestUserMessageIndex];
+  const resolvedAttachments = await resolvePromptImageAttachments(
+    latestUserMessage.text,
+    workspaceRootPath,
+    latestUserMessage.attachments ?? []
+  );
+
+  if (areImageAttachmentsEquivalent(latestUserMessage.attachments ?? [], resolvedAttachments)) {
+    return { history };
+  }
+
+  const updatedUserMessage: AiChatMessage = {
+    ...latestUserMessage,
+    attachments: resolvedAttachments
+  };
+  const nextHistory = history.slice();
+  nextHistory[latestUserMessageIndex] = updatedUserMessage;
+
+  return {
+    history: nextHistory,
+    updatedUserMessage
+  };
+}
+
+async function resolvePromptImageAttachments(
+  text: string,
+  workspaceRootPath: string | null,
+  existingAttachments: AiChatImageAttachment[]
+): Promise<AiChatImageAttachment[]> {
+  const attachmentsByKey = new Map<string, AiChatImageAttachment>();
+
+  for (const attachment of existingAttachments) {
+    attachmentsByKey.set(normalizeAttachmentSourceKey(attachment.sourcePath, workspaceRootPath), attachment);
+  }
+
+  for (const candidatePath of extractImagePathCandidates(text)) {
+    const attachment = await resolveImageAttachmentFromCandidate(candidatePath, workspaceRootPath);
+
+    if (!attachment) {
+      continue;
+    }
+
+    attachmentsByKey.set(normalizeAttachmentSourceKey(attachment.sourcePath, workspaceRootPath), attachment);
+  }
+
+  return Array.from(attachmentsByKey.values());
+}
+
+function extractImagePathCandidates(text: string): string[] {
+  const candidates = new Set<string>();
+  const quotedPattern = /["']([^"'`\r\n]+\.(?:bmp|gif|jpe?g|png|svg|webp))["']/giu;
+  const windowsAbsolutePattern = /[A-Za-z]:\\[^\s"'`]+?\.(?:bmp|gif|jpe?g|png|svg|webp)/gu;
+  const unixLikePattern = /(?:\.{1,2}[\\/]|[A-Za-z0-9_\-./\\]+[\\/])[^\s"'`]+?\.(?:bmp|gif|jpe?g|png|svg|webp)/giu;
+
+  for (const pattern of [quotedPattern, windowsAbsolutePattern, unixLikePattern]) {
+    for (const match of text.matchAll(pattern)) {
+      const candidate = (match[1] ?? match[0] ?? "").trim();
+
+      if (candidate.length > 0) {
+        candidates.add(candidate.replace(/[,.;:]+$/u, ""));
+      }
+    }
+  }
+
+  return Array.from(candidates);
+}
+
+async function resolveImageAttachmentFromCandidate(
+  candidatePath: string,
+  workspaceRootPath: string | null
+): Promise<AiChatImageAttachment | null> {
+  const resolvedAbsolutePath = resolveCandidateAbsolutePath(candidatePath, workspaceRootPath);
+
+  if (!resolvedAbsolutePath) {
+    return null;
+  }
+
+  const extension = path.extname(resolvedAbsolutePath).toLowerCase();
+
+  if (!IMAGE_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return null;
+  }
+
+  try {
+    const fileStats = await fs.stat(resolvedAbsolutePath);
+
+    if (!fileStats.isFile() || fileStats.size > MAX_IMAGE_ATTACHMENT_FILE_BYTES) {
+      return null;
+    }
+
+    const mediaType = inferImageMediaType(resolvedAbsolutePath);
+
+    if (!mediaType) {
+      return null;
+    }
+
+    const buffer = await fs.readFile(resolvedAbsolutePath);
+    const sourcePath = toDisplayAttachmentPath(resolvedAbsolutePath, workspaceRootPath);
+
+    return {
+      dataUrl: `data:${mediaType};base64,${buffer.toString("base64")}`,
+      id: createChatAttachmentId(sourcePath),
+      mediaType,
+      name: path.basename(resolvedAbsolutePath),
+      sourcePath
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveCandidateAbsolutePath(
+  candidatePath: string,
+  workspaceRootPath: string | null
+): string | null {
+  const trimmedCandidatePath = candidatePath.trim();
+
+  if (trimmedCandidatePath.length === 0) {
+    return null;
+  }
+
+  if (/^file:\/\//iu.test(trimmedCandidatePath)) {
+    try {
+      return path.resolve(fileURLToPath(new URL(trimmedCandidatePath)));
+    } catch {
+      return null;
+    }
+  }
+
+  if (path.isAbsolute(trimmedCandidatePath)) {
+    return path.resolve(trimmedCandidatePath);
+  }
+
+  if (!workspaceRootPath) {
+    return null;
+  }
+
+  return path.resolve(workspaceRootPath, ...trimmedCandidatePath.split(/[\\/]+/u).filter(Boolean));
+}
+
+function inferImageMediaType(absolutePath: string): string | null {
+  switch (path.extname(absolutePath).toLowerCase()) {
+    case ".bmp":
+      return "image/bmp";
+    case ".gif":
+      return "image/gif";
+    case ".jpeg":
+    case ".jpg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    default:
+      return null;
+  }
+}
+
+function toDisplayAttachmentPath(absolutePath: string, workspaceRootPath: string | null): string {
+  if (!workspaceRootPath) {
+    return absolutePath;
+  }
+
+  const relativePath = path.relative(workspaceRootPath, absolutePath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return absolutePath;
+  }
+
+  return relativePath.split(path.sep).join("/");
+}
+
+function normalizeAttachmentSourceKey(sourcePath: string, workspaceRootPath: string | null): string {
+  if (path.isAbsolute(sourcePath)) {
+    return path.resolve(sourcePath).toLowerCase();
+  }
+
+  if (workspaceRootPath) {
+    return path.resolve(workspaceRootPath, ...sourcePath.split(/[\\/]+/u).filter(Boolean)).toLowerCase();
+  }
+
+  return sourcePath.toLowerCase();
+}
+
+function areImageAttachmentsEquivalent(
+  left: readonly AiChatImageAttachment[],
+  right: readonly AiChatImageAttachment[]
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((attachment, index) => {
+    const other = right[index];
+
+    return (
+      attachment.dataUrl === other?.dataUrl &&
+      attachment.mediaType === other?.mediaType &&
+      attachment.name === other?.name &&
+      attachment.sourcePath === other?.sourcePath
+    );
+  });
+}
+
+function buildToolMessages(message: AiChatMessage): AiChatMessage[] {
+  if (!message.diagnostics || message.diagnostics.toolTrace.length === 0) {
+    return [];
+  }
+
+  return message.diagnostics.toolTrace.map((entry, index) => ({
+    createdAt: message.createdAt,
+    id: `${message.id}-tool-${index}`,
+    role: "tool",
+    text: entry.inputSummary,
+    toolTraceEntry: entry
+  }));
 }
 
 function applyPersistedApiKey(settings: PersistedAiChatSettings, apiKey: string): void {
@@ -892,4 +1138,8 @@ function isDefined<T>(value: T | null | undefined): value is T {
 
 function createChatMessageId(role: "assistant" | "user"): string {
   return `chat-${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createChatAttachmentId(sourcePath: string): string {
+  return `chat-attachment-${sourcePath.replace(/[^a-z0-9]+/giu, "-").toLowerCase()}`;
 }

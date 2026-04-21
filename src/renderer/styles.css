@@ -3699,6 +3699,12 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   background: linear-gradient(180deg, rgba(250, 252, 255, 0.98) 0%, rgba(242, 247, 252, 0.98) 100%);
 }
 
+.ai-chat-panel__message--tool {
+  align-self: center;
+  width: min(100%, 680px);
+  background: linear-gradient(180deg, rgba(246, 248, 250, 0.98) 0%, rgba(240, 244, 247, 0.98) 100%);
+}
+
 .ai-chat-panel__message--user {
   align-self: flex-end;
   background: linear-gradient(180deg, rgba(236, 244, 253, 0.98) 0%, rgba(229, 239, 251, 0.98) 100%);
@@ -3714,6 +3720,46 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   color: #183149;
   font-size: 0.82rem;
   line-height: 1.55;
+}
+
+.ai-chat-panel__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ai-chat-panel__attachments--composer {
+  padding-top: 2px;
+}
+
+.ai-chat-panel__attachment {
+  display: grid;
+  gap: 6px;
+  width: 132px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid rgba(210, 220, 231, 0.92);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.ai-chat-panel__attachment-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: rgba(231, 237, 243, 0.7);
+}
+
+.ai-chat-panel__attachment figcaption {
+  overflow-wrap: anywhere;
+  color: #567089;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.ai-chat-panel__attachment-remove {
+  justify-self: flex-start;
 }
 
 .ai-chat-panel__message-diagnostics,
@@ -3808,6 +3854,10 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.ai-chat-panel__file-input {
+  display: none;
 }
 
 .ai-chat-panel__error {

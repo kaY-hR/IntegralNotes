@@ -1,4 +1,12 @@
-export type AiChatRole = "assistant" | "user";
+export type AiChatRole = "assistant" | "tool" | "user";
+
+export interface AiChatImageAttachment {
+  dataUrl: string;
+  id: string;
+  mediaType: string;
+  name: string;
+  sourcePath: string;
+}
 
 export interface AiChatToolTraceEntry {
   inputSummary: string;
@@ -16,11 +24,13 @@ export interface AiChatMessageDiagnostics {
 }
 
 export interface AiChatMessage {
+  attachments?: AiChatImageAttachment[];
   createdAt: string;
   diagnostics?: AiChatMessageDiagnostics | null;
   id: string;
   role: AiChatRole;
   text: string;
+  toolTraceEntry?: AiChatToolTraceEntry | null;
 }
 
 export interface AiChatContextSummary {
@@ -66,5 +76,6 @@ export interface SubmitAiChatRequest {
 }
 
 export interface SubmitAiChatResult {
-  assistantMessage: AiChatMessage;
+  messages: AiChatMessage[];
+  userMessage?: AiChatMessage;
 }

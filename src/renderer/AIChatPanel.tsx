@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
-import type { AiChatContextSummary, AiChatMessage, AiChatStatus } from "../shared/aiChat";
+import type {
+  AiChatContextSummary,
+  AiChatImageAttachment,
+  AiChatMessage,
+  AiChatStatus
+} from "../shared/aiChat";
 import type { WorkspaceFileDocument } from "../shared/workspace";
 
 interface AIChatPanelProps {
@@ -26,6 +31,7 @@ export function AIChatPanel({
     workspaceRootName
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [composerAttachments, setComposerAttachments] = useState<AiChatImageAttachment[]>([]);
   const [isContextDialogOpen, setIsContextDialogOpen] = useState(false);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -36,6 +42,7 @@ export function AIChatPanel({
   const [selectedModelId, setSelectedModelId] = useState("");
   const [status, setStatus] = useState<AiChatStatus | null>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,12 +151,21 @@ export function AIChatPanel({
   }, [isSubmitting, messages]);
 
   const composerHint = useMemo(() => {
+    const attachmentSummary =
+      composerAttachments.length > 0
+        ? `${composerAttachments.length} image${composerAttachments.length === 1 ? "" : "s"} attached`
+        : null;
+
     if (contextSummary.activeRelativePath) {
-      return `active: ${contextSummary.activeRelativePath}`;
+      return attachmentSummary
+        ? `active: ${contextSummary.activeRelativePath} • ${attachmentSummary}`
+        : `active: ${contextSummary.activeRelativePath}`;
     }
 
-    return "Context ボタンから active file / note の文脈を確認できます";
-  }, [contextSummary.activeRelativePath]);
+    return attachmentSummary
+      ? `Context ボタンから active file / note の文脈を確認できます • ${attachmentSummary}`
+      : "Context ボタンから active file / note の文脈を確認できます";
+  }, [composerAttachments.length, contextSummary.activeRelativePath]);
 
   const runtimeModeLabel = useMemo(() => {
     if (!status) {
@@ -228,15 +244,17 @@ export function AIChatPanel({
     setIsSubmitting(true);
 
     const userMessage: AiChatMessage = {
+      attachments: composerAttachments.length > 0 ? composerAttachments : undefined,
       createdAt: new Date().toISOString(),
       id: createChatMessageId("user"),
       role: "user",
       text: trimmedPrompt
     };
-    const nextHistory = [...messages, userMessage];
+    const nextHistory = [...messages.filter((message) => message.role !== "tool"), userMessage];
 
-    setMessages(nextHistory);
+    setMessages((currentMessages) => [...currentMessages, userMessage]);
     setPrompt("");
+    setComposerAttachments([]);
 
     try {
       const result = await window.integralNotes.submitAiChat({
@@ -245,13 +263,41 @@ export function AIChatPanel({
         prompt: trimmedPrompt
       });
 
-      setMessages((currentMessages) => [...currentMessages, result.assistantMessage]);
+      setMessages((currentMessages) => {
+        const nextMessages = currentMessages.map((message) =>
+          message.id === userMessage.id ? (result.userMessage ?? message) : message
+        );
+
+        return [...nextMessages, ...result.messages];
+      });
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
       setMessages(messages);
       setPrompt(trimmedPrompt);
+      setComposerAttachments(userMessage.attachments ?? []);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleAttachImages = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const files = Array.from(event.target.files ?? []);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    setErrorMessage(null);
+
+    try {
+      const nextAttachments = await Promise.all(files.map((file) => createImageAttachment(file)));
+      setComposerAttachments((currentAttachments) =>
+        mergeImageAttachments(currentAttachments, nextAttachments)
+      );
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      event.target.value = "";
     }
   };
 
@@ -316,10 +362,53 @@ export function AIChatPanel({
               key={message.id}
             >
               <div className="ai-chat-panel__message-meta">
-                <strong>{message.role === "assistant" ? "Assistant" : "You"}</strong>
+                <strong>
+                  {message.role === "assistant"
+                    ? "Assistant"
+                    : message.role === "tool"
+                      ? "Tool"
+                      : "You"}
+                </strong>
                 <span>{formatMessageTime(message.createdAt)}</span>
               </div>
+
+              {message.attachments && message.attachments.length > 0 ? (
+                <div className="ai-chat-panel__attachments">
+                  {message.attachments.map((attachment) => (
+                    <figure className="ai-chat-panel__attachment" key={attachment.id}>
+                      <img
+                        alt={attachment.name}
+                        className="ai-chat-panel__attachment-image"
+                        src={attachment.dataUrl}
+                      />
+                      <figcaption>{attachment.sourcePath}</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              ) : null}
+
               <pre className="ai-chat-panel__message-body">{message.text}</pre>
+
+              {message.role === "tool" && message.toolTraceEntry ? (
+                <div className="ai-chat-panel__message-diagnostics">
+                  <div className="ai-chat-panel__message-pills">
+                    <span className="ai-chat-panel__message-pill">
+                      tool: {message.toolTraceEntry.toolName}
+                    </span>
+                    <span className="ai-chat-panel__message-pill">
+                      step: {message.toolTraceEntry.stepNumber + 1}
+                    </span>
+                    <span
+                      className={`ai-chat-panel__trace-status ai-chat-panel__trace-status--${message.toolTraceEntry.status}`}
+                    >
+                      {message.toolTraceEntry.status}
+                    </span>
+                  </div>
+                  <code className="ai-chat-panel__trace-line">
+                    {message.toolTraceEntry.outputSummary}
+                  </code>
+                </div>
+              ) : null}
 
               {message.role === "assistant" && message.diagnostics ? (
                 <div className="ai-chat-panel__message-diagnostics">
@@ -343,30 +432,6 @@ export function AIChatPanel({
                       </span>
                     ) : null}
                   </div>
-
-                  {message.diagnostics.toolTrace.length > 0 ? (
-                    <details className="ai-chat-panel__trace">
-                      <summary>Trace</summary>
-
-                      <div className="ai-chat-panel__trace-list">
-                        {message.diagnostics.toolTrace.map((entry, index) => (
-                          <article className="ai-chat-panel__trace-entry" key={`${message.id}-${index}`}>
-                            <div className="ai-chat-panel__trace-meta">
-                              <strong>{entry.toolName}</strong>
-                              <span>step {entry.stepNumber + 1}</span>
-                              <span
-                                className={`ai-chat-panel__trace-status ai-chat-panel__trace-status--${entry.status}`}
-                              >
-                                {entry.status}
-                              </span>
-                            </div>
-                            <code className="ai-chat-panel__trace-line">{entry.inputSummary}</code>
-                            <code className="ai-chat-panel__trace-line">{entry.outputSummary}</code>
-                          </article>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
                 </div>
               ) : null}
             </article>
@@ -397,6 +462,17 @@ export function AIChatPanel({
       >
         {errorMessage ? <div className="ai-chat-panel__error">{errorMessage}</div> : null}
 
+        <input
+          accept="image/*"
+          className="ai-chat-panel__file-input"
+          multiple
+          onChange={(event) => {
+            void handleAttachImages(event);
+          }}
+          ref={attachmentInputRef}
+          type="file"
+        />
+
         <textarea
           className="ai-chat-panel__composer-input"
           disabled={isSubmitting}
@@ -414,17 +490,58 @@ export function AIChatPanel({
           value={prompt}
         />
 
+        {composerAttachments.length > 0 ? (
+          <div className="ai-chat-panel__attachments ai-chat-panel__attachments--composer">
+            {composerAttachments.map((attachment) => (
+              <figure className="ai-chat-panel__attachment" key={attachment.id}>
+                <img
+                  alt={attachment.name}
+                  className="ai-chat-panel__attachment-image"
+                  src={attachment.dataUrl}
+                />
+                <figcaption>{attachment.sourcePath}</figcaption>
+                <button
+                  className="button button--ghost ai-chat-panel__attachment-remove"
+                  onClick={() => {
+                    setComposerAttachments((currentAttachments) =>
+                      currentAttachments.filter((currentAttachment) => currentAttachment.id !== attachment.id)
+                    );
+                  }}
+                  type="button"
+                >
+                  Remove
+                </button>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+
         <div className="ai-chat-panel__composer-actions">
           <span className="ai-chat-panel__composer-hint">{composerHint}</span>
 
           <div className="ai-chat-panel__composer-buttons">
             <button
               className="button button--ghost"
-              disabled={messages.length === 0 && prompt.trim().length === 0}
+              disabled={isSubmitting}
+              onClick={() => {
+                attachmentInputRef.current?.click();
+              }}
+              type="button"
+            >
+              Attach Images
+            </button>
+            <button
+              className="button button--ghost"
+              disabled={
+                messages.length === 0 &&
+                prompt.trim().length === 0 &&
+                composerAttachments.length === 0
+              }
               onClick={() => {
                 setErrorMessage(null);
                 setMessages([]);
                 setPrompt("");
+                setComposerAttachments([]);
               }}
               type="button"
             >
@@ -826,8 +943,57 @@ function formatContextWindow(value: number): string {
   return String(value);
 }
 
-function createChatMessageId(role: "assistant" | "user"): string {
+function createChatMessageId(role: "assistant" | "tool" | "user"): string {
   return `chat-${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function createImageAttachment(file: File): Promise<AiChatImageAttachment> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error(`${file.name} is not an image file.`);
+  }
+
+  const sourcePath = window.integralNotes.getPathForFile(file) || file.name;
+
+  return {
+    dataUrl: await readFileAsDataUrl(file),
+    id: createChatAttachmentId(sourcePath),
+    mediaType: file.type || "image/*",
+    name: file.name,
+    sourcePath
+  };
+}
+
+function mergeImageAttachments(
+  currentAttachments: AiChatImageAttachment[],
+  nextAttachments: AiChatImageAttachment[]
+): AiChatImageAttachment[] {
+  const attachmentsById = new Map(currentAttachments.map((attachment) => [attachment.id, attachment] as const));
+
+  for (const attachment of nextAttachments) {
+    attachmentsById.set(attachment.id, attachment);
+  }
+
+  return Array.from(attachmentsById.values());
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error(`Failed to read ${file.name}.`));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error(`Unexpected file reader result for ${file.name}.`));
+        return;
+      }
+
+      resolve(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function createChatAttachmentId(sourcePath: string): string {
+  return `chat-attachment-${sourcePath.replace(/[^a-z0-9]+/giu, "-").toLowerCase()}`;
 }
 
 function getPathLeafName(relativePath: string): string {

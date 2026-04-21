@@ -1,8 +1,17 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
-import { ToolLoopAgent, createGateway, stepCountIs, type LanguageModel, type ToolSet } from "ai";
+import {
+  ToolLoopAgent,
+  createGateway,
+  stepCountIs,
+  tool,
+  type LanguageModel,
+  type ModelMessage,
+  type ToolSet
+} from "ai";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 
 import type {
   AiChatContextSummary,
@@ -15,6 +24,18 @@ import { WorkspaceService } from "./workspaceService";
 const AGENT_SKILLS_DESTINATION = ".integral-ai-skills";
 const MAX_WORKSPACE_FILE_COUNT = 5_000;
 const MAX_WORKSPACE_FILE_SIZE_BYTES = 1_000_000;
+const IMAGE_FILE_EXTENSIONS = new Set([
+  ".avif",
+  ".bmp",
+  ".gif",
+  ".heic",
+  ".heif",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".webp"
+]);
 const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
   ".git",
   ".integral-ai-skills",
@@ -69,7 +90,7 @@ export class AiAgentService {
       tools: toolContext.tools
     });
     const result = await agent.generate({
-      messages: history.map(toModelMessage)
+      messages: history.map(toModelMessage).filter(isDefined)
     });
     const text = result.text.trim();
 
@@ -137,7 +158,7 @@ export class AiAgentService {
 
     if (!workspaceRootPath) {
       return {
-        skillCount: 0,
+      skillCount: 0,
         tools: {},
         workspaceMounted: false
       };
@@ -164,10 +185,20 @@ export class AiAgentService {
       },
       maxFiles: 0
     });
+    const persistentWorkspaceTools = createPersistentWorkspaceTools(
+      workspaceRootPath,
+      this.workspaceService
+    );
 
     return {
       skillCount: skillToolkit?.skills.length ?? 0,
-      tools: skillToolkit ? { skill: skillToolkit.skill, ...bashToolkit.tools } : bashToolkit.tools,
+      tools: skillToolkit
+        ? {
+            ...persistentWorkspaceTools,
+            skill: skillToolkit.skill,
+            ...bashToolkit.tools
+          }
+        : { ...persistentWorkspaceTools, ...bashToolkit.tools },
       workspaceMounted: true
     };
   }
@@ -186,6 +217,7 @@ function buildAgentInstructions(
     "Use tools when you need to inspect files instead of guessing.",
     "For repository, code, configuration, file, or implementation questions, inspect the workspace with tools before answering even if an active excerpt is available.",
     "If the task requires concrete file evidence, search the workspace first.",
+    "If the user wants real workspace edits, use writeWorkspaceFile. bash/writeFile remains preview-only.",
     "Do not claim that real workspace files were saved unless the app explicitly tells you persistence happened.",
     ""
   ];
@@ -222,8 +254,9 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "Use relative paths from the current working directory unless an absolute mounted path is clearer.",
     "The bash runtime supports rg, find, grep, ls, head, tail, sed, jq, cat, and related Unix-style commands.",
     "When the user asks about files beyond the active excerpt, start with rg/find/ls/readFile instead of answering from memory.",
-    "Readable workspace files are preloaded into the sandbox for this request. Some locked, binary, or oversized files may be omitted.",
+    "Workspace files are preloaded into the sandbox for this request. Text files include real content; binary or oversized files may appear as placeholder stubs so they remain discoverable via find/ls.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
+    "Use writeWorkspaceFile when you need to persist a real workspace text edit.",
     "Do not tell the user that files were saved; instead describe preview changes or proposed edits."
   ];
 
@@ -289,7 +322,7 @@ async function collectWorkspaceFiles(workspaceRootPath: string): Promise<Record<
         continue;
       }
 
-      const fileContent = await tryReadWorkspaceTextFile(entryPath);
+      const fileContent = await createWorkspaceSnapshotEntry(entryPath, relativePath);
 
       if (fileContent === null) {
         continue;
@@ -331,6 +364,40 @@ async function tryReadWorkspaceTextFile(filePath: string): Promise<string | null
   }
 }
 
+async function createWorkspaceSnapshotEntry(
+  filePath: string,
+  relativePath: string
+): Promise<string | null> {
+  const textContent = await tryReadWorkspaceTextFile(filePath);
+
+  if (textContent !== null) {
+    return textContent;
+  }
+
+  const fileStats = await fs.stat(filePath).catch(() => null);
+
+  if (!fileStats?.isFile()) {
+    return null;
+  }
+
+  return buildWorkspacePlaceholder(relativePath, fileStats.size);
+}
+
+function buildWorkspacePlaceholder(relativePath: string, fileSizeBytes: number): string {
+  const extension = path.extname(relativePath).toLowerCase();
+  const fileKind = IMAGE_FILE_EXTENSIONS.has(extension) ? "image" : "binary-or-unloaded";
+  const lines = [
+    "[workspace snapshot placeholder]",
+    `path: ${relativePath}`,
+    `kind: ${fileKind}`,
+    `sizeBytes: ${fileSizeBytes}`,
+    "note: The file exists in the real workspace, but its binary or oversized contents were not loaded into the bash snapshot.",
+    "note: Use find/ls to discover it. If the user wants image inspection, have them attach the image or mention its path in the prompt."
+  ];
+
+  return lines.join("\n");
+}
+
 async function importEsmModule<T>(specifier: string): Promise<T> {
   const importer = new Function("specifier", "return import(specifier);") as (
     nextSpecifier: string
@@ -339,13 +406,87 @@ async function importEsmModule<T>(specifier: string): Promise<T> {
   return importer(specifier);
 }
 
-function toModelMessage(message: AiChatMessage): {
-  content: string;
-  role: "assistant" | "user";
-} {
+function createPersistentWorkspaceTools(
+  workspaceRootPath: string,
+  workspaceService: WorkspaceService
+): ToolSet {
+  return {
+    writeWorkspaceFile: tool({
+      description:
+        "Persist UTF-8 text changes to a real workspace file. Use this for actual saves; bash/writeFile is preview-only.",
+      inputSchema: z.object({
+        content: z.string(),
+        createIfMissing: z.boolean().default(false),
+        path: z.string().min(1)
+      }),
+      execute: async ({ content, createIfMissing, path: targetPath }) => {
+        const relativePath = normalizeWorkspaceRelativePath(targetPath);
+        const absolutePath = resolveWorkspaceAbsolutePath(workspaceRootPath, relativePath);
+        const fileStats = await fs.stat(absolutePath).catch(() => null);
+        const existed = fileStats !== null;
+
+        if (fileStats?.isDirectory()) {
+          throw new Error(`Cannot write directory: ${relativePath}`);
+        }
+
+        if (!existed && !createIfMissing) {
+          throw new Error(`Target file does not exist: ${relativePath}`);
+        }
+
+        if (path.extname(relativePath).toLowerCase() === ".md" && existed) {
+          const note = await workspaceService.saveNote(relativePath, content);
+
+          return {
+            created: false,
+            path: note.relativePath,
+            saved: true
+          };
+        }
+
+        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        await fs.writeFile(absolutePath, content, "utf8");
+
+        return {
+          created: !existed,
+          path: relativePath,
+          saved: true
+        };
+      }
+    })
+  };
+}
+
+function toModelMessage(message: AiChatMessage): ModelMessage | null {
+  if (message.role === "tool") {
+    return null;
+  }
+
+  if (message.role === "assistant") {
+    return {
+      content: message.text,
+      role: "assistant"
+    };
+  }
+
+  if (message.attachments && message.attachments.length > 0) {
+    return {
+      content: [
+        {
+          text: message.text,
+          type: "text"
+        },
+        ...message.attachments.map((attachment) => ({
+          image: attachment.dataUrl,
+          type: "image" as const
+        }))
+      ],
+      role: "user"
+    };
+  }
+
   return {
     content: message.text,
-    role: message.role
+    role: "user"
   };
 }
 
@@ -394,10 +535,10 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return truncateTraceText(input.command);
   }
 
-  if ((toolName === "readFile" || toolName === "writeFile") && isRecord(input)) {
+  if ((toolName === "readFile" || toolName === "writeFile" || toolName === "writeWorkspaceFile") && isRecord(input)) {
     const pathValue = typeof input.path === "string" ? input.path : "(unknown path)";
 
-    if (toolName === "writeFile") {
+    if (toolName === "writeFile" || toolName === "writeWorkspaceFile") {
       const contentLength =
         typeof input.content === "string" || Buffer.isBuffer(input.content)
           ? input.content.length
@@ -436,6 +577,13 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
     return output.success ? "overlay preview updated" : "write reported failure";
   }
 
+  if (toolName === "writeWorkspaceFile" && isRecord(output) && typeof output.path === "string") {
+    const created =
+      typeof output.created === "boolean" ? (output.created ? "created" : "updated") : "saved";
+
+    return `${created}: ${output.path}`;
+  }
+
   return summarizeUnknownValue(output);
 }
 
@@ -471,4 +619,24 @@ function isDefined<T>(value: T | null | undefined): value is T {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null;
+}
+
+function normalizeWorkspaceRelativePath(targetPath: string): string {
+  return targetPath
+    .trim()
+    .replace(/^[\\/]+/gu, "")
+    .split(/[\\/]+/u)
+    .filter(Boolean)
+    .join("/");
+}
+
+function resolveWorkspaceAbsolutePath(workspaceRootPath: string, targetPath: string): string {
+  const absolutePath = path.resolve(workspaceRootPath, ...targetPath.split("/").filter(Boolean));
+  const normalizedRelativePath = path.relative(workspaceRootPath, absolutePath);
+
+  if (normalizedRelativePath.startsWith("..") || path.isAbsolute(normalizedRelativePath)) {
+    throw new Error(`Path escapes workspace root: ${targetPath}`);
+  }
+
+  return absolutePath;
 }
