@@ -3,357 +3,313 @@
 ## 目的
 
 IntegralNotes に、`Claude Code` / `Codex` / `GitHub Copilot Chat` に近い coding chat panel を追加する。  
-この panel は単なる Q&A ではなく、現在の workspace を読み、必要なら編集し、command を実行し、skills と MCP を使って外部 capability も呼べる agent UI とする。
+ただし本 branch の文書では「理想像」ではなく、**現時点で実装済みの構成**と、**まだ未実装の範囲**を分けて整理する。
 
-今回の文書では次を決める。
+## この branch で確定したこと
 
-- chat panel の配置
-- Vercel AI SDK / AI Gateway をどう使うか
-- `cwd` 内検索 / read / write / command / skills / MCP の実装方針
-- first version の範囲
+- `AI Chat` は `Activity Bar` の built-in workspace-tool item として配置し、クリックで main workspace の `FlexLayout` tab を開く
+- chat UI は renderer に置き、model 呼び出し・tool 実行・skills 読み込みは main process に置く
+- runtime は `Vercel AI Gateway 固定` ではなく、
+  - `anthropic/*` は `ANTHROPIC_API_KEY`
+  - `openai/*` は `OPENAI_API_KEY`
+  - それらが無い場合のみ `AI Gateway`
+  の順で選ぶ
+- 汎用探索は `bash-tool` を使う
+- skills は repo の `.codex/skills` を source of truth にし、`experimental_createSkillTool()` で読む
+- `readWorkspaceImage` / `renderWorkspaceDocument` / `writeWorkspaceFile` を main process 側の typed tool として追加した
+- transcript には assistant message だけでなく tool 実行も `tool` role message として表示する
+- `MCP` は**まだ未実装**で、registry も add UI も無い
 
-## 結論
-
-- AI Chat は `Activity Bar` から開く main workspace tab とする
-- renderer は AI SDK UI を使って chat state と stream 描画を持つ
-- provider 呼び出し、tool 実行、skill 読み込み、MCP client 接続は renderer ではなく main process に置く
-- model transport の第一候補は `Vercel AI Gateway` とするが、app 内 abstraction は gateway 固定にしない
-- 汎用な codebase 探索は `bash-tool` を使う
-- ただし `bash-tool` は「与えた filesystem / sandbox 上で動く tool」であり、local workspace へ自動で触れるわけではない
-- そのため Electron app では、main process 側で local workspace を mount した runtime を作る
-- skills は `bash-tool` の skill tool を使い、repo の `.codex/skills` を source of truth にする
-- MCP は `@ai-sdk/mcp` client を main process に持ち、remote HTTP 系と local stdio 系の両方を受ける
-- ただし `Vercel MCP` そのものは 2026-01-30 時点 docs で「Vercel が review / approve した client のみ接続可」とされているため、IntegralNotes 独自 client が直ちに使える前提には置かない
-
-## なぜ純粋な Vercel Sandbox 前提にしないか
-
-ユーザーが欲しいのは「今開いている local workspace に対して Claude Code 的に動く chat」である。  
-ここで重要なのは、`bash-tool` や `Vercel Sandbox` は local `cwd` の魔法の代理ではない、という点である。
-
-- `bash-tool` は、与えた filesystem または sandbox 上で `bash` / `readFile` / `writeFile` を提供する
-- remote sandbox を使う場合、local workspace をそこへ同期しない限り、agent は手元の file を見られない
-- remote 側へ workspace mirror を作る方式は、dirty tab、frontmatter 保持、`.idts`、hidden data-note、外部 command 実行契約と衝突しやすい
-
-したがって first version では次を採る。
-
-- model 呼び出しは API ベースでよい
-- しかし workspace 操作は local Electron main process 側で行う
-- `bash-tool` の実行基盤は local workspace mount を前提にする
-
-## 全体構成
+## 現在の構成
 
 ```text
 Renderer (React)
   AIChatPanel
     -> preload IPC
+    -> ai-chat:getStatus / saveSettings / clearApiKey / refreshModels / submit
 
 Main Process
-  aiAgentService
-    -> ToolLoopAgent
-    -> model transport (AI Gateway / OpenAI-compatible)
+  AiChatService
+    -> model catalog / auth resolution / history normalization
+    -> AiAgentService.submit()
+
+  AiAgentService
+    -> ToolLoopAgent.generate()
     -> bash-tool runtime
-    -> skill tool
-    -> MCP client registry
-    -> workspaceService / integralWorkspaceService
-    -> host command runner
+    -> skill tool (.codex/skills)
+    -> typed workspace tools
+
+  WorkspaceVisualRenderService
+    -> hidden BrowserWindow render
+    -> capturePage()
 ```
 
-責務分離:
+補足:
 
-- renderer
-  - message list
-  - composer
-  - tool call 状態表示
-  - diff preview / approval UI
-- main process
-  - provider API key 保持
-  - stream 実行
-  - tool 実装
-  - MCP 接続
-  - filesystem / command access
+- 現在は `ToolLoopAgent.stream()` ではなく `ToolLoopAgent.generate()` を使う request/response 方式である
+- renderer は `useChat` transport ではなく、React state + IPC invoke で管理している
 
-## Chat UI と transport
+## UI 設計
 
-AI SDK 5 系の `useChat` は transport ベースで構成できる。  
-Electron app でわざわざ local HTTP server を立てる必要はないため、renderer には custom transport を置き、preload 経由で main process の agent service へ接続する。
+### 配置
 
-方針:
+- `Activity Bar` に `builtin:ai-chat` icon を追加済み
+- クリック時に main workspace 側へ `AI Chat` tab を開く
+- AI Chat は sidebar view ではなく、長い会話を前提にした main workspace tab とする
 
-- renderer は `useChat` 相当の UI state model を使う
-- transport は `ElectronChatTransport` のような custom 実装にする
-- main process は `ToolLoopAgent.stream()` または `streamText()` を実行し、UI message stream 相当の chunk を IPC で返す
-- provider key や BYOK 情報は renderer に出さない
+### panel 内 UI
 
-## tool 層の分割
+- header には runtime mode / provider label / MCP status pill を出す
+- 設定は inline section ではなく `Settings` dialog に分離する
+- current workspace context は `Context` dialog に分離する
+- 本文領域は message list を優先し、composer を panel 下部に固定する
+- tool 実行は assistant の内部 state ではなく、独立した `tool` message として transcript に差し込む
+- user は画像ファイルを添付できる
+- prompt 文中に画像 path が書かれている場合も、可能なら画像 attachment 化する
 
-`Claude Code` / `Codex` に近い体験を出すには、tool を 1 種類に寄せすぎない方がよい。  
-first version では次の 5 層に分ける。
+### 現在の status 表示
 
-### 1. 汎用 code tools
+- `MCP connected` ではなく `MCP not wired` を出す
+- これは未接続ではなく、**機能自体がまだ wiring されていない**ことを示す
 
-基本の探索は `bash-tool` を中心にする。
+## 認証と model 選択
+
+### model catalog
+
+- model 一覧は `https://ai-gateway.vercel.sh/v1/models` を live fetch する
+- 失敗時のみ fallback catalog を使う
+- model catalog は main process 側 cache を持つ
+
+### runtime 選択
+
+優先順位:
+
+1. `anthropic/*` model で `ANTHROPIC_API_KEY` があるなら direct Anthropic
+2. `openai/*` model で `OPENAI_API_KEY` があるなら direct OpenAI
+3. 上記が無い場合で `AI_GATEWAY_API_KEY` または `VERCEL_OIDC_TOKEN` があれば AI Gateway
+4. どれも無ければ stub
+
+### credential 読み取り元
+
+- `process.env`
+- workspace `.env.local`
+- workspace `.env`
+- 保存済み `AI Gateway API Key`
+
+保存済み key の扱い:
+
+- 保存対象は `AI Gateway API Key` のみ
+- 保存先は app `userData/ai-chat-settings.json`
+- `safeStorage` が使える環境では暗号化、使えない場合は平文
+
+## proxy 対応
+
+main process 起動時に proxy を初期化する。
+
+対応 env:
+
+- `HTTPS_PROXY` / `https_proxy`
+- `HTTP_PROXY` / `http_proxy`
+- `NO_PROXY` / `no_proxy`
+- `PROXY_HTTPS` / `proxy_https`
+- `PROXY_HTTP` / `proxy_http`
+- `PROXY_NO` / `proxy_no`
+
+`undici` の global dispatcher に反映するため、AI Gateway / direct provider の両方に効く。
+
+## agent runtime
+
+### 基本
+
+- `AiAgentService` が `ToolLoopAgent.generate()` を呼ぶ
+- stop 条件は `stepCountIs(8)`
+- renderer には
+  - final assistant text
+  - finish reason
+  - model id
+  - step count
+  - tool trace
+  を返す
+
+### empty assistant text の扱い
+
+モデルが tool を呼んだだけで最終 text を返さない場合がある。  
+そのため現状では、tool trace が残っていれば fallback assistant text を生成して例外にしない。
+
+これは本質的な UX 解決ではなく、**`assistant text 空` で panel 全体が失敗しないための安全策**である。
+
+### tool trace
+
+tool trace は step 単位ではなく transcript message としても表示する。  
+現在の summary 対象:
 
 - `bash`
 - `readFile`
 - `writeFile`
+- `writeWorkspaceFile`
+- `readWorkspaceImage`
+- `renderWorkspaceDocument`
 
-用途:
+## workspace 探索と `bash-tool`
 
-- `rg`, `find`, `sed`, `head`, `tail`, `jq` などで必要部分だけ読む
-- prompt に workspace 全体を入れず、agent が段階的に探索する
+### 採用方針
 
-ただし persistent write をいきなり real workspace に通すのは危険なので、write policy は app 側で制御する。
+- 基本の探索は `bash-tool` を使う
+- `rg`, `find`, `ls`, `cat`, `jq` など Unix-style command を agent に使わせる
 
-第一案:
+### 現在の実装方式
 
-- `bash` は `OverlayFs` 相当の copy-on-write mount 上で動かす
-- agent は shell 的に編集案を作れる
-- app は差分を preview し、承認後に real workspace へ反映する
+現在の branch では、real workspace を live mount するのではなく、**submit 時に workspace snapshot を in-memory files として `bash-tool` に渡す**。
 
-これにより `bash-tool` の利便性を残しつつ、いきなり disk を壊しにくくできる。
+理由:
 
-### 2. IntegralNotes 固有 tool
+- `just-bash` / `OverlayFs` の Windows 挙動が publish 版ではまだ不安定
+- 特に子 path 解決で `No such file or directory` が再現した
+- そのため current branch では Windows workaround として snapshot preload を採用している
 
-この app には、ただの text file として扱うと壊しやすい対象がある。  
-それらは typed tool に分ける。
+### snapshot の内容
 
-候補:
+- readable text file は本文を preload
+- binary / oversized file は placeholder text にして存在だけ discoverable にする
+- 画像も placeholder により `find` / `ls` には出る
 
-- `get_active_context`
-  - active tab
-  - selected paths
-  - current note path
-  - current dataset path
-- `read_note`
-  - frontmatter を壊さない前提で note 本文を読む
-- `inspect_dataset`
-  - `.idts` manifest を構造化して読む
-- `read_data_note`
-  - hidden path を直接出さず target ID 起点で読む
-- `list_workspace_selection`
-  - explorer 選択中 path を返す
+制限:
 
-これらは既存の `workspaceService.ts` と `integralWorkspaceService.ts` を再利用して実装する。
+- 最大 5,000 files
+- text preload は 1 file 1MB まで
+- image inspect は 8MB まで
+- `.git`, `node_modules`, `dist`, `out` などは除外
 
-### 3. persistent write tool
+### write の扱い
 
-`Claude Code` 的 UX には file write が必要だが、IntegralNotes では unsaved tab や note frontmatter との整合も要る。  
-そのため persistent write は `bash` の直接 write ではなく app-owned tool に寄せる。
+- `bash/writeFile` は overlay preview 専用で、real workspace には保存しない
+- real save は `writeWorkspaceFile` tool を使う
 
-候補:
+## skills
 
-- `apply_workspace_patch`
-- `write_workspace_file`
-- `save_note_body`
-- `create_workspace_entry`
+- `.codex/skills` を最優先で読む
+- `experimental_createSkillTool()` の結果を `bash-tool` runtime に統合する
+- skill 自体は recipe であり、filesystem write や command 実行の権限そのものではない
 
-基本方針:
+現時点では `.codex/skills` の deep integration は最小限で、approval policy や richer UI はまだ無い。
 
-- preview なしの即保存はしない
-- dirty な tab と衝突する場合は保存前に止める
-- note は frontmatter 保持契約を守る
+## typed workspace tools
 
-### 4. host command tool
+### `writeWorkspaceFile`
 
-`bash-tool` だけでは `npm run build`, `git diff`, `python -m pytest` のような「実際の project runtime を使う command 実行」を完全には代替しにくい。  
-また `just-bash` の docs でも、full VM や arbitrary binary execution が要るなら `Vercel Sandbox` を使うよう案内されている。
+目的:
 
-そのため coding chat としては別に host command tool を持つ。
+- real workspace への UTF-8 text save
+- `bash/writeFile` の preview と区別する
 
-候補:
+現状:
 
-- `run_host_command`
+- `.md` は `workspaceService.saveNote()` を通す
+- それ以外の text file は直接 write する
+- patch preview / approve UI はまだ無い
 
-基本方針:
+### `readWorkspaceImage`
 
-- working directory は workspace root またはその配下に限定する
-- destructive command は明示承認制にする
-- network を使う command は別 policy にする
-- stdout / stderr / exit code を trace として残す
+目的:
 
-Windows first の app なので、initial shell は `PowerShell` を基準にする。
+- agent が `find` や `rg` で画像 path を見つけた後、その path を引数に real workspace の画像を読めるようにする
 
-### 5. skills / MCP tools
+現状:
 
-generic bash だけでは「この repo 固有の作法」や「外部 SaaS の専用操作」は弱い。  
-その穴を skills と MCP で埋める。
+- `png`, `jpg`, `webp`, `svg` など主要画像を base64 + media type で model に返す
+- prompt に path が書かれていた場合の attachment 化とは別経路
 
-## skills 方針
+### `renderWorkspaceDocument`
 
-Vercel は 2026-01-21 時点で `bash-tool` の skills 対応を案内しており、skill pattern を bash runtime と併用できる。  
-IntegralNotes 側では repo 内にすでに `.codex/skills` を持っているため、これをそのまま活かす。
+目的:
 
-方針:
+- `markdown` / `html` / `text` を「見た目」で確認させる
+- 埋め込み HTML chart や markdown 内 raw HTML を screenshot として model に渡す
 
-- project local の `.codex/skills` を最優先で読む
-- 将来的に global skill directory も追加可
-- skill 発火は agent 自律でも user explicit でもよいが、first version は explicit or high-confidence match を推奨する
-- skill 実行自体は main process 側で行う
+現状:
 
-注意:
+- hidden `BrowserWindow` で描画して `capturePage()` する
+- markdown は `micromark + gfm` で HTML 化し、raw HTML を保持する
+- workspace-root 相対の `src` / `href` は file URL に rewrite する
+- output には `renderReadiness` を付与する
 
-- skill は tool 群の上位レシピであり、権限そのものではない
-- 実際の file write / command 実行は通常の approval policy に従わせる
+補足:
 
-## MCP 方針
+- `renderReadiness` は `document.readyState`、fonts、Plotly container、`svg/canvas/img` の実サイズなどを見た結果である
+- それでも visual render は best-effort であり、外部 asset や複雑な script に完全対応しているわけではない
 
-### 役割
+## transcript と message model
 
-MCP は「外部 tool / resource / prompt を標準化された形で agent に渡す層」として使う。  
-IntegralNotes の AI Chat は first version では `MCP host` 側として振る舞い、外部 MCP server へ client 接続する。
+message role は次を持つ。
 
-AI SDK 側では `@ai-sdk/mcp` の `createMCPClient()` が使える。  
-この client は tools だけでなく resources / prompts / elicitation も扱える。
+- `user`
+- `assistant`
+- `tool`
 
-### 対応する transport
+追加済み情報:
 
-first version で扱う transport:
+- image attachments
+- assistant diagnostics
+  - `modelId`
+  - `finishReason`
+  - `stepCount`
+  - `toolTrace`
+- tool message ごとの input / output summary
 
-- remote HTTP / SSE / Streamable HTTP
-- local stdio
+これにより、Claude Code / Codex 風に「どの tool が何をしたか」を会話面から追える。
 
-整理:
+## Activity Bar / Sidebar との関係
 
-- remote HTTP 系は外部 SaaS や self-hosted MCP 向け
-- stdio は local の補助 server や agent-friendly script 向け
-- AI SDK docs でも production は HTTP transport 推奨、stdio は local server 向けとされている
+- `AI Chat` は sidebar view ではなく built-in workspace-tool item である
+- `Explorer` / `Search` / `Plugins` とは別 registry で扱う
+- `Process Chain` と同じ category の built-in workspace tab opener として扱う
 
-### Vercel MCP の扱い
+## 現時点で未実装
 
-Vercel docs の `Use Vercel's MCP server` は 2026-01-30 更新時点で、`https://mcp.vercel.com` は OAuth 付き remote MCP であり、review / approve 済みの client のみ接続可としている。  
-したがって IntegralNotes 独自 app がそのまま `Vercel MCP` へ接続できる前提は unsafe である。
+- streaming response
+- chat cancel / abort
+- explicit diff preview / approval UI
+- host command tool
+- generic MCP client registry
+- MCP server add / enable / disable UI
+- persistent write の conflict handling
+- multi-session 永続化
+- background autonomous agent
 
-ここでの判断:
+## MCP の現状
 
-- app 自体は generic MCP client 対応にする
-- `Vercel MCP` は「使えれば使う optional integration」として扱う
-- first version の core dependency にはしない
+この branch では **MCP は設計のみで、実装はまだ無い**。
 
-### MCP registry
+未実装のもの:
 
-main process に MCP registry を置く。
+- `@ai-sdk/mcp` による client registry
+- remote HTTP / SSE / Streamable HTTP transport
+- local stdio transport
+- UI 上の server add / enable / disable
+- namespaced MCP tool export
 
-保持したい情報:
+したがって、現時点では `Vercel MCP` も generic MCP server も接続できない。
 
-- server id
-- display name
-- transport 種別
-- endpoint または command
-- auth state
-- enabled / disabled
-- tool allow-list
+## 次段で実装する候補
 
-tool 名は衝突回避のため namespace する。
+優先度順に見ると、次はこの順が自然である。
 
-例:
-
-- `mcp__github__create_issue`
-- `mcp__vercel__list_projects`
-
-### 将来の拡張
-
-first version は「外部 MCP server を使う client」でよい。  
-ただし将来は逆に IntegralNotes 自身が local MCP server を持ち、
-
-- `read_note`
-- `inspect_dataset`
-- `execute_block`
-- `search_workspace`
-
-などを外部 agent へ公開できる形にしてもよい。  
-この場合も、今回の tool contract をそのまま server 側へ再利用できるようにしておく。
-
-## approval と trace
-
-coding chat は便利さより先に、何を読んで何を変えたかを追える必要がある。
-
-最低限必要な UI:
-
-- tool call list
-- 実行中 / 完了 / failed 状態
-- write preview
-- command preview
-- approval / deny
-- source summary
-  - どの file
-  - どの skill
-  - どの MCP tool
-  - どの command
-
-保存先候補:
-
-- in-memory session
-- 後段で `.store/.integral/ai/` に session / trace を保存
-
-## MVP
-
-first version でやること:
-
-- Activity Bar から `AI Chat` tab を開ける
-- 1 session の会話履歴、streaming、cancel、clear
-- active tab / selected path を context として渡せる
-- main process 側に `ToolLoopAgent` ベースの agent runtime を置く
-- `bash-tool` による local workspace 探索
-- IntegralNotes 固有 typed tool の最小集合
-- persistent write preview
-- 限定的な host command 実行
-- `.codex/skills` 読み込み
-- MCP registry と、少なくとも 1 つの stdio server または generic remote MCP server 接続
-
-## first version でやらないこと
-
-- remote sandbox への workspace 完全同期
-- full autonomous background agent
-- unrestricted shell
-- unrestricted network
-- multi-tab / multi-agent orchestration
-- Vercel MCP 直結を必須前提にした OAuth 実装
-
-## 実装単位
-
-追加 / 更新候補:
-
-- `src/shared/aiChat.ts`
-  - chat request / response / stream event / approval 型
-- `src/main/aiAgentService.ts`
-  - agent runtime 本体
-- `src/main/aiTools/*`
-  - bash tool, typed workspace tool, host command tool
-- `src/main/aiSkills.ts`
-  - `.codex/skills` 読み込み
-- `src/main/aiMcpRegistry.ts`
-  - MCP client 管理
-- `src/main/main.ts`
-  - IPC 登録
-- `src/main/preload.ts`
-  - renderer bridge
-- `src/renderer/AIChatPanel.tsx`
-  - UI
-- `src/renderer/workspaceToolPlugins.tsx`
-  - Activity Bar item 追加
-- `src/renderer/styles.css`
-  - panel / trace / preview UI
-
-既存再利用:
-
-- `src/main/workspaceService.ts`
-- `src/main/integralWorkspaceService.ts`
-- `src/shared/workspace.ts`
-- `src/shared/integral.ts`
+1. streaming + cancel
+2. host command tool
+3. write preview / approval UI
+4. MCP registry
+5. session persistence
 
 ## open questions
 
-- persistent write の最終反映を patch ベースに固定するか、file 単位保存も許すか
-- host command の approval granularity を command 単位にするか、session policy にするか
-- MCP server 設定を workspace local に置くか、user global に置くか
-- skill の自動発火をどこまで許すか
-- chat / trace の保存先を workspace 内 metadata に置くか、app user data に置くか
+- `bash-tool` を将来的に `OverlayFs` へ戻すか、それとも snapshot preload を正式方針にするか
+- real workspace write を patch ベース approval に寄せるか、file save を許すか
+- host command approval を message 単位にするか、session policy にするか
+- MCP 設定を workspace local に置くか、user global に置くか
+- trace / session 保存先を workspace metadata に置くか、app userData に置くか
 
 ## 参考
 
-- Vercel AI SDK `useChat` / transport
-  - https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat
-  - https://ai-sdk.dev/docs/ai-sdk-ui/transport
 - Vercel AI SDK `ToolLoopAgent`
   - https://ai-sdk.dev/docs/reference/ai-sdk-core/tool-loop-agent
 - Vercel AI SDK MCP client
