@@ -24,6 +24,7 @@ import { WorkspaceService } from "./workspaceService";
 const AGENT_SKILLS_DESTINATION = ".integral-ai-skills";
 const MAX_WORKSPACE_FILE_COUNT = 5_000;
 const MAX_WORKSPACE_FILE_SIZE_BYTES = 1_000_000;
+const MAX_WORKSPACE_IMAGE_SIZE_BYTES = 8_000_000;
 const IMAGE_FILE_EXTENSIONS = new Set([
   ".avif",
   ".bmp",
@@ -217,6 +218,7 @@ function buildAgentInstructions(
     "Use tools when you need to inspect files instead of guessing.",
     "For repository, code, configuration, file, or implementation questions, inspect the workspace with tools before answering even if an active excerpt is available.",
     "If the task requires concrete file evidence, search the workspace first.",
+    "If you discover an image path and need to inspect the image itself, use readWorkspaceImage.",
     "If the user wants real workspace edits, use writeWorkspaceFile. bash/writeFile remains preview-only.",
     "Do not claim that real workspace files were saved unless the app explicitly tells you persistence happened.",
     ""
@@ -255,6 +257,7 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "The bash runtime supports rg, find, grep, ls, head, tail, sed, jq, cat, and related Unix-style commands.",
     "When the user asks about files beyond the active excerpt, start with rg/find/ls/readFile instead of answering from memory.",
     "Workspace files are preloaded into the sandbox for this request. Text files include real content; binary or oversized files may appear as placeholder stubs so they remain discoverable via find/ls.",
+    "Use readWorkspaceImage when you need to inspect an image file in the real workspace by path.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
     "Use writeWorkspaceFile when you need to persist a real workspace text edit.",
     "Do not tell the user that files were saved; instead describe preview changes or proposed edits."
@@ -392,7 +395,7 @@ function buildWorkspacePlaceholder(relativePath: string, fileSizeBytes: number):
     `kind: ${fileKind}`,
     `sizeBytes: ${fileSizeBytes}`,
     "note: The file exists in the real workspace, but its binary or oversized contents were not loaded into the bash snapshot.",
-    "note: Use find/ls to discover it. If the user wants image inspection, have them attach the image or mention its path in the prompt."
+    "note: Use find/ls to discover it. If you need to inspect an image by path, call readWorkspaceImage."
   ];
 
   return lines.join("\n");
@@ -411,6 +414,57 @@ function createPersistentWorkspaceTools(
   workspaceService: WorkspaceService
 ): ToolSet {
   return {
+    readWorkspaceImage: tool({
+      description:
+        "Load an image file from the real workspace and send it back to the model for visual inspection. Use this when you discover an image path and need to examine the image contents.",
+      inputSchema: z.object({
+        path: z.string().min(1)
+      }),
+      execute: async ({ path: targetPath }) => {
+        const relativePath = normalizeWorkspaceRelativePath(targetPath);
+        const absolutePath = resolveWorkspaceAbsolutePath(workspaceRootPath, relativePath);
+        const fileStats = await fs.stat(absolutePath).catch(() => null);
+
+        if (!fileStats?.isFile()) {
+          throw new Error(`Image file not found: ${relativePath}`);
+        }
+
+        if (fileStats.size > MAX_WORKSPACE_IMAGE_SIZE_BYTES) {
+          throw new Error(
+            `Image file is too large to inspect (${fileStats.size} bytes): ${relativePath}`
+          );
+        }
+
+        const mediaType = inferWorkspaceImageMediaType(relativePath);
+
+        if (!mediaType) {
+          throw new Error(`Unsupported image file type: ${relativePath}`);
+        }
+
+        const buffer = await fs.readFile(absolutePath);
+
+        return {
+          base64Data: buffer.toString("base64"),
+          mediaType,
+          path: relativePath,
+          sizeBytes: fileStats.size
+        };
+      },
+      toModelOutput: ({ output }) => ({
+        type: "content",
+        value: [
+          {
+            text: `Workspace image loaded: ${output.path} (${output.mediaType}, ${output.sizeBytes} bytes)`,
+            type: "text"
+          },
+          {
+            data: output.base64Data,
+            mediaType: output.mediaType,
+            type: "image-data"
+          }
+        ]
+      })
+    }),
     writeWorkspaceFile: tool({
       description:
         "Persist UTF-8 text changes to a real workspace file. Use this for actual saves; bash/writeFile is preview-only.",
@@ -550,6 +604,10 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return pathValue;
   }
 
+  if (toolName === "readWorkspaceImage" && isRecord(input) && typeof input.path === "string") {
+    return input.path;
+  }
+
   return summarizeUnknownValue(input);
 }
 
@@ -582,6 +640,15 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
       typeof output.created === "boolean" ? (output.created ? "created" : "updated") : "saved";
 
     return `${created}: ${output.path}`;
+  }
+
+  if (toolName === "readWorkspaceImage" && isRecord(output) && typeof output.path === "string") {
+    const mediaType =
+      typeof output.mediaType === "string" ? output.mediaType : "image/*";
+    const sizeBytes =
+      typeof output.sizeBytes === "number" ? `${output.sizeBytes} bytes` : "size unknown";
+
+    return `${output.path} | ${mediaType} | ${sizeBytes}`;
   }
 
   return summarizeUnknownValue(output);
@@ -639,4 +706,30 @@ function resolveWorkspaceAbsolutePath(workspaceRootPath: string, targetPath: str
   }
 
   return absolutePath;
+}
+
+function inferWorkspaceImageMediaType(targetPath: string): string | null {
+  switch (path.extname(targetPath).toLowerCase()) {
+    case ".avif":
+      return "image/avif";
+    case ".bmp":
+      return "image/bmp";
+    case ".gif":
+      return "image/gif";
+    case ".heic":
+      return "image/heic";
+    case ".heif":
+      return "image/heif";
+    case ".jpeg":
+    case ".jpg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    default:
+      return null;
+  }
 }
