@@ -30,11 +30,16 @@ import {
   PluginRegistry,
   resolveInstalledPluginRootPath
 } from "./pluginRegistry";
+import { AiAgentService } from "./aiAgentService";
+import { AiChatService } from "./aiChatService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
+import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
 const WORKSPACE_SELECTION_CLIPBOARD_FORMAT = "application/x-integralnotes-workspace-selection";
+
+initializeNetworkProxyFromEnvironment();
 
 function resolveInitialWorkspacePath(): string | undefined {
   const configuredRootPath = process.env.INTEGRALNOTES_DEFAULT_WORKSPACE?.trim();
@@ -151,6 +156,12 @@ const workspaceService = new WorkspaceService({
   initialRootPath: resolveInitialWorkspacePath(),
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
+const aiAgentService = new AiAgentService(workspaceService);
+const aiChatService = new AiChatService(
+  aiAgentService,
+  workspaceService,
+  path.join(app.getPath("userData"), "ai-chat-settings.json")
+);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 let mainWindow: BrowserWindow | null = null;
@@ -551,6 +562,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle("integral:executeAction", async (_event, request: ExecuteIntegralActionRequest) =>
     getPluginRegistry().executeAction(request)
   );
+  ipcMain.handle("ai-chat:getStatus", async () => aiChatService.getStatus());
+  ipcMain.handle("ai-chat:saveSettings", async (_event, request) => aiChatService.saveSettings(request));
+  ipcMain.handle("ai-chat:clearApiKey", async () => aiChatService.clearApiKey());
+  ipcMain.handle("ai-chat:refreshModels", async () => aiChatService.refreshModels());
+  ipcMain.handle("ai-chat:submit", async (_event, request) => aiChatService.submit(request));
 }
 
 function getPluginRegistry(): PluginRegistry {

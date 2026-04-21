@@ -1,0 +1,844 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import type { AiChatContextSummary, AiChatMessage, AiChatStatus } from "../shared/aiChat";
+import type { WorkspaceFileDocument } from "../shared/workspace";
+
+interface AIChatPanelProps {
+  contextRelativePath: string | null;
+  noteOverrides: Record<string, string>;
+  selectedEntryPaths: string[];
+  workspaceRootName: string | null;
+}
+
+export function AIChatPanel({
+  contextRelativePath,
+  noteOverrides,
+  selectedEntryPaths,
+  workspaceRootName
+}: AIChatPanelProps): JSX.Element {
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [contextSummary, setContextSummary] = useState<AiChatContextSummary>({
+    activeDocumentExcerpt: null,
+    activeDocumentKind: null,
+    activeDocumentName: null,
+    activeRelativePath: contextRelativePath,
+    selectedPaths: selectedEntryPaths,
+    workspaceRootName
+  });
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isContextDialogOpen, setIsContextDialogOpen] = useState(false);
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [messages, setMessages] = useState<AiChatMessage[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [status, setStatus] = useState<AiChatStatus | null>(null);
+  const messagesRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStatus = async (): Promise<void> => {
+      try {
+        const nextStatus = await window.integralNotes.getAiChatStatus();
+
+        if (!cancelled) {
+          setStatus(nextStatus);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(toErrorMessage(error));
+        }
+      }
+    };
+
+    void loadStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadContextSummary = async (): Promise<void> => {
+      try {
+        const nextSummary = await buildContextSummary({
+          contextRelativePath,
+          noteOverrides,
+          selectedEntryPaths,
+          workspaceRootName
+        });
+
+        if (!cancelled) {
+          setContextSummary(nextSummary);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(toErrorMessage(error));
+        }
+      }
+    };
+
+    void loadContextSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contextRelativePath, noteOverrides, selectedEntryPaths, workspaceRootName]);
+
+  useEffect(() => {
+    if (!status) {
+      return;
+    }
+
+    if (!selectedModelId || !status.availableModels.some((model) => model.id === selectedModelId)) {
+      setSelectedModelId(status.selectedModelId ?? status.availableModels[0]?.id ?? "");
+    }
+  }, [selectedModelId, status]);
+
+  useEffect(() => {
+    const hasOpenDialog = isContextDialogOpen || isSettingsDialogOpen;
+
+    document.body.classList.toggle("integral-dialog-open", hasOpenDialog);
+
+    if (hasOpenDialog && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    return () => {
+      document.body.classList.remove("integral-dialog-open");
+    };
+  }, [isContextDialogOpen, isSettingsDialogOpen]);
+
+  useEffect(() => {
+    if (!isContextDialogOpen && !isSettingsDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setIsContextDialogOpen(false);
+        setIsSettingsDialogOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isContextDialogOpen, isSettingsDialogOpen]);
+
+  useEffect(() => {
+    const container = messagesRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+  }, [isSubmitting, messages]);
+
+  const composerHint = useMemo(() => {
+    if (contextSummary.activeRelativePath) {
+      return `active: ${contextSummary.activeRelativePath}`;
+    }
+
+    return "Context ボタンから active file / note の文脈を確認できます";
+  }, [contextSummary.activeRelativePath]);
+
+  const runtimeModeLabel = useMemo(() => {
+    if (!status) {
+      return "Loading";
+    }
+
+    switch (status.implementationMode) {
+      case "direct":
+        return "Direct Runtime";
+      case "gateway":
+        return "Gateway Runtime";
+      default:
+        return "Stub Runtime";
+    }
+  }, [status]);
+
+  const handleSaveSettings = async (): Promise<void> => {
+    setErrorMessage(null);
+    setIsSavingSettings(true);
+
+    try {
+      const nextStatus = await window.integralNotes.saveAiChatSettings({
+        apiKey: apiKeyInput.trim().length > 0 ? apiKeyInput.trim() : undefined,
+        modelId: selectedModelId || null
+      });
+
+      setStatus(nextStatus);
+      setApiKeyInput("");
+      setSelectedModelId(nextStatus.selectedModelId ?? nextStatus.availableModels[0]?.id ?? "");
+      setIsSettingsDialogOpen(false);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleClearApiKey = async (): Promise<void> => {
+    setErrorMessage(null);
+    setIsSavingSettings(true);
+
+    try {
+      const nextStatus = await window.integralNotes.clearAiChatApiKey();
+      setStatus(nextStatus);
+      setApiKeyInput("");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleRefreshModels = async (): Promise<void> => {
+    setErrorMessage(null);
+    setIsRefreshingModels(true);
+
+    try {
+      const nextStatus = await window.integralNotes.refreshAiChatModels();
+      setStatus(nextStatus);
+      setSelectedModelId(nextStatus.selectedModelId ?? nextStatus.availableModels[0]?.id ?? "");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsRefreshingModels(false);
+    }
+  };
+
+  const handleSubmit = async (): Promise<void> => {
+    const trimmedPrompt = prompt.trim();
+
+    if (trimmedPrompt.length === 0 || isSubmitting) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsSubmitting(true);
+
+    const userMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      id: createChatMessageId("user"),
+      role: "user",
+      text: trimmedPrompt
+    };
+    const nextHistory = [...messages, userMessage];
+
+    setMessages(nextHistory);
+    setPrompt("");
+
+    try {
+      const result = await window.integralNotes.submitAiChat({
+        context: contextSummary,
+        history: nextHistory,
+        prompt: trimmedPrompt
+      });
+
+      setMessages((currentMessages) => [...currentMessages, result.assistantMessage]);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+      setMessages(messages);
+      setPrompt(trimmedPrompt);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="ai-chat-panel">
+      <header className="ai-chat-panel__header">
+        <div>
+          <p className="ai-chat-panel__eyebrow">Workspace Agent</p>
+          <h1 className="ai-chat-panel__title">AI Chat</h1>
+          <p className="ai-chat-panel__description">
+            panel 本体は chat を優先し、runtime 設定と current context は別 dialog に分離しています。
+          </p>
+        </div>
+
+        <div className="ai-chat-panel__header-actions">
+          <div className="ai-chat-panel__status">
+            <span className="ai-chat-panel__pill">{runtimeModeLabel}</span>
+            <span className="ai-chat-panel__pill">{status?.providerLabel ?? "runtime status loading"}</span>
+            <span className="ai-chat-panel__pill">
+              MCP {status?.mcpEnabled ? "ready (design)" : "disabled"}
+            </span>
+          </div>
+
+          <button
+            aria-label="AI Chat context"
+            className="button button--ghost ai-chat-panel__icon-button"
+            onClick={() => {
+              setErrorMessage(null);
+              setIsContextDialogOpen(true);
+            }}
+            title="Context"
+            type="button"
+          >
+            <ContextIcon />
+          </button>
+
+          <button
+            aria-label="AI Chat settings"
+            className="button button--ghost ai-chat-panel__icon-button"
+            onClick={() => {
+              setErrorMessage(null);
+              setIsSettingsDialogOpen(true);
+            }}
+            title="Settings"
+            type="button"
+          >
+            <SettingsIcon />
+          </button>
+        </div>
+      </header>
+
+      <section className="ai-chat-panel__messages" ref={messagesRef}>
+        {messages.length === 0 ? (
+          <div className="ai-chat-panel__empty">
+            <strong>まだ会話はありません。</strong>
+            <span>settings icon から runtime 設定、context icon から current context を確認できます。</span>
+          </div>
+        ) : (
+          messages.map((message) => (
+            <article
+              className={`ai-chat-panel__message ai-chat-panel__message--${message.role}`}
+              key={message.id}
+            >
+              <div className="ai-chat-panel__message-meta">
+                <strong>{message.role === "assistant" ? "Assistant" : "You"}</strong>
+                <span>{formatMessageTime(message.createdAt)}</span>
+              </div>
+              <pre className="ai-chat-panel__message-body">{message.text}</pre>
+
+              {message.role === "assistant" && message.diagnostics ? (
+                <div className="ai-chat-panel__message-diagnostics">
+                  <div className="ai-chat-panel__message-pills">
+                    {message.diagnostics.modelId ? (
+                      <span className="ai-chat-panel__message-pill">
+                        model: {message.diagnostics.modelId}
+                      </span>
+                    ) : null}
+                    <span className="ai-chat-panel__message-pill">
+                      steps: {message.diagnostics.stepCount}
+                    </span>
+                    {message.diagnostics.toolTrace.length > 0 ? (
+                      <span className="ai-chat-panel__message-pill">
+                        tools: {message.diagnostics.toolTrace.length}
+                      </span>
+                    ) : null}
+                    {message.diagnostics.finishReason ? (
+                      <span className="ai-chat-panel__message-pill">
+                        finish: {message.diagnostics.finishReason}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {message.diagnostics.toolTrace.length > 0 ? (
+                    <details className="ai-chat-panel__trace">
+                      <summary>Trace</summary>
+
+                      <div className="ai-chat-panel__trace-list">
+                        {message.diagnostics.toolTrace.map((entry, index) => (
+                          <article className="ai-chat-panel__trace-entry" key={`${message.id}-${index}`}>
+                            <div className="ai-chat-panel__trace-meta">
+                              <strong>{entry.toolName}</strong>
+                              <span>step {entry.stepNumber + 1}</span>
+                              <span
+                                className={`ai-chat-panel__trace-status ai-chat-panel__trace-status--${entry.status}`}
+                              >
+                                {entry.status}
+                              </span>
+                            </div>
+                            <code className="ai-chat-panel__trace-line">{entry.inputSummary}</code>
+                            <code className="ai-chat-panel__trace-line">{entry.outputSummary}</code>
+                          </article>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+          ))
+        )}
+
+        {isSubmitting ? (
+          <article className="ai-chat-panel__message ai-chat-panel__message--assistant">
+            <div className="ai-chat-panel__message-meta">
+              <strong>Assistant</strong>
+              <span>thinking...</span>
+            </div>
+            <div className="ai-chat-panel__thinking">
+              <span />
+              <span />
+              <span />
+            </div>
+          </article>
+        ) : null}
+      </section>
+
+      <form
+        className="ai-chat-panel__composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
+        }}
+      >
+        {errorMessage ? <div className="ai-chat-panel__error">{errorMessage}</div> : null}
+
+        <textarea
+          className="ai-chat-panel__composer-input"
+          disabled={isSubmitting}
+          onChange={(event) => {
+            setPrompt(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+              event.preventDefault();
+              void handleSubmit();
+            }
+          }}
+          placeholder="workspace に対してやりたいことを書く"
+          rows={5}
+          value={prompt}
+        />
+
+        <div className="ai-chat-panel__composer-actions">
+          <span className="ai-chat-panel__composer-hint">{composerHint}</span>
+
+          <div className="ai-chat-panel__composer-buttons">
+            <button
+              className="button button--ghost"
+              disabled={messages.length === 0 && prompt.trim().length === 0}
+              onClick={() => {
+                setErrorMessage(null);
+                setMessages([]);
+                setPrompt("");
+              }}
+              type="button"
+            >
+              Clear
+            </button>
+            <button
+              className="button button--primary"
+              disabled={isSubmitting || prompt.trim().length === 0}
+              type="submit"
+            >
+              {isSubmitting ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      {isSettingsDialogOpen ? (
+        <div
+          className="dialog-backdrop"
+          onClick={() => {
+            setIsSettingsDialogOpen(false);
+          }}
+        >
+          <div
+            className="dialog-card dialog-card--ai-chat-settings"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="dialog-card__header">
+              <p className="dialog-card__eyebrow">AI Chat</p>
+              <h2>Runtime Settings</h2>
+              <p>model と認証を設定します。current context は別の Context dialog に移しました。</p>
+            </div>
+
+            <div className="dialog-card__body dialog-card__body--ai-chat-settings">
+              <div className="ai-chat-panel__dialog-section">
+                <div className="ai-chat-panel__settings-header">
+                  <div>
+                    <span className="ai-chat-panel__context-label">Connection</span>
+                    <h3 className="ai-chat-panel__section-title">Runtime Settings</h3>
+                  </div>
+
+                  <div className="ai-chat-panel__status">
+                    <span className="ai-chat-panel__pill">
+                      Runtime Auth {status?.runtimeAuthConfigured ? "Configured" : "Missing"}
+                    </span>
+                    <span className="ai-chat-panel__pill">
+                      Models {status?.modelCatalogSource === "live" ? "Live" : "Fallback"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="ai-chat-panel__settings-grid">
+                  <label className="ai-chat-panel__settings-field">
+                    <span className="ai-chat-panel__context-label">AI Gateway API Key</span>
+                    <input
+                      autoFocus
+                      className="ai-chat-panel__settings-input"
+                      onChange={(event) => {
+                        setApiKeyInput(event.target.value);
+                      }}
+                      placeholder={
+                        status?.apiKeyConfigured
+                          ? "保存済み。変更する場合のみ入力"
+                          : "optional: AI Gateway を使う場合のみ入力"
+                      }
+                      type="password"
+                      value={apiKeyInput}
+                    />
+                  </label>
+
+                  <label className="ai-chat-panel__settings-field">
+                    <span className="ai-chat-panel__context-label">Model</span>
+                    <select
+                      className="ai-chat-panel__settings-input"
+                      onChange={(event) => {
+                        setSelectedModelId(event.target.value);
+                      }}
+                      value={selectedModelId}
+                    >
+                      {status?.availableModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.id}
+                          {typeof model.contextWindow === "number"
+                            ? ` (${formatContextWindow(model.contextWindow)})`
+                            : ""}
+                        </option>
+                      )) ?? <option value="">モデルを読み込み中</option>}
+                    </select>
+                  </label>
+                </div>
+
+                {status?.notes.length ? (
+                  <div className="ai-chat-panel__notes">
+                    {status.notes.map((note) => (
+                      <p className="ai-chat-panel__note" key={note}>
+                        {note}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="ai-chat-panel__dialog-meta">
+                <span className="ai-chat-panel__composer-hint">
+                  {status?.catalogRefreshedAt
+                    ? `Catalog refreshed: ${formatCatalogTime(status.catalogRefreshedAt)}`
+                    : "Catalog not loaded yet"}
+                </span>
+              </div>
+
+              {errorMessage ? <div className="ai-chat-panel__error">{errorMessage}</div> : null}
+
+              <div className="dialog-actions">
+                <button
+                  className="button button--ghost"
+                  disabled={isSavingSettings || isRefreshingModels}
+                  onClick={() => {
+                    setErrorMessage(null);
+                    setIsSettingsDialogOpen(false);
+                  }}
+                  type="button"
+                >
+                  Close
+                </button>
+                <button
+                  className="button button--ghost"
+                  disabled={isRefreshingModels}
+                  onClick={() => {
+                    void handleRefreshModels();
+                  }}
+                  type="button"
+                >
+                  {isRefreshingModels ? "Refreshing..." : "Refresh Models"}
+                </button>
+                <button
+                  className="button button--ghost"
+                  disabled={
+                    isSavingSettings || (!status?.apiKeyConfigured && apiKeyInput.trim().length === 0)
+                  }
+                  onClick={() => {
+                    void handleClearApiKey();
+                  }}
+                  type="button"
+                >
+                  Clear Gateway Key
+                </button>
+                <button
+                  className="button button--primary"
+                  disabled={isSavingSettings || selectedModelId.length === 0}
+                  onClick={() => {
+                    void handleSaveSettings();
+                  }}
+                  type="button"
+                >
+                  {isSavingSettings ? "Saving..." : "Save Settings"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isContextDialogOpen ? (
+        <div
+          className="dialog-backdrop"
+          onClick={() => {
+            setIsContextDialogOpen(false);
+          }}
+        >
+          <div
+            className="dialog-card dialog-card--ai-chat-settings"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="dialog-card__header">
+              <p className="dialog-card__eyebrow">AI Chat</p>
+              <h2>Workspace Context</h2>
+              <p>active file と current selection を chat panel から切り離して確認できます。</p>
+            </div>
+
+            <div className="dialog-card__body dialog-card__body--ai-chat-settings">
+              <div className="ai-chat-panel__dialog-section">
+                <div>
+                  <span className="ai-chat-panel__context-label">Context</span>
+                  <h3 className="ai-chat-panel__section-title">Current Workspace Context</h3>
+                </div>
+
+                <div className="ai-chat-panel__context-grid">
+                  <div className="ai-chat-panel__context-field">
+                    <span className="ai-chat-panel__context-label">Workspace</span>
+                    <strong>{contextSummary.workspaceRootName ?? "(未選択)"}</strong>
+                  </div>
+                  <div className="ai-chat-panel__context-field">
+                    <span className="ai-chat-panel__context-label">Active</span>
+                    <strong>{contextSummary.activeRelativePath ?? "(なし)"}</strong>
+                  </div>
+                  <div className="ai-chat-panel__context-field">
+                    <span className="ai-chat-panel__context-label">Selected Paths</span>
+                    <strong>{contextSummary.selectedPaths.length}</strong>
+                  </div>
+                  <div className="ai-chat-panel__context-field">
+                    <span className="ai-chat-panel__context-label">Skills</span>
+                    <strong>{status?.skillsDirectoryPath ?? "(workspace 未選択)"}</strong>
+                  </div>
+                </div>
+
+                {contextSummary.activeDocumentExcerpt ? (
+                  <div className="ai-chat-panel__excerpt">
+                    <div className="ai-chat-panel__excerpt-header">
+                      <span className="ai-chat-panel__context-label">Active Document Excerpt</span>
+                      <strong>
+                        {contextSummary.activeDocumentName ?? "(unknown)"}{" "}
+                        {contextSummary.activeDocumentKind
+                          ? `[${contextSummary.activeDocumentKind}]`
+                          : ""}
+                      </strong>
+                    </div>
+                    <pre>{contextSummary.activeDocumentExcerpt}</pre>
+                  </div>
+                ) : (
+                  <p className="ai-chat-panel__note">active document excerpt は現在ありません。</p>
+                )}
+              </div>
+
+              <div className="dialog-actions">
+                <button
+                  className="button button--primary"
+                  onClick={() => {
+                    setIsContextDialogOpen(false);
+                  }}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function SettingsIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="ai-chat-panel__icon-svg" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="2.1" />
+      <path d="M8 1.9v1.55" />
+      <path d="M8 12.55v1.55" />
+      <path d="m3.68 3.68 1.1 1.1" />
+      <path d="m11.22 11.22 1.1 1.1" />
+      <path d="M1.9 8h1.55" />
+      <path d="M12.55 8h1.55" />
+      <path d="m3.68 12.32 1.1-1.1" />
+      <path d="m11.22 4.78 1.1-1.1" />
+    </svg>
+  );
+}
+
+function ContextIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="ai-chat-panel__icon-svg" viewBox="0 0 16 16">
+      <path d="M2.4 3.2h11.2v9.6H2.4z" />
+      <path d="M4.4 5.3h7.2" />
+      <path d="M4.4 8h7.2" />
+      <path d="M4.4 10.7h4.5" />
+    </svg>
+  );
+}
+
+async function buildContextSummary({
+  contextRelativePath,
+  noteOverrides,
+  selectedEntryPaths,
+  workspaceRootName
+}: {
+  contextRelativePath: string | null;
+  noteOverrides: Record<string, string>;
+  selectedEntryPaths: string[];
+  workspaceRootName: string | null;
+}): Promise<AiChatContextSummary> {
+  if (!contextRelativePath) {
+    return {
+      activeDocumentExcerpt: null,
+      activeDocumentKind: null,
+      activeDocumentName: null,
+      activeRelativePath: null,
+      selectedPaths: selectedEntryPaths,
+      workspaceRootName
+    };
+  }
+
+  const overriddenContent = noteOverrides[contextRelativePath];
+
+  if (typeof overriddenContent === "string") {
+    return {
+      activeDocumentExcerpt: clampExcerpt(overriddenContent),
+      activeDocumentKind: "markdown",
+      activeDocumentName: getPathLeafName(contextRelativePath),
+      activeRelativePath: contextRelativePath,
+      selectedPaths: selectedEntryPaths,
+      workspaceRootName
+    };
+  }
+
+  const document = await window.integralNotes.readWorkspaceFile(contextRelativePath);
+
+  return {
+    activeDocumentExcerpt: buildDocumentExcerpt(document),
+    activeDocumentKind: document.kind,
+    activeDocumentName: document.name,
+    activeRelativePath: contextRelativePath,
+    selectedPaths: selectedEntryPaths,
+    workspaceRootName
+  };
+}
+
+function buildDocumentExcerpt(document: WorkspaceFileDocument): string | null {
+  if (document.datasetManifest) {
+    const members = document.datasetManifest.members
+      .slice(0, 6)
+      .map((member) => member.displayName || member.relativePath || member.managedFileId);
+
+    return clampExcerpt(
+      [
+        `dataset: ${document.datasetManifest.datasetName}`,
+        `kind: ${document.datasetManifest.datasetKind}`,
+        `members: ${members.length > 0 ? members.join(", ") : "(none)"}`,
+        `note target: ${document.datasetManifest.noteTargetId}`
+      ].join("\n")
+    );
+  }
+
+  if (typeof document.content !== "string" || document.content.trim().length === 0) {
+    return null;
+  }
+
+  if (document.kind === "html") {
+    return clampExcerpt(document.content.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ").trim());
+  }
+
+  if (document.kind === "image" || document.kind === "unsupported") {
+    return null;
+  }
+
+  return clampExcerpt(document.content);
+}
+
+function clampExcerpt(value: string): string {
+  const normalized = value.replace(/\r\n/gu, "\n").trim();
+
+  if (normalized.length <= 640) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 640).trimEnd()}\n...`;
+}
+
+function formatMessageTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatCatalogTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+
+  return date.toLocaleString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  });
+}
+
+function formatContextWindow(value: number): string {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 1)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `${Math.round(value / 1_000)}k`;
+  }
+
+  return String(value);
+}
+
+function createChatMessageId(role: "assistant" | "user"): string {
+  return `chat-${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getPathLeafName(relativePath: string): string {
+  const segments = relativePath.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? relativePath;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}

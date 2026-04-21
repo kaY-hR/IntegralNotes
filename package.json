@@ -49,11 +49,17 @@
     }
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/openai": "^3.0.53",
     "@milkdown/crepe": "^7.17.1",
     "@milkdown/plugin-listener": "^7.17.1",
+    "ai": "^6.0.168",
+    "bash-tool": "^1.3.16",
     "flexlayout-react": "^0.8.17",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "undici": "^8.1.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",

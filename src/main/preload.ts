@@ -77,7 +77,12 @@ const api: IntegralNotesApi = {
     ipcRenderer.invoke("workspace:openPathInExternalApp", relativePath),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("plugins:uninstall", pluginId),
   executeIntegralBlock: (request) => ipcRenderer.invoke("integral:executeBlock", request),
-  executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request)
+  executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request),
+  getAiChatStatus: () => ipcRenderer.invoke("ai-chat:getStatus"),
+  saveAiChatSettings: (request) => ipcRenderer.invoke("ai-chat:saveSettings", request),
+  clearAiChatApiKey: () => ipcRenderer.invoke("ai-chat:clearApiKey"),
+  refreshAiChatModels: () => ipcRenderer.invoke("ai-chat:refreshModels"),
+  submitAiChat: (request) => ipcRenderer.invoke("ai-chat:submit", request)
 };
 
 contextBridge.exposeInMainWorld("integralNotes", api);
