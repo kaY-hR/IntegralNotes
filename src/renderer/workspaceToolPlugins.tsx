@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { IntegralAssetCatalog } from "../shared/integral";
 import type { WorkspaceEntry } from "../shared/workspace";
+import { AIChatPanel } from "./AIChatPanel";
 import { ProcessChainViewer } from "./ProcessChainViewer";
 
 export interface WorkspaceToolPluginRenderContext {
@@ -10,7 +11,9 @@ export interface WorkspaceToolPluginRenderContext {
   noteOverrides: Record<string, string>;
   onOpenWorkspaceFile: (relativePath: string) => void;
   onOpenWorkspaceTarget: (target: string) => void;
+  selectedEntryPaths: string[];
   workspaceEntries: WorkspaceEntry[];
+  workspaceRootName: string | null;
 }
 
 export interface WorkspaceToolPluginDefinition {
@@ -37,6 +40,16 @@ function ProcessChainToolIcon(): JSX.Element {
   );
 }
 
+function AIChatToolIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
+      <path d="M2 3.2h12v7.1H7.2L4.1 13v-2.7H2z" />
+      <path d="M4.8 5.7h6.4" />
+      <path d="M4.8 8h4.6" />
+    </svg>
+  );
+}
+
 const processChainToolPlugin: WorkspaceToolPluginDefinition = {
   activityIcon: <ProcessChainToolIcon />,
   description: "現在の note / file を起点に、関連する block と file の chain を辿って表示します。",
@@ -46,7 +59,17 @@ const processChainToolPlugin: WorkspaceToolPluginDefinition = {
   title: "Process Chain"
 };
 
+const aiChatToolPlugin: WorkspaceToolPluginDefinition = {
+  activityIcon: <AIChatToolIcon />,
+  description: "workspace 文脈を渡して coding chat を行います。",
+  id: "builtin:ai-chat",
+  render: (context) => <AIChatPanel {...context} />,
+  tabTitle: "AI Chat",
+  title: "AI Chat"
+};
+
 export const workspaceToolPlugins: readonly WorkspaceToolPluginDefinition[] = [
+  aiChatToolPlugin,
   processChainToolPlugin
 ];
 

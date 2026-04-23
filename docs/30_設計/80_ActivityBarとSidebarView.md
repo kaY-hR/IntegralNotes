@@ -48,8 +48,9 @@ Sidebar Host の中に表示される実体。
 
 ### workspace-tool plugin items
 
-- process chain viewer
-- 将来的な AI Chat など、main workspace 側に tab を開く optional item
+- `builtin:ai-chat`
+- `builtin:process-chain-viewer`
+- main workspace 側に tab を開く built-in / optional item 群
 
 ### external views
 
@@ -108,8 +109,6 @@ process chain viewer は sidebar view ではなく、optional な internal works
 - hover preview は file node だけを対象に後段で追加してよい
 
 現状の external plugin API は iframe sidebar view が中心なので、process chain viewer は external plugin ではなく internal plugin category として実装する。
-
-を merge して Activity Bar と Sidebar Host の両方で使う。
 
 ## built-in view の扱い
 

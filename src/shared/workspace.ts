@@ -3,6 +3,12 @@ import type {
   ResolvedPluginViewer
 } from "./plugins";
 import type {
+  SaveAiChatSettingsRequest,
+  AiChatStatus,
+  SubmitAiChatRequest,
+  SubmitAiChatResult
+} from "./aiChat";
+import type {
   CreateDatasetRequest,
   CreateDatasetFromWorkspaceEntriesRequest,
   CreateDatasetResult,
@@ -299,6 +305,11 @@ export interface IntegralNotesApi {
   executeIntegralAction: (
     request: ExecuteIntegralActionRequest
   ) => Promise<ExecuteIntegralActionResult>;
+  getAiChatStatus: () => Promise<AiChatStatus>;
+  saveAiChatSettings: (request: SaveAiChatSettingsRequest) => Promise<AiChatStatus>;
+  clearAiChatApiKey: () => Promise<AiChatStatus>;
+  refreshAiChatModels: () => Promise<AiChatStatus>;
+  submitAiChat: (request: SubmitAiChatRequest) => Promise<SubmitAiChatResult>;
 }
 
 

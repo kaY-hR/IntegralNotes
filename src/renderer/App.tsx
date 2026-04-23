@@ -3011,7 +3011,11 @@ export function App(): JSX.Element {
             openUnsupportedExternally: true
           });
         },
-        workspaceEntries: workspace?.entries ?? []
+        selectedEntryPaths: Array.from(selectedEntryPaths).sort((left, right) =>
+          left.localeCompare(right)
+        ),
+        workspaceEntries: workspace?.entries ?? [],
+        workspaceRootName: workspace?.rootName ?? null
       });
     }
 
