@@ -5,7 +5,7 @@ $scriptRoot = Split-Path -Parent $PSCommandPath
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
 # Change this path when reusing the script.
 # Keep this file encoded as UTF-8 with BOM if TargetRoot contains non-ASCII characters.
-$targetRoot = [System.IO.Path]::GetFullPath('C:\Users\shimadzu\OneDrive - SHIMADZU\共有\Rutilea様共有フォルダ(表示のみ)\簡易ソフト\コード')
+$targetRoot = [System.IO.Path]::GetFullPath('C:\Users\shimadzu\OneDrive - SHIMADZU\共有\Rutilea様共有フォルダ(表示のみ)\簡易ソフト_島津側AI仮実装\コード')
 $excludeFilePath = Join-Path $scriptRoot '.copyexclude'
 $manifestRelativePath = 'scripts/.copyexport-manifest'
 $manifestPath = Join-Path $targetRoot ($manifestRelativePath.Replace('/', '\'))
