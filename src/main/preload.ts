@@ -91,7 +91,9 @@ const api: IntegralNotesApi = {
   saveAiChatSession: (request) => ipcRenderer.invoke("ai-chat:saveSession", request),
   switchAiChatSession: (sessionId) => ipcRenderer.invoke("ai-chat:switchSession", sessionId),
   deleteAiChatSession: (sessionId) => ipcRenderer.invoke("ai-chat:deleteSession", sessionId),
-  submitAiChat: (request) => ipcRenderer.invoke("ai-chat:submit", request)
+  submitAiChat: (request) => ipcRenderer.invoke("ai-chat:submit", request),
+  submitInlineAiInsertion: (request) => ipcRenderer.invoke("ai-chat:submitInlineInsertion", request),
+  submitInlinePythonBlock: (request) => ipcRenderer.invoke("ai-chat:submitInlinePythonBlock", request)
 };
 
 contextBridge.exposeInMainWorld("integralNotes", api);

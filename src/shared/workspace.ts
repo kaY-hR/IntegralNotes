@@ -9,7 +9,11 @@ import type {
   SaveAiChatSessionRequest,
   AiChatStatus,
   SubmitAiChatRequest,
-  SubmitAiChatResult
+  SubmitAiChatResult,
+  SubmitInlineAiInsertionRequest,
+  SubmitInlineAiInsertionResult,
+  SubmitInlinePythonBlockRequest,
+  SubmitInlinePythonBlockResult
 } from "./aiChat";
 import type {
   CreateDatasetRequest,
@@ -321,6 +325,12 @@ export interface IntegralNotesApi {
   switchAiChatSession: (sessionId: string) => Promise<AiChatHistorySnapshot>;
   deleteAiChatSession: (sessionId: string) => Promise<AiChatHistorySnapshot>;
   submitAiChat: (request: SubmitAiChatRequest) => Promise<SubmitAiChatResult>;
+  submitInlineAiInsertion: (
+    request: SubmitInlineAiInsertionRequest
+  ) => Promise<SubmitInlineAiInsertionResult>;
+  submitInlinePythonBlock: (
+    request: SubmitInlinePythonBlockRequest
+  ) => Promise<SubmitInlinePythonBlockResult>;
 }
 
 

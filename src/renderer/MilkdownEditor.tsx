@@ -9,8 +9,10 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type {
   ExecuteIntegralBlockResult,
+  IntegralAssetCatalog,
   IntegralBlockTypeDefinition
 } from "../shared/integral";
+import type { AiChatContextSummary } from "../shared/aiChat";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
@@ -22,8 +24,10 @@ import {
   initializeIntegralPluginRuntime
 } from "./integralPluginRuntime";
 import {
+  GENERAL_ANALYSIS_PLUGIN_ID,
   INTEGRAL_BLOCK_LANGUAGE,
   createInitialIntegralBlock,
+  createPythonIntegralBlockMarkdown,
   parseIntegralBlockSource,
   serializeIntegralBlockContent,
   toIntegralCodeBlock
@@ -36,12 +40,15 @@ interface MilkdownEditorProps {
   isActive: boolean;
   onChange: (markdown: string) => void;
   onFocusedBlockHandled?: () => void;
+  onIntegralAssetCatalogChanged: (catalog: IntegralAssetCatalog) => void;
   onOpenWorkspaceFile: (target: string) => void;
-  onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot) => void;
+  onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot, statusMessage?: string) => void;
   onWorkspaceLinkError: (message: string) => void;
   relativePath: string;
+  selectedEntryPaths: string[];
   toolbar?: ReactNode;
   workspaceEntries: WorkspaceEntry[];
+  workspaceRootName: string | null;
 }
 
 interface WorkspaceFileSuggestion {
@@ -70,23 +77,51 @@ interface AnalysisCompletionState {
   y: number;
 }
 
+type InlineAiMode = "insert-text" | "python-block";
+
+interface InlineAiPromptState {
+  afterText: string;
+  anchorPos: number;
+  beforeText: string;
+  error: string | null;
+  isSubmitting: boolean;
+  mode: InlineAiMode;
+  prompt: string;
+  x: number;
+  y: number;
+}
+
+interface InlineAiTriggerState {
+  afterText: string;
+  beforeText: string;
+  mode: InlineAiMode;
+  replaceFrom: number;
+  replaceTo: number;
+  x: number;
+  y: number;
+}
+
 export function MilkdownEditor({
   focusedBlockId,
   initialValue,
   isActive,
   onChange,
   onFocusedBlockHandled,
+  onIntegralAssetCatalogChanged,
   onOpenWorkspaceFile,
   onWorkspaceSnapshotChanged,
   onWorkspaceLinkError,
   relativePath,
+  selectedEntryPaths,
   toolbar,
-  workspaceEntries
+  workspaceEntries,
+  workspaceRootName
 }: MilkdownEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Crepe | null>(null);
   const onChangeRef = useRef(onChange);
   const onFocusedBlockHandledRef = useRef(onFocusedBlockHandled);
+  const onIntegralAssetCatalogChangedRef = useRef(onIntegralAssetCatalogChanged);
   const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
   const onWorkspaceSnapshotChangedRef = useRef(onWorkspaceSnapshotChanged);
   const onWorkspaceLinkErrorRef = useRef(onWorkspaceLinkError);
@@ -95,14 +130,19 @@ export function MilkdownEditor({
   const focusedBlockIdRef = useRef(focusedBlockId ?? null);
   const linkCompletionRef = useRef<LinkCompletionState | null>(null);
   const analysisCompletionRef = useRef<AnalysisCompletionState | null>(null);
+  const inlineAiPromptRef = useRef<InlineAiPromptState | null>(null);
+  const inlineAiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const completionPanelRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
+  const selectedEntryPathsRef = useRef<string[]>(selectedEntryPaths);
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
   const workspaceEntriesRef = useRef<WorkspaceEntry[]>(workspaceEntries);
+  const workspaceRootNameRef = useRef<string | null>(workspaceRootName);
   const [linkCompletion, setLinkCompletion] = useState<LinkCompletionState | null>(null);
   const [analysisCompletion, setAnalysisCompletion] = useState<AnalysisCompletionState | null>(null);
+  const [inlineAiPrompt, setInlineAiPrompt] = useState<InlineAiPromptState | null>(null);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -111,6 +151,10 @@ export function MilkdownEditor({
   useEffect(() => {
     onFocusedBlockHandledRef.current = onFocusedBlockHandled;
   }, [onFocusedBlockHandled]);
+
+  useEffect(() => {
+    onIntegralAssetCatalogChangedRef.current = onIntegralAssetCatalogChanged;
+  }, [onIntegralAssetCatalogChanged]);
 
   useEffect(() => {
     onOpenWorkspaceFileRef.current = onOpenWorkspaceFile;
@@ -130,6 +174,7 @@ export function MilkdownEditor({
     if (!isActive) {
       setLinkCompletion(null);
       setAnalysisCompletion(null);
+      setInlineAiPrompt(null);
     }
   }, [isActive]);
 
@@ -140,12 +185,34 @@ export function MilkdownEditor({
   }, [workspaceEntries]);
 
   useEffect(() => {
+    selectedEntryPathsRef.current = selectedEntryPaths;
+  }, [selectedEntryPaths]);
+
+  useEffect(() => {
+    workspaceRootNameRef.current = workspaceRootName;
+  }, [workspaceRootName]);
+
+  useEffect(() => {
     linkCompletionRef.current = linkCompletion;
   }, [linkCompletion]);
 
   useEffect(() => {
     analysisCompletionRef.current = analysisCompletion;
   }, [analysisCompletion]);
+
+  useEffect(() => {
+    inlineAiPromptRef.current = inlineAiPrompt;
+  }, [inlineAiPrompt]);
+
+  useEffect(() => {
+    if (!inlineAiPrompt) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      inlineAiTextareaRef.current?.focus();
+    }, 0);
+  }, [inlineAiPrompt?.anchorPos, inlineAiPrompt?.mode]);
 
   useEffect(() => {
     focusedBlockIdRef.current = focusedBlockId ?? null;
@@ -279,6 +346,19 @@ export function MilkdownEditor({
           }
 
           const view = ctx.get(editorViewCtx);
+          const inlineTrigger = computeInlineAiTriggerState(view, selection);
+
+          if (inlineTrigger && !inlineAiPromptRef.current) {
+            openInlineAiPrompt(view, inlineTrigger);
+            return;
+          }
+
+          if (inlineAiPromptRef.current) {
+            setLinkCompletion(null);
+            setAnalysisCompletion(null);
+            return;
+          }
+
           setLinkCompletion(computeLinkCompletionState(view, selection));
           setAnalysisCompletion(computeAnalysisCompletionState(view, selection));
         });
@@ -519,6 +599,156 @@ export function MilkdownEditor({
           visibleIntegralBlockSuggestions.length - 1
         );
 
+  const openInlineAiPrompt = (view: EditorView, trigger: InlineAiTriggerState): void => {
+    const nextPrompt: InlineAiPromptState = {
+      afterText: trigger.afterText,
+      anchorPos: trigger.replaceFrom,
+      beforeText: trigger.beforeText,
+      error: null,
+      isSubmitting: false,
+      mode: trigger.mode,
+      prompt: "",
+      x: trigger.x,
+      y: trigger.y
+    };
+
+    inlineAiPromptRef.current = nextPrompt;
+    setInlineAiPrompt(nextPrompt);
+    setLinkCompletion(null);
+    setAnalysisCompletion(null);
+
+    const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
+    transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
+    view.dispatch(transaction.scrollIntoView());
+  };
+
+  const closeInlineAiPrompt = (): void => {
+    if (inlineAiPromptRef.current?.isSubmitting) {
+      return;
+    }
+
+    inlineAiPromptRef.current = null;
+    setInlineAiPrompt(null);
+    editorRef.current?.editor.action((ctx) => {
+      ctx.get(editorViewCtx).focus();
+    });
+  };
+
+  const updateInlineAiPrompt = (prompt: string): void => {
+    setInlineAiPrompt((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const next = { ...current, error: null, prompt };
+      inlineAiPromptRef.current = next;
+      return next;
+    });
+  };
+
+  const submitInlineAiPrompt = async (): Promise<void> => {
+    const current = inlineAiPromptRef.current;
+    const editor = editorRef.current;
+
+    if (!current || !editor || current.isSubmitting || current.prompt.trim().length === 0) {
+      return;
+    }
+
+    const submittingState = {
+      ...current,
+      error: null,
+      isSubmitting: true
+    };
+
+    inlineAiPromptRef.current = submittingState;
+    setInlineAiPrompt(submittingState);
+
+    try {
+      if (current.mode === "insert-text") {
+        const result = await window.integralNotes.submitInlineAiInsertion({
+          afterText: current.afterText,
+          beforeText: current.beforeText,
+          context: buildInlineAiContextSummary(current),
+          prompt: current.prompt
+        });
+
+        insertMarkdownAtPosition(current.anchorPos, result.text);
+      } else {
+        const result = await window.integralNotes.submitInlinePythonBlock({
+          afterText: current.afterText,
+          beforeText: current.beforeText,
+          context: buildInlineAiContextSummary(current),
+          prompt: current.prompt,
+          sourceNotePath: relativePath
+        });
+        const snapshot = await window.integralNotes.syncWorkspace();
+
+        if (snapshot) {
+          onWorkspaceSnapshotChangedRef.current(
+            snapshot,
+            `${result.scriptPath} を AI で作成しました`
+          );
+        }
+
+        const catalog = await window.integralNotes.getIntegralAssetCatalog();
+        onIntegralAssetCatalogChangedRef.current(catalog);
+
+        const blockType = `${result.scriptPath}:${result.functionName}`;
+        const definition =
+          catalog.blockTypes.find(
+            (candidate) =>
+              candidate.pluginId === GENERAL_ANALYSIS_PLUGIN_ID && candidate.blockType === blockType
+          ) ?? null;
+        const blockMarkdown = definition
+          ? toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)))
+          : createPythonIntegralBlockMarkdown(blockType);
+
+        insertMarkdownAtPosition(current.anchorPos, blockMarkdown);
+      }
+
+      inlineAiPromptRef.current = null;
+      setInlineAiPrompt(null);
+    } catch (error) {
+      const nextState = {
+        ...current,
+        error: toErrorMessage(error),
+        isSubmitting: false
+      };
+
+      inlineAiPromptRef.current = nextState;
+      setInlineAiPrompt(nextState);
+    }
+  };
+
+  const insertMarkdownAtPosition = (position: number, markdown: string): void => {
+    const editor = editorRef.current;
+
+    if (!editor) {
+      return;
+    }
+
+    editor.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const nextPosition = Math.max(0, Math.min(position, view.state.doc.content.size));
+      view.dispatch(
+        view.state.tr
+          .setSelection(TextSelection.create(view.state.doc, nextPosition))
+          .scrollIntoView()
+      );
+      insert(markdown)(ctx);
+      view.focus();
+    });
+  };
+
+  const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
+    activeDocumentExcerpt: buildInlineAiExcerpt(state.beforeText, state.afterText),
+    activeDocumentKind: "markdown",
+    activeDocumentName: getFileName(relativePath),
+    activeRelativePath: relativePath,
+    selectedPaths: selectedEntryPathsRef.current,
+    workspaceRootName: workspaceRootNameRef.current
+  });
+
   const insertWorkspaceLink = (suggestion: WorkspaceFileSuggestion): void => {
     const editor = editorRef.current;
     const completionState = linkCompletionRef.current;
@@ -721,6 +951,81 @@ export function MilkdownEditor({
         className="editor-surface"
         ref={rootRef}
       />
+      {inlineAiPrompt ? (
+        <form
+          className="editor-ai-popup"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitInlineAiPrompt();
+          }}
+          style={{
+            left: `${inlineAiPrompt.x}px`,
+            top: `${inlineAiPrompt.y}px`
+          }}
+        >
+          <div className="editor-ai-popup__header">
+            <strong>
+              {inlineAiPrompt.mode === "insert-text" ? "AI 挿入" : "Python block 生成"}
+            </strong>
+            <button
+              aria-label="閉じる"
+              className="editor-ai-popup__close"
+              disabled={inlineAiPrompt.isSubmitting}
+              onClick={closeInlineAiPrompt}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+          <textarea
+            className="editor-ai-popup__input"
+            disabled={inlineAiPrompt.isSubmitting}
+            onChange={(event) => {
+              updateInlineAiPrompt(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeInlineAiPrompt();
+                return;
+              }
+
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                event.preventDefault();
+                void submitInlineAiPrompt();
+              }
+            }}
+            placeholder={
+              inlineAiPrompt.mode === "insert-text"
+                ? "挿入したい内容を指示"
+                : "実装したい解析 block を指示"
+            }
+            ref={inlineAiTextareaRef}
+            rows={4}
+            value={inlineAiPrompt.prompt}
+          />
+          {inlineAiPrompt.error ? (
+            <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
+          ) : null}
+          <div className="editor-ai-popup__actions">
+            <button
+              className="button button--ghost button--xs"
+              disabled={inlineAiPrompt.isSubmitting}
+              onClick={closeInlineAiPrompt}
+              type="button"
+            >
+              キャンセル
+            </button>
+            <button
+              className="button button--primary button--xs"
+              disabled={inlineAiPrompt.isSubmitting || inlineAiPrompt.prompt.trim().length === 0}
+              type="submit"
+            >
+              {inlineAiPrompt.isSubmitting ? "送信中..." : "送信"}
+            </button>
+          </div>
+        </form>
+      ) : null}
       {analysisCompletion ? (
         <div
           className="editor-link-completion"
@@ -817,6 +1122,48 @@ function collectWorkspaceFileSuggestions(entries: WorkspaceEntry[]): WorkspaceFi
     left.relativePath.localeCompare(right.relativePath, "ja")
   );
   return suggestions;
+}
+
+function computeInlineAiTriggerState(
+  view: EditorView,
+  selection: Selection
+): InlineAiTriggerState | null {
+  if (!selection.empty) {
+    return null;
+  }
+
+  const { $from, from } = selection;
+  const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
+  const marker = textBefore.endsWith("??") ? "??" : textBefore.endsWith(">>") ? ">>" : null;
+
+  if (!marker) {
+    return null;
+  }
+
+  const replaceFrom = from - marker.length;
+  const replaceTo = from;
+
+  try {
+    const coords = view.coordsAtPos(from);
+    const popupLayout = computePopupLayout(coords);
+
+    return {
+      afterText: view.state.doc.textBetween(
+        replaceTo,
+        Math.min(view.state.doc.content.size, replaceTo + 6000),
+        "\n",
+        "\0"
+      ),
+      beforeText: view.state.doc.textBetween(Math.max(0, replaceFrom - 6000), replaceFrom, "\n", "\0"),
+      mode: marker === "??" ? "insert-text" : "python-block",
+      replaceFrom,
+      replaceTo,
+      x: clampPopupCoordinate(coords.left, 420, window.innerWidth),
+      y: popupLayout.y
+    };
+  } catch {
+    return null;
+  }
 }
 
 function computeLinkCompletionState(
@@ -1069,6 +1416,22 @@ function toWorkspaceLinkLabel(fileName: string): string {
   }
 
   return fileName.slice(0, -3);
+}
+
+function buildInlineAiExcerpt(beforeText: string, afterText: string): string {
+  return [
+    "before cursor:",
+    beforeText,
+    "",
+    "after cursor:",
+    afterText
+  ].join("\n");
+}
+
+function getFileName(relativePath: string): string {
+  const normalizedPath = relativePath.replace(/\\/gu, "/");
+  const segments = normalizedPath.split("/");
+  return segments[segments.length - 1] ?? normalizedPath;
 }
 
 function clampPopupCoordinate(value: number, panelSize: number, viewportSize: number): number {

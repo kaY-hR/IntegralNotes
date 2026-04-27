@@ -18,7 +18,11 @@ import type {
   SaveAiChatSettingsRequest,
   SaveAiChatSessionRequest,
   SubmitAiChatRequest,
-  SubmitAiChatResult
+  SubmitAiChatResult,
+  SubmitInlineAiInsertionRequest,
+  SubmitInlineAiInsertionResult,
+  SubmitInlinePythonBlockRequest,
+  SubmitInlinePythonBlockResult
 } from "../shared/aiChat";
 import { AiAgentService, type AiAgentExecutionRuntime } from "./aiAgentService";
 import { WorkspaceService } from "./workspaceService";
@@ -96,6 +100,8 @@ const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
 const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"]);
 const MAX_PERSISTED_CHAT_SESSIONS = 50;
 const MAX_IMAGE_ATTACHMENT_FILE_BYTES = 8_000_000;
+const MAX_INLINE_AI_CONTEXT_CHARS = 6_000;
+const TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS = 8;
 const WORKSPACE_ENV_FILENAMES = [".env.local", ".env"] as const;
 const FALLBACK_MODELS: AiChatModelOption[] = [
   {
@@ -366,6 +372,94 @@ export class AiChatService {
     };
   }
 
+  async submitInlineInsertion(
+    request: SubmitInlineAiInsertionRequest
+  ): Promise<SubmitInlineAiInsertionResult> {
+    const prompt = request.prompt.trim();
+
+    if (prompt.length === 0) {
+      throw new Error("プロンプトが空です。");
+    }
+
+    const { runtimeSelection, status } = await this.resolveCurrentRuntimeSelection();
+
+    if (runtimeSelection.mode === "stub") {
+      throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
+    }
+
+    const result = await this.generateTaskWithAgentRuntime({
+      context: request.context,
+      instructions: buildInlineInsertionInstructions(),
+      maxSteps: 1,
+      prompt: buildInlineInsertionPrompt(request),
+      runtimeSelection,
+      useWorkspaceTools: false
+    });
+    const text = result.text.trim();
+
+    if (text.length === 0) {
+      throw new Error("AI が挿入テキストを返しませんでした。");
+    }
+
+    return {
+      text
+    };
+  }
+
+  async submitInlinePythonBlock(
+    request: SubmitInlinePythonBlockRequest
+  ): Promise<SubmitInlinePythonBlockResult> {
+    const prompt = request.prompt.trim();
+    const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
+
+    if (prompt.length === 0) {
+      throw new Error("プロンプトが空です。");
+    }
+
+    if (!workspaceRootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const { runtimeSelection, status } = await this.resolveCurrentRuntimeSelection();
+
+    if (runtimeSelection.mode === "stub") {
+      throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
+    }
+
+    const skillPrompt = await readImplementIntegralBlockSkillPrompt(workspaceRootPath);
+    const result = await this.generateTaskWithAgentRuntime({
+      context: request.context,
+      instructions: buildInlinePythonBlockInstructions(skillPrompt),
+      maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
+      prompt: buildInlinePythonBlockPrompt(request),
+      runtimeSelection,
+      useWorkspaceTools: true
+    });
+    const parsed = parseInlinePythonBlockResult(result.text, result.diagnostics.toolTrace);
+    const scriptPath = normalizeGeneratedScriptPath(parsed.scriptPath);
+    const functionName = normalizeGeneratedFunctionName(parsed.functionName);
+    const absoluteScriptPath = this.workspaceService.getAbsolutePath(scriptPath);
+    const stats = await fs.stat(absoluteScriptPath).catch(() => null);
+
+    if (!stats?.isFile()) {
+      throw new Error(`AI が Python script を保存しませんでした: ${scriptPath}`);
+    }
+
+    const scriptSource = await fs.readFile(absoluteScriptPath, "utf8");
+
+    if (!containsDiscoverableIntegralCallable(scriptSource, functionName)) {
+      throw new Error(
+        `${scriptPath} に @integral_block 直下の def ${functionName}(...) が見つかりません。`
+      );
+    }
+
+    return {
+      assistantText: result.text,
+      functionName,
+      scriptPath
+    };
+  }
+
   private async getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
     if (!forceRefresh && this.modelCatalogCache) {
       return this.modelCatalogCache;
@@ -455,6 +549,27 @@ export class AiChatService {
       `${JSON.stringify(normalizePersistedHistory(history), null, 2)}\n`,
       "utf8"
     );
+  }
+
+  private async resolveCurrentRuntimeSelection(): Promise<{
+    runtimeSelection: ResolvedAiRuntime;
+    status: AiChatStatus;
+    workspaceRootPath: string | null;
+  }> {
+    const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
+    const [status, settings] = await Promise.all([this.getStatus(), this.readPersistedSettings()]);
+    const selectedModelId = status.selectedModelId ?? FALLBACK_MODELS[0]?.id ?? "openai/gpt-5.4";
+    const runtimeSelection = await this.resolveRuntimeSelection({
+      modelId: selectedModelId,
+      settings,
+      workspaceRootPath
+    });
+
+    return {
+      runtimeSelection,
+      status,
+      workspaceRootPath
+    };
   }
 
   private async resolveRuntimeSelection({
@@ -558,6 +673,274 @@ export class AiChatService {
       throw error;
     }
   }
+
+  private async generateTaskWithAgentRuntime({
+    context,
+    instructions,
+    maxSteps,
+    prompt,
+    runtimeSelection,
+    useWorkspaceTools
+  }: {
+    context: AiChatContextSummary;
+    instructions: string;
+    maxSteps: number;
+    prompt: string;
+    runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
+    useWorkspaceTools: boolean;
+  }): Promise<{
+    diagnostics: AiChatMessageDiagnostics;
+    text: string;
+  }> {
+    try {
+      const result = await this.aiAgentService.generateForTask({
+        context,
+        instructions,
+        maxSteps,
+        prompt,
+        runtime: runtimeSelection.runtime,
+        useWorkspaceTools
+      });
+
+      return {
+        diagnostics: result.diagnostics,
+        text: result.text
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (runtimeSelection.mode === "gateway" && /Authentication failed|AI_GATEWAY_API_KEY|VERCEL_OIDC_TOKEN/iu.test(message)) {
+        throw new Error(
+          buildGatewayRequestErrorMessage({
+            gatewayAuthSource: runtimeSelection.gatewayAuth.source,
+            message,
+            usedByok:
+              runtimeSelection.runtime.mode === "gateway" &&
+              runtimeSelection.runtime.providerOptions !== undefined
+          })
+        );
+      }
+
+      if (runtimeSelection.mode === "direct" && /401|403|authentication|api key|unauthorized/iu.test(message)) {
+        throw new Error(buildDirectProviderRequestErrorMessage(runtimeSelection.directProvider, message));
+      }
+
+      throw error;
+    }
+  }
+}
+
+function buildInlineRuntimeNotConfiguredMessage(status: AiChatStatus): string {
+  const model = status.selectedModelId ? ` (${status.selectedModelId})` : "";
+
+  return `AI runtime が未設定です${model}。AI Chat settings で model と credential を設定してください。`;
+}
+
+function buildInlineInsertionInstructions(): string {
+  return [
+    "You are an inline Markdown editor assistant inside IntegralNotes.",
+    "Return only the best text to insert at the cursor position.",
+    "Do not include explanations, greetings, labels, surrounding quotes, or code fences unless those characters are the intended inserted text.",
+    "Match the language, tone, formatting, and Markdown style of the surrounding note.",
+    "Use the user's request as the editing instruction, not as text to restate."
+  ].join("\n");
+}
+
+function buildInlineInsertionPrompt(request: SubmitInlineAiInsertionRequest): string {
+  return [
+    "User request:",
+    request.prompt.trim(),
+    "",
+    "Text before cursor:",
+    truncateInlineContext(request.beforeText, "tail"),
+    "",
+    "Text after cursor:",
+    truncateInlineContext(request.afterText, "head"),
+    "",
+    "Return only the text to insert at the cursor."
+  ].join("\n");
+}
+
+function buildInlinePythonBlockInstructions(skillPrompt: string): string {
+  const lines = [
+    "You are implementing a Python analysis block for IntegralNotes.",
+    "Immediately implement the requested block as a real workspace Python file by using writeWorkspaceFile.",
+    "Use the implement-integral-block skill rules below as the system contract for the Python file.",
+    "Prefer a new file under scripts/ai_blocks/ with a descriptive snake_case name unless the user asks for a specific path.",
+    "Do not modify the active note. The app will insert the itg-notes block after you return.",
+    "The script must expose a top-level @integral_block-decorated callable, normally def main(inputs, outputs, params) -> None.",
+    "After saving the script, return JSON only. No markdown fence, no prose.",
+    'Required JSON shape: {"scriptPath":"scripts/ai_blocks/example.py","functionName":"main","summary":"short summary"}',
+    ""
+  ];
+
+  if (skillPrompt.trim().length > 0) {
+    lines.push(skillPrompt.trim());
+  }
+
+  return lines.join("\n");
+}
+
+function buildInlinePythonBlockPrompt(request: SubmitInlinePythonBlockRequest): string {
+  return [
+    "User request:",
+    request.prompt.trim(),
+    "",
+    `Source note path: ${request.sourceNotePath}`,
+    "",
+    "Text before cursor:",
+    truncateInlineContext(request.beforeText, "tail"),
+    "",
+    "Text after cursor:",
+    truncateInlineContext(request.afterText, "head"),
+    "",
+    "Implement the Python script now, save it with writeWorkspaceFile, then return the required JSON only."
+  ].join("\n");
+}
+
+async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string): Promise<string> {
+  const candidateRoots = [
+    path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block"),
+    path.join(workspaceRootPath, "Notes", ".codex", "skills", "implement-integral-block")
+  ];
+
+  for (const skillRootPath of candidateRoots) {
+    const skillBody = await readTextIfExists(path.join(skillRootPath, "SKILL.md"));
+
+    if (!skillBody) {
+      continue;
+    }
+
+    const sdkReference = await readTextIfExists(
+      path.join(skillRootPath, "references", "integral-sdk-interface.md")
+    );
+    const patternReference = await readTextIfExists(
+      path.join(skillRootPath, "references", "block-implementation-patterns.md")
+    );
+
+    return [
+      "# implement-integral-block skill",
+      skillBody,
+      sdkReference ? "# integral-sdk-interface reference\n\n" + sdkReference : "",
+      patternReference ? "# block-implementation-patterns reference\n\n" + patternReference : ""
+    ]
+      .filter((part) => part.trim().length > 0)
+      .join("\n\n");
+  }
+
+  return [
+    "Use from integral import integral_block.",
+    "The decorator supports display_name, description, inputs, and outputs.",
+    "Slot objects support name, extension/extensions, format, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "Keep @integral_block(...) immediately above a top-level def main(inputs, outputs, params) -> None.",
+    "Treat inputs and outputs as path dictionaries. Write outputs only to assigned output paths."
+  ].join("\n");
+}
+
+async function readTextIfExists(filePath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function parseInlinePythonBlockResult(
+  text: string,
+  toolTrace: readonly AiChatToolTraceEntry[]
+): {
+  functionName: string;
+  scriptPath: string;
+} {
+  const parsedJson = parseJsonObjectFromText(text);
+  const jsonScriptPath =
+    parsedJson && typeof parsedJson.scriptPath === "string" ? parsedJson.scriptPath : null;
+  const jsonFunctionName =
+    parsedJson && typeof parsedJson.functionName === "string" ? parsedJson.functionName : null;
+  const traceScriptPath = [...toolTrace]
+    .reverse()
+    .find((entry) => entry.toolName === "writeWorkspaceFile" && entry.status === "success")
+    ?.outputSummary.match(/^(?:created|updated|saved):\s*(.+)$/u)?.[1];
+  const scriptPath = jsonScriptPath ?? traceScriptPath ?? null;
+
+  if (!scriptPath) {
+    throw new Error("AI の応答から保存済み script path を取得できませんでした。");
+  }
+
+  return {
+    functionName: jsonFunctionName ?? "main",
+    scriptPath
+  };
+}
+
+function parseJsonObjectFromText(text: string): Record<string, unknown> | null {
+  const fencedMatch = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text);
+  const candidate = fencedMatch?.[1] ?? text;
+  const startIndex = candidate.indexOf("{");
+  const endIndex = candidate.lastIndexOf("}");
+
+  if (startIndex < 0 || endIndex <= startIndex) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(candidate.slice(startIndex, endIndex + 1)) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGeneratedScriptPath(scriptPath: string): string {
+  const normalized = scriptPath.trim().replace(/\\/gu, "/").replace(/^\/+/u, "");
+  const relativePath = path.posix.normalize(normalized);
+
+  if (
+    relativePath.length === 0 ||
+    relativePath === "." ||
+    relativePath.includes(":") ||
+    relativePath.startsWith("../") ||
+    relativePath.includes("/../") ||
+    path.posix.extname(relativePath).toLowerCase() !== ".py"
+  ) {
+    throw new Error(`AI が返した script path が不正です: ${scriptPath}`);
+  }
+
+  return relativePath;
+}
+
+function normalizeGeneratedFunctionName(functionName: string): string {
+  const normalized = functionName.trim();
+
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized)) {
+    throw new Error(`AI が返した function name が不正です: ${functionName}`);
+  }
+
+  return normalized;
+}
+
+function containsDiscoverableIntegralCallable(source: string, functionName: string): boolean {
+  const escapedFunctionName = escapeRegExp(functionName);
+  const expression = new RegExp(
+    `@integral_block\\s*\\([\\s\\S]*?\\)\\s*(?:\\r?\\n)+\\s*def\\s+${escapedFunctionName}\\s*\\(`,
+    "u"
+  );
+
+  return expression.test(source);
+}
+
+function truncateInlineContext(value: string, side: "head" | "tail"): string {
+  if (value.length <= MAX_INLINE_AI_CONTEXT_CHARS) {
+    return value;
+  }
+
+  return side === "head"
+    ? value.slice(0, MAX_INLINE_AI_CONTEXT_CHARS)
+    : value.slice(-MAX_INLINE_AI_CONTEXT_CHARS);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function buildHistorySnapshot(history: PersistedAiChatHistoryFile): AiChatHistorySnapshot {

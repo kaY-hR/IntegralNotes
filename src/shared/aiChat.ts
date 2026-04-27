@@ -110,3 +110,28 @@ export interface SubmitAiChatResult {
   messages: AiChatMessage[];
   userMessage?: AiChatMessage;
 }
+
+export interface SubmitInlineAiInsertionRequest {
+  afterText: string;
+  beforeText: string;
+  context: AiChatContextSummary;
+  prompt: string;
+}
+
+export interface SubmitInlineAiInsertionResult {
+  text: string;
+}
+
+export interface SubmitInlinePythonBlockRequest {
+  afterText: string;
+  beforeText: string;
+  context: AiChatContextSummary;
+  prompt: string;
+  sourceNotePath: string;
+}
+
+export interface SubmitInlinePythonBlockResult {
+  assistantText: string;
+  functionName: string;
+  scriptPath: string;
+}

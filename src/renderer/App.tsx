@@ -3143,22 +3143,30 @@ export function App(): JSX.Element {
           onFocusedBlockHandled={() => {
             clearPendingFocusedBlock(relativePath);
           }}
+          onIntegralAssetCatalogChanged={(catalog) => {
+            setIntegralPluginRuntimeCatalog(catalog);
+            setAssetCatalog(catalog);
+          }}
           onOpenWorkspaceFile={(target) => {
             void openWorkspaceTarget(target, {
               openUnsupportedExternally: true
             });
           }}
-          onWorkspaceSnapshotChanged={(snapshot) => {
+          onWorkspaceSnapshotChanged={(snapshot, statusMessage) => {
             applyWorkspaceSnapshot(snapshot, {
-              statusMessage: "画像を workspace に保存しました"
+              statusMessage: statusMessage ?? "画像を workspace に保存しました"
             });
           }}
           onWorkspaceLinkError={(message) => {
             setStatusMessage(message);
           }}
           relativePath={relativePath}
+          selectedEntryPaths={Array.from(selectedEntryPaths).sort((left, right) =>
+            left.localeCompare(right)
+          )}
           toolbar={editorToolbar}
           workspaceEntries={visibleWorkspaceEntries}
+          workspaceRootName={workspace?.rootName ?? null}
         />
       );
     }

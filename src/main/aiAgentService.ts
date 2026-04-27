@@ -119,6 +119,69 @@ export class AiAgentService {
     };
   }
 
+  async generateForTask({
+    context,
+    instructions,
+    maxSteps = TOOL_LOOP_MAX_STEPS,
+    prompt,
+    runtime,
+    useWorkspaceTools
+  }: {
+    context: AiChatContextSummary;
+    instructions: string;
+    maxSteps?: number;
+    prompt: string;
+    runtime: AiAgentExecutionRuntime;
+    useWorkspaceTools: boolean;
+  }): Promise<{
+    diagnostics: AiChatMessageDiagnostics;
+    text: string;
+  }> {
+    const { model, providerOptions } = this.createLanguageModel(runtime);
+    const toolContext = useWorkspaceTools
+      ? await this.createToolContext()
+      : {
+          skillCount: 0,
+          tools: {},
+          workspaceMounted: false
+        };
+    const agent = new ToolLoopAgent({
+      instructions: buildTaskInstructions(instructions, context, toolContext),
+      model,
+      providerOptions: providerOptions as any,
+      stopWhen: stepCountIs(maxSteps),
+      tools: toolContext.tools
+    });
+    const result = await agent.generate({
+      messages: [
+        {
+          content: prompt,
+          role: "user"
+        }
+      ]
+    });
+    const toolTrace = buildToolTrace(result.steps);
+    const text = result.text.trim();
+    const responseText =
+      text.length > 0
+        ? text
+        : buildFallbackAssistantText(toolTrace, result.finishReason ?? null);
+
+    if (responseText.length === 0) {
+      throw new Error("AI agent returned no assistant text.");
+    }
+
+    return {
+      diagnostics: {
+        finishReason: result.finishReason ?? null,
+        modelId: result.steps.at(-1)?.model.modelId ?? runtime.modelId,
+        stepCount: result.steps.length,
+        toolTrace
+      },
+      text: responseText
+    };
+  }
+
   private createLanguageModel(
     runtime: AiAgentExecutionRuntime
   ): {
@@ -236,10 +299,41 @@ function buildAgentInstructions(
     ""
   ];
 
-  lines.push(`workspace: ${context.workspaceRootName ?? "(not open)"}`);
-  lines.push(`active path: ${context.activeRelativePath ?? "(none)"}`);
-  lines.push(`workspace tools mounted: ${toolContext.workspaceMounted ? "yes" : "no"}`);
-  lines.push(`skills available: ${toolContext.skillCount}`);
+  lines.push(buildWorkspaceContextInstructions(context, toolContext));
+
+  return lines.join("\n");
+}
+
+function buildTaskInstructions(
+  instructions: string,
+  context: AiChatContextSummary,
+  toolContext: {
+    skillCount: number;
+    workspaceMounted: boolean;
+  }
+): string {
+  return [
+    instructions.trim(),
+    "",
+    buildWorkspaceContextInstructions(context, toolContext)
+  ]
+    .filter((part) => part.trim().length > 0)
+    .join("\n");
+}
+
+function buildWorkspaceContextInstructions(
+  context: AiChatContextSummary,
+  toolContext: {
+    skillCount: number;
+    workspaceMounted: boolean;
+  }
+): string {
+  const lines = [
+    `workspace: ${context.workspaceRootName ?? "(not open)"}`,
+    `active path: ${context.activeRelativePath ?? "(none)"}`,
+    `workspace tools mounted: ${toolContext.workspaceMounted ? "yes" : "no"}`,
+    `skills available: ${toolContext.skillCount}`
+  ];
 
   if (context.activeDocumentName) {
     lines.push(`active document name: ${context.activeDocumentName}`);

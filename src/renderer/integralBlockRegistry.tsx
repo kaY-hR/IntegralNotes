@@ -75,6 +75,20 @@ export function createIntegralBlockMarkdown(definition: IntegralBlockDefinition)
   return toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)));
 }
 
+export function createPythonIntegralBlockMarkdown(blockType: string): string {
+  return toIntegralCodeBlock(
+    serializeIntegralBlockContent({
+      "block-type": blockType,
+      id: createBlockId(),
+      inputs: {},
+      outputConfigs: {},
+      outputs: {},
+      params: {},
+      plugin: GENERAL_ANALYSIS_PLUGIN_ID
+    })
+  );
+}
+
 export function serializeIntegralBlockContent(block: IntegralBlockDocument): string {
   return serializeSimpleYamlDocument(buildIntegralYamlDocument(block));
 }
