@@ -3517,6 +3517,7 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 .ai-chat-panel__pill {
   display: inline-flex;
   align-items: center;
+  max-width: 220px;
   min-height: 28px;
   padding: 0 10px;
   border: 1px solid rgba(146, 170, 194, 0.55);
@@ -3525,6 +3526,9 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   color: #476076;
   font-size: 0.76rem;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-chat-panel__settings,
@@ -3681,6 +3685,10 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 
 .ai-chat-panel__empty strong {
   color: #183149;
+}
+
+.ai-chat-panel__empty--compact {
+  min-height: 96px;
 }
 
 .ai-chat-panel__message {
@@ -3912,6 +3920,71 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 .ai-chat-panel__dialog-meta {
   display: flex;
   justify-content: flex-end;
+}
+
+.ai-chat-panel__session-list {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.ai-chat-panel__session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px;
+  border: 1px solid rgba(204, 215, 227, 0.86);
+  border-radius: 12px;
+  background: rgba(249, 251, 254, 0.92);
+}
+
+.ai-chat-panel__session-row--active {
+  border-color: rgba(76, 126, 176, 0.5);
+  background: rgba(237, 245, 253, 0.96);
+}
+
+.ai-chat-panel__session-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #183149;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-chat-panel__session-main:disabled {
+  cursor: default;
+}
+
+.ai-chat-panel__session-main strong,
+.ai-chat-panel__session-main span,
+.ai-chat-panel__session-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-chat-panel__session-main strong {
+  font-size: 0.84rem;
+}
+
+.ai-chat-panel__session-main span {
+  color: #6a7f94;
+  font-size: 0.72rem;
+}
+
+.ai-chat-panel__session-main small {
+  color: #506a82;
+  font-size: 0.72rem;
+}
+
+.ai-chat-panel__session-delete {
+  align-self: center;
 }
 
 .ai-chat-panel__composer-hint {

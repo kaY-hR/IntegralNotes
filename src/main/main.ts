@@ -1,6 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import type {
@@ -50,6 +52,10 @@ function resolveInitialWorkspacePath(): string | undefined {
   }
 
   return undefined;
+}
+
+function toVSCodeFileUri(absolutePath: string): string {
+  return `vscode://file${pathToFileURL(absolutePath).pathname}`;
 }
 
 async function readClipboardExternalPaths(): Promise<string[]> {
@@ -162,7 +168,8 @@ const aiAgentService = new AiAgentService(workspaceService, workspaceVisualRende
 const aiChatService = new AiChatService(
   aiAgentService,
   workspaceService,
-  path.join(app.getPath("userData"), "ai-chat-settings.json")
+  path.join(app.getPath("userData"), "ai-chat-settings.json"),
+  path.join(app.getPath("userData"), "ai-chat-history.json")
 );
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -566,6 +573,40 @@ function registerIpcHandlers(): void {
       throw new Error(errorMessage);
     }
   });
+  ipcMain.handle("workspace:openPathInFileManager", async (_event, relativePath?: string | null) => {
+    const rootPath = workspaceService.currentRootPath;
+
+    if (!rootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const targetPath =
+      relativePath && relativePath.trim().length > 0
+        ? workspaceService.getAbsolutePath(relativePath)
+        : rootPath;
+    const stats = await fs.stat(targetPath);
+
+    if (stats.isDirectory()) {
+      const errorMessage = await shell.openPath(targetPath);
+
+      if (errorMessage.trim().length > 0) {
+        throw new Error(errorMessage);
+      }
+
+      return;
+    }
+
+    shell.showItemInFolder(targetPath);
+  });
+  ipcMain.handle("workspace:openWorkspaceInVSCode", async () => {
+    const rootPath = workspaceService.currentRootPath;
+
+    if (!rootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    await shell.openExternal(toVSCodeFileUri(rootPath));
+  });
   ipcMain.handle("integral:executeAction", async (_event, request: ExecuteIntegralActionRequest) =>
     getPluginRegistry().executeAction(request)
   );
@@ -573,6 +614,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ai-chat:saveSettings", async (_event, request) => aiChatService.saveSettings(request));
   ipcMain.handle("ai-chat:clearApiKey", async () => aiChatService.clearApiKey());
   ipcMain.handle("ai-chat:refreshModels", async () => aiChatService.refreshModels());
+  ipcMain.handle("ai-chat:getHistory", async () => aiChatService.getHistory());
+  ipcMain.handle("ai-chat:createSession", async (_event, request) => aiChatService.createSession(request));
+  ipcMain.handle("ai-chat:saveSession", async (_event, request) => aiChatService.saveSession(request));
+  ipcMain.handle("ai-chat:switchSession", async (_event, sessionId) => aiChatService.switchSession(sessionId));
+  ipcMain.handle("ai-chat:deleteSession", async (_event, sessionId) => aiChatService.deleteSession(sessionId));
   ipcMain.handle("ai-chat:submit", async (_event, request) => aiChatService.submit(request));
 }
 

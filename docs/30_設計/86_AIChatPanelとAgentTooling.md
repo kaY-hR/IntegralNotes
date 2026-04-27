@@ -21,6 +21,7 @@ IntegralNotes に、`Claude Code` / `Codex` / `GitHub Copilot Chat` に近い co
 - `readWorkspaceImage` / `renderWorkspaceDocument` / `writeWorkspaceFile` を main process 側の typed tool として追加した
 - transcript には assistant message だけでなく tool 実行も `tool` role message として表示する
 - `MCP` は**まだ未実装**で、registry も add UI も無い
+- chat transcript は app `userData/ai-chat-history.json` に session として永続化し、AI Chat panel 起動時に active session を復元する
 
 ## 現在の構成
 
@@ -28,11 +29,14 @@ IntegralNotes に、`Claude Code` / `Codex` / `GitHub Copilot Chat` に近い co
 Renderer (React)
   AIChatPanel
     -> preload IPC
-    -> ai-chat:getStatus / saveSettings / clearApiKey / refreshModels / submit
+    -> ai-chat:getStatus / saveSettings / clearApiKey / refreshModels
+    -> ai-chat:getHistory / createSession / saveSession / switchSession / deleteSession
+    -> ai-chat:submit
 
 Main Process
   AiChatService
     -> model catalog / auth resolution / history normalization
+    -> persisted chat session store
     -> AiAgentService.submit()
 
   AiAgentService
@@ -68,6 +72,8 @@ Main Process
 - tool 実行は assistant の内部 state ではなく、独立した `tool` message として transcript に差し込む
 - user は画像ファイルを添付できる
 - prompt 文中に画像 path が書かれている場合も、可能なら画像 attachment 化する
+- header の History dialog から過去 session を選択し、同じ transcript の続きとして送信できる
+- New Chat は現在の session を残したまま、新しい空 session を active にする
 
 ### 現在の status 表示
 
@@ -103,6 +109,22 @@ Main Process
 - 保存対象は `AI Gateway API Key` のみ
 - 保存先は app `userData/ai-chat-settings.json`
 - `safeStorage` が使える環境では暗号化、使えない場合は平文
+
+## chat履歴
+
+- 保存先は app `userData/ai-chat-history.json`
+- 保存単位は session
+  - `id`
+  - `title`
+  - `createdAt`
+  - `updatedAt`
+  - `workspaceRootName`
+  - `workspaceRootPath`
+  - `messages`
+- `activeSessionId` を保存し、次回 panel 表示時にその session を復元する
+- History dialog では session 一覧、session 切替、New Chat、Delete を扱う
+- `submit` に渡す model 用 history は従来通り renderer 側で `tool` role を除外したものを使う
+- 永続化対象の transcript には `tool` role message も含め、過去の tool 実行 trace をUI上で再確認できるようにする
 
 ## proxy 対応
 
@@ -277,7 +299,6 @@ message role は次を持つ。
 - generic MCP client registry
 - MCP server add / enable / disable UI
 - persistent write の conflict handling
-- multi-session 永続化
 - background autonomous agent
 
 ## MCP の現状
@@ -302,7 +323,6 @@ message role は次を持つ。
 2. host command tool
 3. write preview / approval UI
 4. MCP registry
-5. session persistence
 
 ## open questions
 
@@ -310,7 +330,7 @@ message role は次を持つ。
 - real workspace write を patch ベース approval に寄せるか、file save を許すか
 - host command approval を message 単位にするか、session policy にするか
 - MCP 設定を workspace local に置くか、user global に置くか
-- trace / session 保存先を workspace metadata に置くか、app userData に置くか
+- trace / session 保存先は現状 app userData とするが、workspace local history も将来必要か
 
 ## 参考
 

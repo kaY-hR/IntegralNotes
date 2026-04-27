@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import type {
   AiChatContextSummary,
+  AiChatHistorySnapshot,
   AiChatImageAttachment,
   AiChatMessage,
+  AiChatSessionSummary,
   AiChatStatus
 } from "../shared/aiChat";
 import type { WorkspaceFileDocument } from "../shared/workspace";
@@ -34,10 +36,15 @@ export function AIChatPanel({
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [composerAttachments, setComposerAttachments] = useState<AiChatImageAttachment[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [historySnapshot, setHistorySnapshot] = useState<AiChatHistorySnapshot | null>(null);
   const [isContextDialogOpen, setIsContextDialogOpen] = useState(false);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+  const [isSessionMutating, setIsSessionMutating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [messages, setMessages] = useState<AiChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -45,6 +52,46 @@ export function AIChatPanel({
   const [status, setStatus] = useState<AiChatStatus | null>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+
+  const applyHistoryMetadata = (snapshot: AiChatHistorySnapshot): void => {
+    setHistorySnapshot(snapshot);
+    setActiveSessionId(snapshot.activeSessionId);
+  };
+
+  const applyHistorySnapshot = (snapshot: AiChatHistorySnapshot): void => {
+    applyHistoryMetadata(snapshot);
+    setMessages(snapshot.activeSession.messages);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHistory = async (): Promise<void> => {
+      setIsLoadingHistory(true);
+
+      try {
+        const snapshot = await window.integralNotes.getAiChatHistory();
+
+        if (!cancelled) {
+          applyHistorySnapshot(snapshot);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(toErrorMessage(error));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingHistory(false);
+        }
+      }
+    };
+
+    void loadHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,7 +157,7 @@ export function AIChatPanel({
   }, [selectedModelId, status]);
 
   useEffect(() => {
-    const hasOpenDialog = isContextDialogOpen || isSettingsDialogOpen;
+    const hasOpenDialog = isContextDialogOpen || isHistoryDialogOpen || isSettingsDialogOpen;
 
     document.body.classList.toggle("integral-dialog-open", hasOpenDialog);
 
@@ -121,16 +168,17 @@ export function AIChatPanel({
     return () => {
       document.body.classList.remove("integral-dialog-open");
     };
-  }, [isContextDialogOpen, isSettingsDialogOpen]);
+  }, [isContextDialogOpen, isHistoryDialogOpen, isSettingsDialogOpen]);
 
   useEffect(() => {
-    if (!isContextDialogOpen && !isSettingsDialogOpen) {
+    if (!isContextDialogOpen && !isHistoryDialogOpen && !isSettingsDialogOpen) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         setIsContextDialogOpen(false);
+        setIsHistoryDialogOpen(false);
         setIsSettingsDialogOpen(false);
       }
     };
@@ -140,7 +188,7 @@ export function AIChatPanel({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isContextDialogOpen, isSettingsDialogOpen]);
+  }, [isContextDialogOpen, isHistoryDialogOpen, isSettingsDialogOpen]);
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -183,6 +231,101 @@ export function AIChatPanel({
         return "Stub Runtime";
     }
   }, [status]);
+
+  const activeSessionTitle = historySnapshot?.activeSession.title ?? "New chat";
+  const sessionCount = historySnapshot?.sessions.length ?? 0;
+
+  const resolveActiveSessionId = async (): Promise<string> => {
+    if (activeSessionId) {
+      return activeSessionId;
+    }
+
+    const snapshot = await window.integralNotes.getAiChatHistory();
+    applyHistorySnapshot(snapshot);
+    setIsLoadingHistory(false);
+    return snapshot.activeSessionId;
+  };
+
+  const persistSessionMessages = async (
+    sessionId: string,
+    nextMessages: AiChatMessage[]
+  ): Promise<void> => {
+    const snapshot = await window.integralNotes.saveAiChatSession({
+      context: contextSummary,
+      messages: nextMessages,
+      sessionId
+    });
+
+    applyHistoryMetadata(snapshot);
+  };
+
+  const handleCreateSession = async (): Promise<void> => {
+    if (isSubmitting || isSessionMutating) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsSessionMutating(true);
+
+    try {
+      const snapshot = await window.integralNotes.createAiChatSession({
+        context: contextSummary
+      });
+
+      applyHistorySnapshot(snapshot);
+      setPrompt("");
+      setComposerAttachments([]);
+      setIsHistoryDialogOpen(false);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsSessionMutating(false);
+    }
+  };
+
+  const handleSwitchSession = async (sessionId: string): Promise<void> => {
+    if (isSubmitting || isSessionMutating || sessionId === activeSessionId) {
+      setIsHistoryDialogOpen(false);
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsSessionMutating(true);
+
+    try {
+      const snapshot = await window.integralNotes.switchAiChatSession(sessionId);
+
+      applyHistorySnapshot(snapshot);
+      setPrompt("");
+      setComposerAttachments([]);
+      setIsHistoryDialogOpen(false);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsSessionMutating(false);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string): Promise<void> => {
+    if (isSubmitting || isSessionMutating) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsSessionMutating(true);
+
+    try {
+      const snapshot = await window.integralNotes.deleteAiChatSession(sessionId);
+
+      applyHistorySnapshot(snapshot);
+      setPrompt("");
+      setComposerAttachments([]);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsSessionMutating(false);
+    }
+  };
 
   const handleSaveSettings = async (): Promise<void> => {
     setErrorMessage(null);
@@ -238,12 +381,22 @@ export function AIChatPanel({
   const handleSubmit = async (): Promise<void> => {
     const trimmedPrompt = prompt.trim();
 
-    if (trimmedPrompt.length === 0 || isSubmitting) {
+    if (trimmedPrompt.length === 0 || isLoadingHistory || isSubmitting) {
       return;
     }
 
     setErrorMessage(null);
     setIsSubmitting(true);
+
+    let sessionId: string;
+
+    try {
+      sessionId = await resolveActiveSessionId();
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+      setIsSubmitting(false);
+      return;
+    }
 
     const userMessage: AiChatMessage = {
       attachments: composerAttachments.length > 0 ? composerAttachments : undefined,
@@ -253,8 +406,9 @@ export function AIChatPanel({
       text: trimmedPrompt
     };
     const nextHistory = [...messages.filter((message) => message.role !== "tool"), userMessage];
+    const optimisticMessages = [...messages, userMessage];
 
-    setMessages((currentMessages) => [...currentMessages, userMessage]);
+    setMessages(optimisticMessages);
     setPrompt("");
     setComposerAttachments([]);
 
@@ -265,13 +419,19 @@ export function AIChatPanel({
         prompt: trimmedPrompt
       });
 
-      setMessages((currentMessages) => {
-        const nextMessages = currentMessages.map((message) =>
+      const finalMessages = [
+        ...optimisticMessages.map((message) =>
           message.id === userMessage.id ? (result.userMessage ?? message) : message
-        );
+        ),
+        ...result.messages
+      ];
 
-        return [...nextMessages, ...result.messages];
-      });
+      setMessages(finalMessages);
+      try {
+        await persistSessionMessages(sessionId, finalMessages);
+      } catch (persistError) {
+        setErrorMessage(`AI Chat 履歴の保存に失敗しました: ${toErrorMessage(persistError)}`);
+      }
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
       setMessages(messages);
@@ -316,12 +476,28 @@ export function AIChatPanel({
 
         <div className="ai-chat-panel__header-actions">
           <div className="ai-chat-panel__status">
+            <span className="ai-chat-panel__pill" title={activeSessionTitle}>
+              {isLoadingHistory ? "History loading" : activeSessionTitle}
+            </span>
             <span className="ai-chat-panel__pill">{runtimeModeLabel}</span>
             <span className="ai-chat-panel__pill">{status?.providerLabel ?? "runtime status loading"}</span>
             <span className="ai-chat-panel__pill">
               MCP {status?.mcpEnabled ? "connected" : "not wired"}
             </span>
           </div>
+
+          <button
+            aria-label="AI Chat history"
+            className="button button--ghost ai-chat-panel__icon-button"
+            onClick={() => {
+              setErrorMessage(null);
+              setIsHistoryDialogOpen(true);
+            }}
+            title="History"
+            type="button"
+          >
+            <HistoryIcon />
+          </button>
 
           <button
             aria-label="AI Chat context"
@@ -354,8 +530,8 @@ export function AIChatPanel({
       <section className="ai-chat-panel__messages" ref={messagesRef}>
         {messages.length === 0 ? (
           <div className="ai-chat-panel__empty">
-            <strong>まだ会話はありません。</strong>
-            <span>settings icon から runtime 設定、context icon から current context を確認できます。</span>
+            <strong>{isLoadingHistory ? "履歴を読み込み中です。" : "まだ会話はありません。"}</strong>
+            <span>history icon から過去の会話を復元し、settings icon から runtime 設定を確認できます。</span>
           </div>
         ) : (
           messages.map((message) => (
@@ -534,24 +710,17 @@ export function AIChatPanel({
             </button>
             <button
               className="button button--ghost"
-              disabled={
-                messages.length === 0 &&
-                prompt.trim().length === 0 &&
-                composerAttachments.length === 0
-              }
+              disabled={isSubmitting || isSessionMutating}
               onClick={() => {
-                setErrorMessage(null);
-                setMessages([]);
-                setPrompt("");
-                setComposerAttachments([]);
+                void handleCreateSession();
               }}
               type="button"
             >
-              Clear
+              New Chat
             </button>
             <button
               className="button button--primary"
-              disabled={isSubmitting || prompt.trim().length === 0}
+              disabled={isSubmitting || isLoadingHistory || prompt.trim().length === 0}
               type="submit"
             >
               {isSubmitting ? "Sending..." : "Send"}
@@ -559,6 +728,109 @@ export function AIChatPanel({
           </div>
         </div>
       </form>
+
+      {isHistoryDialogOpen ? (
+        <div
+          className="dialog-backdrop"
+          onClick={() => {
+            setIsHistoryDialogOpen(false);
+          }}
+        >
+          <div
+            className="dialog-card dialog-card--ai-chat-settings"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="dialog-card__header">
+              <p className="dialog-card__eyebrow">AI Chat</p>
+              <h2>Chat History</h2>
+              <p>保存済みの会話を開き、続きから送信できます。</p>
+            </div>
+
+            <div className="dialog-card__body dialog-card__body--ai-chat-settings">
+              <div className="ai-chat-panel__dialog-section">
+                <div className="ai-chat-panel__settings-header">
+                  <div>
+                    <span className="ai-chat-panel__context-label">Sessions</span>
+                    <h3 className="ai-chat-panel__section-title">
+                      {sessionCount} saved chat{sessionCount === 1 ? "" : "s"}
+                    </h3>
+                  </div>
+
+                  <button
+                    className="button button--ghost"
+                    disabled={isSessionMutating || isSubmitting}
+                    onClick={() => {
+                      void handleCreateSession();
+                    }}
+                    type="button"
+                  >
+                    New Chat
+                  </button>
+                </div>
+
+                <div className="ai-chat-panel__session-list">
+                  {historySnapshot?.sessions.map((session) => (
+                    <div
+                      className={`ai-chat-panel__session-row${
+                        session.id === activeSessionId ? " ai-chat-panel__session-row--active" : ""
+                      }`}
+                      key={session.id}
+                    >
+                      <button
+                        className="ai-chat-panel__session-main"
+                        disabled={isSessionMutating || isSubmitting}
+                        onClick={() => {
+                          void handleSwitchSession(session.id);
+                        }}
+                        type="button"
+                      >
+                        <strong>{session.title}</strong>
+                        <span>
+                          {formatSessionTime(session.updatedAt)} · {session.messageCount} messages
+                          {session.workspaceRootName ? ` · ${session.workspaceRootName}` : ""}
+                        </span>
+                        {session.lastMessageText ? <small>{session.lastMessageText}</small> : null}
+                      </button>
+
+                      <button
+                        className="button button--ghost ai-chat-panel__session-delete"
+                        disabled={isSessionMutating || isSubmitting}
+                        onClick={() => {
+                          void handleDeleteSession(session.id);
+                        }}
+                        title="Delete history"
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )) ?? (
+                    <div className="ai-chat-panel__empty ai-chat-panel__empty--compact">
+                      <strong>履歴はまだありません。</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {errorMessage ? <div className="ai-chat-panel__error">{errorMessage}</div> : null}
+
+              <div className="dialog-actions">
+                <button
+                  className="button button--primary"
+                  onClick={() => {
+                    setIsHistoryDialogOpen(false);
+                  }}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isSettingsDialogOpen ? (
         <div
@@ -806,6 +1078,16 @@ function SettingsIcon(): JSX.Element {
   );
 }
 
+function HistoryIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="ai-chat-panel__icon-svg" viewBox="0 0 16 16">
+      <path d="M8 2.2a5.8 5.8 0 1 1-4.1 1.7" />
+      <path d="M3.3 2.6v2.8h2.8" />
+      <path d="M8 5.3V8l2 1.2" />
+    </svg>
+  );
+}
+
 function ContextIcon(): JSX.Element {
   return (
     <svg aria-hidden="true" className="ai-chat-panel__icon-svg" viewBox="0 0 16 16">
@@ -919,6 +1201,21 @@ function formatMessageTime(value: string): string {
 }
 
 function formatCatalogTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+
+  return date.toLocaleString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  });
+}
+
+function formatSessionTime(value: AiChatSessionSummary["updatedAt"]): string {
   const date = new Date(value);
 
   if (Number.isNaN(date.valueOf())) {

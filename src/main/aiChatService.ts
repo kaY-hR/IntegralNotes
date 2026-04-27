@@ -5,11 +5,18 @@ import { fileURLToPath } from "node:url";
 
 import type {
   AiChatContextSummary,
+  AiChatHistorySnapshot,
   AiChatImageAttachment,
   AiChatModelOption,
   AiChatMessage,
+  AiChatMessageDiagnostics,
+  AiChatSession,
+  AiChatSessionSummary,
   AiChatStatus,
+  AiChatToolTraceEntry,
+  CreateAiChatSessionRequest,
   SaveAiChatSettingsRequest,
+  SaveAiChatSessionRequest,
   SubmitAiChatRequest,
   SubmitAiChatResult
 } from "../shared/aiChat";
@@ -20,6 +27,22 @@ interface PersistedAiChatSettings {
   apiKeyCiphertext?: string;
   apiKeyPlaintext?: string;
   selectedModelId?: string | null;
+}
+
+interface PersistedAiChatHistoryFile {
+  activeSessionId: string | null;
+  sessions: PersistedAiChatSession[];
+  version: 1;
+}
+
+interface PersistedAiChatSession {
+  createdAt: string;
+  id: string;
+  messages: AiChatMessage[];
+  title: string;
+  updatedAt: string;
+  workspaceRootName: string | null;
+  workspaceRootPath: string | null;
 }
 
 interface ModelCatalog {
@@ -71,6 +94,7 @@ type ResolvedAiRuntime =
 
 const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
 const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"]);
+const MAX_PERSISTED_CHAT_SESSIONS = 50;
 const MAX_IMAGE_ATTACHMENT_FILE_BYTES = 8_000_000;
 const WORKSPACE_ENV_FILENAMES = [".env.local", ".env"] as const;
 const FALLBACK_MODELS: AiChatModelOption[] = [
@@ -121,7 +145,8 @@ export class AiChatService {
   constructor(
     private readonly aiAgentService: AiAgentService,
     private readonly workspaceService: WorkspaceService,
-    private readonly settingsFilePath: string
+    private readonly settingsFilePath: string,
+    private readonly historyFilePath: string
   ) {}
 
   async getStatus(): Promise<AiChatStatus> {
@@ -196,6 +221,106 @@ export class AiChatService {
   async refreshModels(): Promise<AiChatStatus> {
     await this.getModelCatalog(true);
     return this.getStatus();
+  }
+
+  async getHistory(): Promise<AiChatHistorySnapshot> {
+    const history = await this.readPersistedHistory();
+    const ensuredHistory = ensurePersistedHistoryHasActiveSession(
+      history,
+      this.workspaceService.currentRootPath ?? null
+    );
+
+    if (ensuredHistory !== history) {
+      await this.writePersistedHistory(ensuredHistory);
+    }
+
+    return buildHistorySnapshot(ensuredHistory);
+  }
+
+  async createSession(request: CreateAiChatSessionRequest): Promise<AiChatHistorySnapshot> {
+    const history = await this.readPersistedHistory();
+    const now = new Date().toISOString();
+    const session = createPersistedChatSession({
+      context: request.context,
+      createdAt: now,
+      messages: [],
+      workspaceRootPath: this.workspaceService.currentRootPath ?? null
+    });
+
+    const nextHistory = normalizePersistedHistory({
+      activeSessionId: session.id,
+      sessions: [session, ...history.sessions],
+      version: 1
+    });
+
+    await this.writePersistedHistory(nextHistory);
+    return buildHistorySnapshot(nextHistory);
+  }
+
+  async saveSession(request: SaveAiChatSessionRequest): Promise<AiChatHistorySnapshot> {
+    const history = await this.readPersistedHistory();
+    const now = new Date().toISOString();
+    const normalizedMessages = request.messages.map(normalizeAiChatMessageForPersistence).filter(isDefined);
+    const existingSession = history.sessions.find((session) => session.id === request.sessionId);
+    const nextSession: PersistedAiChatSession = existingSession
+      ? {
+          ...existingSession,
+          messages: normalizedMessages,
+          title: deriveSessionTitle(normalizedMessages, existingSession.title),
+          updatedAt: now,
+          workspaceRootName: request.context.workspaceRootName,
+          workspaceRootPath: this.workspaceService.currentRootPath ?? null
+        }
+      : createPersistedChatSession({
+          context: request.context,
+          createdAt: now,
+          messages: normalizedMessages,
+          sessionId: request.sessionId,
+          workspaceRootPath: this.workspaceService.currentRootPath ?? null
+        });
+    const nextHistory = normalizePersistedHistory({
+      activeSessionId: nextSession.id,
+      sessions: [nextSession, ...history.sessions.filter((session) => session.id !== nextSession.id)],
+      version: 1
+    });
+
+    await this.writePersistedHistory(nextHistory);
+    return buildHistorySnapshot(nextHistory);
+  }
+
+  async switchSession(sessionId: string): Promise<AiChatHistorySnapshot> {
+    const history = await this.readPersistedHistory();
+
+    if (!history.sessions.some((session) => session.id === sessionId)) {
+      throw new Error("指定された AI Chat 履歴が見つかりません。");
+    }
+
+    const nextHistory = normalizePersistedHistory({
+      ...history,
+      activeSessionId: sessionId
+    });
+
+    await this.writePersistedHistory(nextHistory);
+    return buildHistorySnapshot(nextHistory);
+  }
+
+  async deleteSession(sessionId: string): Promise<AiChatHistorySnapshot> {
+    const history = await this.readPersistedHistory();
+    const remainingSessions = history.sessions.filter((session) => session.id !== sessionId);
+    const nextHistory = ensurePersistedHistoryHasActiveSession(
+      normalizePersistedHistory({
+        activeSessionId:
+          history.activeSessionId === sessionId
+            ? (remainingSessions[0]?.id ?? null)
+            : history.activeSessionId,
+        sessions: remainingSessions,
+        version: 1
+      }),
+      this.workspaceService.currentRootPath ?? null
+    );
+
+    await this.writePersistedHistory(nextHistory);
+    return buildHistorySnapshot(nextHistory);
   }
 
   async submit(request: SubmitAiChatRequest): Promise<SubmitAiChatResult> {
@@ -308,6 +433,30 @@ export class AiChatService {
     await fs.writeFile(this.settingsFilePath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
   }
 
+  private async readPersistedHistory(): Promise<PersistedAiChatHistoryFile> {
+    try {
+      const raw = await fs.readFile(this.historyFilePath, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+
+      return normalizePersistedHistory(parsed);
+    } catch {
+      return {
+        activeSessionId: null,
+        sessions: [],
+        version: 1
+      };
+    }
+  }
+
+  private async writePersistedHistory(history: PersistedAiChatHistoryFile): Promise<void> {
+    await fs.mkdir(path.dirname(this.historyFilePath), { recursive: true });
+    await fs.writeFile(
+      this.historyFilePath,
+      `${JSON.stringify(normalizePersistedHistory(history), null, 2)}\n`,
+      "utf8"
+    );
+  }
+
   private async resolveRuntimeSelection({
     modelId,
     settings,
@@ -409,6 +558,331 @@ export class AiChatService {
       throw error;
     }
   }
+}
+
+function buildHistorySnapshot(history: PersistedAiChatHistoryFile): AiChatHistorySnapshot {
+  const activeSession =
+    history.sessions.find((session) => session.id === history.activeSessionId) ?? history.sessions[0];
+
+  if (!activeSession) {
+    throw new Error("AI Chat 履歴を初期化できませんでした。");
+  }
+
+  return {
+    activeSession: buildSession(activeSession),
+    activeSessionId: activeSession.id,
+    sessions: history.sessions.map(buildSessionSummary)
+  };
+}
+
+function buildSession(session: PersistedAiChatSession): AiChatSession {
+  return {
+    ...buildSessionSummary(session),
+    messages: session.messages
+  };
+}
+
+function buildSessionSummary(session: PersistedAiChatSession): AiChatSessionSummary {
+  return {
+    createdAt: session.createdAt,
+    id: session.id,
+    lastMessageText: getLastConversationalMessage(session.messages)?.text ?? null,
+    messageCount: session.messages.filter((message) => message.role !== "tool").length,
+    title: session.title,
+    updatedAt: session.updatedAt,
+    workspaceRootName: session.workspaceRootName,
+    workspaceRootPath: session.workspaceRootPath
+  };
+}
+
+function ensurePersistedHistoryHasActiveSession(
+  history: PersistedAiChatHistoryFile,
+  currentWorkspaceRootPath: string | null
+): PersistedAiChatHistoryFile {
+  const hasActiveSession = history.sessions.some((session) => session.id === history.activeSessionId);
+
+  if (hasActiveSession) {
+    return history;
+  }
+
+  if (history.sessions.length > 0) {
+    return {
+      ...history,
+      activeSessionId: history.sessions[0].id
+    };
+  }
+
+  const now = new Date().toISOString();
+  const context = buildFallbackContextSummary(currentWorkspaceRootPath);
+  const session = createPersistedChatSession({
+    context,
+    createdAt: now,
+    messages: [],
+    workspaceRootPath: currentWorkspaceRootPath
+  });
+
+  return {
+    activeSessionId: session.id,
+    sessions: [session],
+    version: 1
+  };
+}
+
+function buildFallbackContextSummary(currentWorkspaceRootPath: string | null): AiChatContextSummary {
+  return {
+    activeDocumentExcerpt: null,
+    activeDocumentKind: null,
+    activeDocumentName: null,
+    activeRelativePath: null,
+    selectedPaths: [],
+    workspaceRootName: currentWorkspaceRootPath ? path.basename(currentWorkspaceRootPath) : null
+  };
+}
+
+function createPersistedChatSession({
+  context,
+  createdAt,
+  messages,
+  sessionId,
+  workspaceRootPath
+}: {
+  context: AiChatContextSummary;
+  createdAt: string;
+  messages: AiChatMessage[];
+  sessionId?: string;
+  workspaceRootPath: string | null;
+}): PersistedAiChatSession {
+  const normalizedMessages = messages.map(normalizeAiChatMessageForPersistence).filter(isDefined);
+
+  return {
+    createdAt,
+    id: normalizeIdentifier(sessionId) ?? createChatSessionId(),
+    messages: normalizedMessages,
+    title: deriveSessionTitle(normalizedMessages, "New chat"),
+    updatedAt: createdAt,
+    workspaceRootName: context.workspaceRootName,
+    workspaceRootPath
+  };
+}
+
+function normalizePersistedHistory(value: unknown): PersistedAiChatHistoryFile {
+  const rawSessions = isRecord(value) && Array.isArray(value.sessions) ? value.sessions : [];
+  const uniqueSessions = new Map<string, PersistedAiChatSession>();
+
+  for (const rawSession of rawSessions) {
+    const session = normalizePersistedSession(rawSession);
+
+    if (!session || uniqueSessions.has(session.id)) {
+      continue;
+    }
+
+    uniqueSessions.set(session.id, session);
+  }
+
+  const sessions = Array.from(uniqueSessions.values())
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, MAX_PERSISTED_CHAT_SESSIONS);
+  const activeSessionId =
+    isRecord(value) && typeof value.activeSessionId === "string"
+      ? normalizeIdentifier(value.activeSessionId)
+      : null;
+
+  return {
+    activeSessionId:
+      activeSessionId && sessions.some((session) => session.id === activeSessionId)
+        ? activeSessionId
+        : (sessions[0]?.id ?? null),
+    sessions,
+    version: 1
+  };
+}
+
+function normalizePersistedSession(value: unknown): PersistedAiChatSession | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = normalizeIdentifier(value.id);
+
+  if (!id) {
+    return null;
+  }
+
+  const messages = Array.isArray(value.messages)
+    ? value.messages.map(normalizeAiChatMessageForPersistence).filter(isDefined)
+    : [];
+  const createdAt = normalizeIsoTimestamp(value.createdAt) ?? getOldestMessageTimestamp(messages) ?? new Date().toISOString();
+  const updatedAt = normalizeIsoTimestamp(value.updatedAt) ?? getNewestMessageTimestamp(messages) ?? createdAt;
+  const persistedTitle = typeof value.title === "string" ? value.title.trim() : "";
+
+  return {
+    createdAt,
+    id,
+    messages,
+    title: deriveSessionTitle(messages, persistedTitle || "New chat"),
+    updatedAt,
+    workspaceRootName: normalizeNullableString(value.workspaceRootName),
+    workspaceRootPath: normalizeNullableString(value.workspaceRootPath)
+  };
+}
+
+function normalizeAiChatMessageForPersistence(value: unknown): AiChatMessage | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const role = normalizeAiChatRole(value.role);
+
+  if (
+    !role ||
+    typeof value.id !== "string" ||
+    typeof value.createdAt !== "string" ||
+    typeof value.text !== "string"
+  ) {
+    return null;
+  }
+
+  const message: AiChatMessage = {
+    createdAt: value.createdAt,
+    id: value.id,
+    role,
+    text: value.text
+  };
+  const attachments = Array.isArray(value.attachments)
+    ? value.attachments.map(normalizeImageAttachment).filter(isDefined)
+    : [];
+  const diagnostics = normalizeMessageDiagnostics(value.diagnostics);
+  const toolTraceEntry = normalizeToolTraceEntry(value.toolTraceEntry);
+
+  if (attachments.length > 0) {
+    message.attachments = attachments;
+  }
+
+  if (diagnostics) {
+    message.diagnostics = diagnostics;
+  }
+
+  if (toolTraceEntry) {
+    message.toolTraceEntry = toolTraceEntry;
+  }
+
+  return message;
+}
+
+function normalizeImageAttachment(value: unknown): AiChatImageAttachment | null {
+  if (
+    !isRecord(value) ||
+    typeof value.dataUrl !== "string" ||
+    typeof value.id !== "string" ||
+    typeof value.mediaType !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.sourcePath !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    dataUrl: value.dataUrl,
+    id: value.id,
+    mediaType: value.mediaType,
+    name: value.name,
+    sourcePath: value.sourcePath
+  };
+}
+
+function normalizeMessageDiagnostics(value: unknown): AiChatMessageDiagnostics | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    finishReason: typeof value.finishReason === "string" ? value.finishReason : null,
+    modelId: typeof value.modelId === "string" ? value.modelId : null,
+    stepCount:
+      typeof value.stepCount === "number" && Number.isFinite(value.stepCount)
+        ? Math.max(0, Math.floor(value.stepCount))
+        : 0,
+    toolTrace: Array.isArray(value.toolTrace)
+      ? value.toolTrace.map(normalizeToolTraceEntry).filter(isDefined)
+      : []
+  };
+}
+
+function normalizeToolTraceEntry(value: unknown): AiChatToolTraceEntry | null {
+  if (
+    !isRecord(value) ||
+    typeof value.inputSummary !== "string" ||
+    typeof value.outputSummary !== "string" ||
+    typeof value.toolName !== "string" ||
+    (value.status !== "error" && value.status !== "success") ||
+    typeof value.stepNumber !== "number" ||
+    !Number.isFinite(value.stepNumber)
+  ) {
+    return null;
+  }
+
+  return {
+    inputSummary: value.inputSummary,
+    outputSummary: value.outputSummary,
+    status: value.status,
+    stepNumber: Math.max(0, Math.floor(value.stepNumber)),
+    toolName: value.toolName
+  };
+}
+
+function normalizeAiChatRole(value: unknown): AiChatMessage["role"] | null {
+  return value === "assistant" || value === "tool" || value === "user" ? value : null;
+}
+
+function deriveSessionTitle(messages: readonly AiChatMessage[], fallbackTitle: string): string {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const baseTitle =
+    firstUserMessage?.text.replace(/\s+/gu, " ").trim() ||
+    fallbackTitle.replace(/\s+/gu, " ").trim() ||
+    "New chat";
+
+  return baseTitle.length > 64 ? `${baseTitle.slice(0, 61).trimEnd()}...` : baseTitle;
+}
+
+function getLastConversationalMessage(messages: readonly AiChatMessage[]): AiChatMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (message && message.role !== "tool") {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+function getOldestMessageTimestamp(messages: readonly AiChatMessage[]): string | null {
+  return messages[0]?.createdAt ?? null;
+}
+
+function getNewestMessageTimestamp(messages: readonly AiChatMessage[]): string | null {
+  return messages[messages.length - 1]?.createdAt ?? null;
+}
+
+function normalizeIdentifier(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? null : value;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function createChatSessionId(): string {
+  return `chat-session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function buildStubResponse(

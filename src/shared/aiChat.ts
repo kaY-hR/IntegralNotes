@@ -64,9 +64,40 @@ export interface AiChatStatus {
   workspaceRootPath: string | null;
 }
 
+export interface AiChatSessionSummary {
+  createdAt: string;
+  id: string;
+  lastMessageText: string | null;
+  messageCount: number;
+  title: string;
+  updatedAt: string;
+  workspaceRootName: string | null;
+  workspaceRootPath: string | null;
+}
+
+export interface AiChatSession extends AiChatSessionSummary {
+  messages: AiChatMessage[];
+}
+
+export interface AiChatHistorySnapshot {
+  activeSession: AiChatSession;
+  activeSessionId: string;
+  sessions: AiChatSessionSummary[];
+}
+
+export interface CreateAiChatSessionRequest {
+  context: AiChatContextSummary;
+}
+
 export interface SaveAiChatSettingsRequest {
   apiKey?: string;
   modelId: string | null;
+}
+
+export interface SaveAiChatSessionRequest {
+  context: AiChatContextSummary;
+  messages: AiChatMessage[];
+  sessionId: string;
 }
 
 export interface SubmitAiChatRequest {

@@ -3,7 +3,10 @@ import type {
   ResolvedPluginViewer
 } from "./plugins";
 import type {
+  CreateAiChatSessionRequest,
+  AiChatHistorySnapshot,
   SaveAiChatSettingsRequest,
+  SaveAiChatSessionRequest,
   AiChatStatus,
   SubmitAiChatRequest,
   SubmitAiChatResult
@@ -299,6 +302,8 @@ export interface IntegralNotesApi {
   replaceWorkspaceText: (request: WorkspaceReplaceRequest) => Promise<WorkspaceReplaceResult>;
   resolveWorkspaceFileUrl: (relativePath: string) => Promise<string>;
   openPathInExternalApp: (relativePath: string) => Promise<void>;
+  openPathInFileManager: (relativePath?: string | null) => Promise<void>;
+  openWorkspaceInVSCode: () => Promise<void>;
   uninstallPlugin: (pluginId: string) => Promise<UninstallPluginResult>;
   executeIntegralBlock: (
     request: ExecuteIntegralBlockRequest
@@ -310,6 +315,11 @@ export interface IntegralNotesApi {
   saveAiChatSettings: (request: SaveAiChatSettingsRequest) => Promise<AiChatStatus>;
   clearAiChatApiKey: () => Promise<AiChatStatus>;
   refreshAiChatModels: () => Promise<AiChatStatus>;
+  getAiChatHistory: () => Promise<AiChatHistorySnapshot>;
+  createAiChatSession: (request: CreateAiChatSessionRequest) => Promise<AiChatHistorySnapshot>;
+  saveAiChatSession: (request: SaveAiChatSessionRequest) => Promise<AiChatHistorySnapshot>;
+  switchAiChatSession: (sessionId: string) => Promise<AiChatHistorySnapshot>;
+  deleteAiChatSession: (sessionId: string) => Promise<AiChatHistorySnapshot>;
   submitAiChat: (request: SubmitAiChatRequest) => Promise<SubmitAiChatResult>;
 }
 

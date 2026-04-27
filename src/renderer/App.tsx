@@ -2527,6 +2527,29 @@ export function App(): JSX.Element {
     }
   };
 
+  const openPathInFileManager = async (relativePath?: string | null): Promise<void> => {
+    try {
+      await window.integralNotes.openPathInFileManager(relativePath ?? null);
+      setContextMenu(null);
+      setStatusMessage(
+        relativePath && relativePath.trim().length > 0
+          ? `${basename(relativePath)} をエクスプローラーで開きました`
+          : `${workspace?.rootName ?? "workspace"} をエクスプローラーで開きました`
+      );
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
+  const openWorkspaceInVSCode = async (): Promise<void> => {
+    try {
+      await window.integralNotes.openWorkspaceInVSCode();
+      setStatusMessage(`${workspace?.rootName ?? "workspace"} をVSCodeで開きました`);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
   const submitInlineEditor = async (value: string): Promise<void> => {
     if (!inlineEditor) {
       return;
@@ -3517,6 +3540,17 @@ export function App(): JSX.Element {
         </button>
         <button
           className="button button--ghost button--menu"
+          disabled={!workspace}
+          onClick={() => {
+            void openWorkspaceInVSCode();
+          }}
+          title={workspace ? `${workspace.rootPath} をVSCodeで開きます` : "ワークスペースフォルダを開いてください"}
+          type="button"
+        >
+          VSCodeで開く
+        </button>
+        <button
+          className="button button--ghost button--menu"
           onClick={openDataRegistrationDialog}
           type="button"
         >
@@ -3621,6 +3655,15 @@ export function App(): JSX.Element {
                   >
                     貼り付け
                   </button>
+                  <button
+                    className="tree-context-menu__item"
+                    onClick={() => {
+                      void openPathInFileManager(null);
+                    }}
+                    type="button"
+                  >
+                    エクスプローラーで開く
+                  </button>
                 </>
               ) : null}
             </>
@@ -3673,6 +3716,15 @@ export function App(): JSX.Element {
                 type="button"
               >
                 相対パスのコピー
+              </button>
+              <button
+                className="tree-context-menu__item"
+                onClick={() => {
+                  void openPathInFileManager(contextMenu.entry?.relativePath);
+                }}
+                type="button"
+              >
+                エクスプローラーで開く
               </button>
               <button
                 className="tree-context-menu__item"

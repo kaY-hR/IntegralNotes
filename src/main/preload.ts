@@ -76,6 +76,9 @@ const api: IntegralNotesApi = {
   resolveWorkspaceFileUrl: (relativePath) => ipcRenderer.invoke("workspace:resolveFileUrl", relativePath),
   openPathInExternalApp: (relativePath) =>
     ipcRenderer.invoke("workspace:openPathInExternalApp", relativePath),
+  openPathInFileManager: (relativePath) =>
+    ipcRenderer.invoke("workspace:openPathInFileManager", relativePath),
+  openWorkspaceInVSCode: () => ipcRenderer.invoke("workspace:openWorkspaceInVSCode"),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("plugins:uninstall", pluginId),
   executeIntegralBlock: (request) => ipcRenderer.invoke("integral:executeBlock", request),
   executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request),
@@ -83,6 +86,11 @@ const api: IntegralNotesApi = {
   saveAiChatSettings: (request) => ipcRenderer.invoke("ai-chat:saveSettings", request),
   clearAiChatApiKey: () => ipcRenderer.invoke("ai-chat:clearApiKey"),
   refreshAiChatModels: () => ipcRenderer.invoke("ai-chat:refreshModels"),
+  getAiChatHistory: () => ipcRenderer.invoke("ai-chat:getHistory"),
+  createAiChatSession: (request) => ipcRenderer.invoke("ai-chat:createSession", request),
+  saveAiChatSession: (request) => ipcRenderer.invoke("ai-chat:saveSession", request),
+  switchAiChatSession: (sessionId) => ipcRenderer.invoke("ai-chat:switchSession", sessionId),
+  deleteAiChatSession: (sessionId) => ipcRenderer.invoke("ai-chat:deleteSession", sessionId),
   submitAiChat: (request) => ipcRenderer.invoke("ai-chat:submit", request)
 };
 
