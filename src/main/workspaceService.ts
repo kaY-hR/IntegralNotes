@@ -73,6 +73,16 @@ const DATA_DIRECTORY = "Data";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
 const DATA_NOTE_DIRECTORY = "data-notes";
+const WORKSPACE_SKILL_BOOTSTRAPS = [
+  {
+    destinationRelativePath: path.join(".claude", "skills"),
+    sourceRelativePath: path.join("Notes", ".claude", "skills")
+  },
+  {
+    destinationRelativePath: path.join(".codex", "skills"),
+    sourceRelativePath: path.join("Notes", ".codex", "skills")
+  }
+] as const;
 const HTML_EXTENSIONS = new Set([".htm", ".html"]);
 const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
 const TEXT_EXTENSIONS = new Set([
@@ -132,6 +142,7 @@ export type WorkspaceMutationListener = (
 export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
+  private readonly bootstrappedSkillRootPaths = new Set<string>();
   private readonly mutationListeners = new Set<WorkspaceMutationListener>();
   private pluginRegistry: PluginRegistry | null = null;
   private readonly stateFilePath: string;
@@ -188,6 +199,7 @@ export class WorkspaceService {
       }),
       fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true })
     ]);
+    await this.syncWorkspaceSkillBootstraps(rootPath);
     await this.syncManagedDataNotesInternal(rootPath);
   }
 
@@ -741,6 +753,31 @@ export class WorkspaceService {
     const absolutePath = this.resolveWorkspacePath(relativePath);
     const content = await fs.readFile(absolutePath);
     return `data:${inferMimeType(absolutePath)};base64,${content.toString("base64")}`;
+  }
+
+  private async syncWorkspaceSkillBootstraps(rootPath: string): Promise<void> {
+    if (this.bootstrappedSkillRootPaths.has(rootPath)) {
+      return;
+    }
+
+    await Promise.all(
+      WORKSPACE_SKILL_BOOTSTRAPS.map(async ({ destinationRelativePath, sourceRelativePath }) => {
+        const sourceAbsolutePath = path.join(rootPath, sourceRelativePath);
+
+        if (!(await directoryExists(sourceAbsolutePath))) {
+          return;
+        }
+
+        const destinationAbsolutePath = path.join(rootPath, destinationRelativePath);
+        await fs.mkdir(path.dirname(destinationAbsolutePath), { recursive: true });
+        await fs.cp(sourceAbsolutePath, destinationAbsolutePath, {
+          errorOnExist: false,
+          force: true,
+          recursive: true
+        });
+      })
+    );
+    this.bootstrappedSkillRootPaths.add(rootPath);
   }
 
   private async ensureDirectoryPath(relativePath: string): Promise<string> {
@@ -1839,6 +1876,15 @@ async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await fs.access(targetPath);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+async function directoryExists(targetPath: string): Promise<boolean> {
+  try {
+    const stats = await fs.stat(targetPath);
+    return stats.isDirectory();
   } catch {
     return false;
   }
