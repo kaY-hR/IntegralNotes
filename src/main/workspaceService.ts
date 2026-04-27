@@ -1770,23 +1770,32 @@ async function resolveWorkspaceSkillBootstrapSourcePath(
     return workspaceSourcePath;
   }
 
-  const bundledSourcePath = resolveBundledWorkspaceSkillBootstrapSourcePath(bootstrap);
+  const bundledSourcePaths = resolveBundledWorkspaceSkillBootstrapSourcePaths(bootstrap);
 
-  if (await directoryExists(bundledSourcePath)) {
-    return bundledSourcePath;
+  for (const bundledSourcePath of bundledSourcePaths) {
+    if (await directoryExists(bundledSourcePath)) {
+      return bundledSourcePath;
+    }
   }
 
   return null;
 }
 
-function resolveBundledWorkspaceSkillBootstrapSourcePath(
+function resolveBundledWorkspaceSkillBootstrapSourcePaths(
   bootstrap: (typeof WORKSPACE_SKILL_BOOTSTRAPS)[number]
-): string {
+): string[] {
+  const developmentSourcePath = path.resolve(
+    __dirname,
+    "../..",
+    bootstrap.developmentSourceRelativePath
+  );
+  const packagedSourcePath = path.join(process.resourcesPath, bootstrap.bundledSourceRelativePath);
+
   if (process.env.VITE_DEV_SERVER_URL) {
-    return path.resolve(__dirname, "../..", bootstrap.developmentSourceRelativePath);
+    return [developmentSourcePath, packagedSourcePath];
   }
 
-  return path.join(process.resourcesPath, bootstrap.bundledSourceRelativePath);
+  return [packagedSourcePath, developmentSourcePath];
 }
 
 async function createCopyDestinationPath(
