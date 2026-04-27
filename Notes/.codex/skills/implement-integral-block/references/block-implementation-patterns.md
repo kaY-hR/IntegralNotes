@@ -73,17 +73,26 @@ If the block lives in a nested folder and should also run directly from the comm
 Use output slot metadata only when the behavior is intentional:
 
 - `auto_insert_to_work_note=True`: place a user-facing renderable right under the block
+- omit `auto_insert_to_work_note` or set it to `False`: keep CSV/TSV/JSON and other machine-readable or intermediate outputs out of the note
 - `share_note_with_input="source"`: reuse the input's data-note target
 - `embed_to_shared_note=True`: append provenance and `![]()` to the shared data-note
 
 The Python script itself should still focus on file generation. Do not hand-write work-note or data-note Markdown from inside the block.
+
+## Output Slot Boundaries
+
+Do not bundle files with different roles or user intent into one `.idts` output. Prefer separate output slots for separate artifact roles:
+
+- user-facing renderables such as HTML reports, plots, images, SVG/PNG/JPEG/WebP files, and readable Markdown/text reports should be independent output slots
+- machine-readable or intermediate files such as CSV/TSV/JSON should be independent output slots and should normally not auto-insert into the work note
+- `.idts` outputs are for multiple files of the same nature generated as one set, such as one artifact per input file or repeated files sharing the same format and role
 
 ## Heuristics
 
 - Keep slot names short and literal.
 - Use `options = params or {}` before reading params.
 - Prefer UTF-8 text output.
-- Emit at least one renderable artifact when the result is meant for humans.
+- Emit at least one renderable artifact when the result is meant for humans, and give that artifact its own output slot.
 - Keep filenames inside bundle outputs stable, such as `index.html`, `summary.json`, `README.txt`, or `scores.csv`.
 - Keep the decorator directly above the top-level function so discovery remains simple.
 

@@ -41,9 +41,14 @@ Do not rely on repository-level product docs, architecture docs, or development 
 - Validate required input paths clearly before doing the real work.
 - Use `options = params or {}` for optional params.
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
+- Do not group files with different roles or user intent into one `.idts` output just for convenience.
+- Use a `.idts` output only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same format and role.
+- If the user is meant to inspect an output directly, make it its own output slot. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other renderable artifacts.
+- Keep machine-readable or intermediate outputs such as CSV/TSV/JSON separate from user-facing reports unless the user specifically wants that file to be the visible result.
 - If the user wants the result to be viewable in the app, emit at least one renderable file such as `index.html`, `README.txt`, `*.json`, `*.csv`, or an image.
 - Use output slot metadata when it matches the UX goal:
   - `auto_insert_to_work_note=True` for user-facing renderables that should appear right under the block
+  - `auto_insert_to_work_note=False` or omission for CSV/TSV/JSON and other machine-readable or intermediate outputs that should not be inserted into the note
   - `share_note_with_input="source"` to make an output reuse the referenced input's data-note target
   - `embed_to_shared_note=True` when the output should also append provenance and `![]()` to that shared data-note
 - If the block lives in a nested folder and should also run directly outside the app, reuse the local `sys.path` bootstrap pattern from `../../../src/*.py` to reach `scripts/integral/`.

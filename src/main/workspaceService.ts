@@ -80,11 +80,15 @@ const DATA_NOTE_DIRECTORY = "data-notes";
 const WORKSPACE_SKILL_BOOTSTRAPS = [
   {
     destinationRelativePath: path.join(".claude", "skills"),
-    sourceRelativePath: path.join("Notes", ".claude", "skills")
+    bundledSourceRelativePath: path.join("workspace-skills", "claude", "skills"),
+    developmentSourceRelativePath: path.join("Notes", ".claude", "skills"),
+    workspaceSourceRelativePath: path.join("Notes", ".claude", "skills")
   },
   {
     destinationRelativePath: path.join(".codex", "skills"),
-    sourceRelativePath: path.join("Notes", ".codex", "skills")
+    bundledSourceRelativePath: path.join("workspace-skills", "codex", "skills"),
+    developmentSourceRelativePath: path.join("Notes", ".codex", "skills"),
+    workspaceSourceRelativePath: path.join("Notes", ".codex", "skills")
   }
 ] as const;
 const HTML_EXTENSIONS = new Set([".htm", ".html"]);
@@ -788,14 +792,22 @@ export class WorkspaceService {
     }
 
     await Promise.all(
-      WORKSPACE_SKILL_BOOTSTRAPS.map(async ({ destinationRelativePath, sourceRelativePath }) => {
-        const sourceAbsolutePath = path.join(rootPath, sourceRelativePath);
+      WORKSPACE_SKILL_BOOTSTRAPS.map(async (bootstrap) => {
+        const sourceAbsolutePath = await resolveWorkspaceSkillBootstrapSourcePath(
+          rootPath,
+          bootstrap
+        );
 
-        if (!(await directoryExists(sourceAbsolutePath))) {
+        if (!sourceAbsolutePath) {
           return;
         }
 
-        const destinationAbsolutePath = path.join(rootPath, destinationRelativePath);
+        const destinationAbsolutePath = path.join(rootPath, bootstrap.destinationRelativePath);
+
+        if (isSamePath(sourceAbsolutePath, destinationAbsolutePath)) {
+          return;
+        }
+
         await fs.mkdir(path.dirname(destinationAbsolutePath), { recursive: true });
         await fs.cp(sourceAbsolutePath, destinationAbsolutePath, {
           errorOnExist: false,
@@ -1746,6 +1758,35 @@ function assertDestinationIsOutsideSource(
   if (isDescendantPath(destinationDirectoryPath, sourcePath)) {
     throw new Error(`${path.basename(sourcePath)} の配下へは ${operation} できません。`);
   }
+}
+
+async function resolveWorkspaceSkillBootstrapSourcePath(
+  rootPath: string,
+  bootstrap: (typeof WORKSPACE_SKILL_BOOTSTRAPS)[number]
+): Promise<string | null> {
+  const workspaceSourcePath = path.join(rootPath, bootstrap.workspaceSourceRelativePath);
+
+  if (await directoryExists(workspaceSourcePath)) {
+    return workspaceSourcePath;
+  }
+
+  const bundledSourcePath = resolveBundledWorkspaceSkillBootstrapSourcePath(bootstrap);
+
+  if (await directoryExists(bundledSourcePath)) {
+    return bundledSourcePath;
+  }
+
+  return null;
+}
+
+function resolveBundledWorkspaceSkillBootstrapSourcePath(
+  bootstrap: (typeof WORKSPACE_SKILL_BOOTSTRAPS)[number]
+): string {
+  if (process.env.VITE_DEV_SERVER_URL) {
+    return path.resolve(__dirname, "../..", bootstrap.developmentSourceRelativePath);
+  }
+
+  return path.join(process.resourcesPath, bootstrap.bundledSourceRelativePath);
 }
 
 async function createCopyDestinationPath(

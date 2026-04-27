@@ -769,6 +769,11 @@ function buildInlinePythonBlockInstructions(skillPrompt: string): string {
     "Prefer a new file under scripts/ai_blocks/ with a descriptive snake_case name unless the user asks for a specific path.",
     "Do not modify the active note. The app will insert the itg-notes block after you return.",
     "The script must expose a top-level @integral_block-decorated callable, normally def main(inputs, outputs, params) -> None.",
+    "Do not group files with different roles or user intent into one .idts output just for convenience.",
+    "Use .idts outputs only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same format and role.",
+    "Make user-facing renderables their own output slots. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other files the user is meant to inspect directly.",
+    "Set auto_insert_to_work_note=True for user-facing renderable output slots that should appear under the block.",
+    "Keep CSV/TSV/JSON and other machine-readable or intermediate outputs in separate output slots, with auto_insert_to_work_note omitted or false unless the user explicitly wants that file as the visible result.",
     "After saving the script, return JSON only. No markdown fence, no prose.",
     'Required JSON shape: {"scriptPath":"scripts/ai_blocks/example.py","functionName":"main","summary":"short summary"}',
     ""
@@ -832,6 +837,11 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
     "Use from integral import integral_block.",
     "The decorator supports display_name, description, inputs, and outputs.",
     "Slot objects support name, extension/extensions, format, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "Do not group files with different roles or user intent into one .idts output just for convenience.",
+    "Use .idts outputs only when multiple files of the same nature are generated as one set.",
+    "Make user-facing renderables such as HTML reports, plots, images, SVG/PNG/JPEG/WebP files, and readable Markdown/text reports their own output slots.",
+    "Set auto_insert_to_work_note=true for user-facing renderable output slots that should appear under the block.",
+    "Keep CSV/TSV/JSON and other machine-readable or intermediate outputs in separate output slots, with auto_insert_to_work_note omitted or false unless the user explicitly wants that file as the visible result.",
     "Keep @integral_block(...) immediately above a top-level def main(inputs, outputs, params) -> None.",
     "Treat inputs and outputs as path dictionaries. Write outputs only to assigned output paths."
   ].join("\n");
