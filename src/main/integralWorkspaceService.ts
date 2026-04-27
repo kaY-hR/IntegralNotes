@@ -208,6 +208,9 @@ if not sdk_import_root.exists():
     raise RuntimeError(f"Integral Python SDK import root was not found: {sdk_import_root}")
 
 sys.path.insert(0, str(sdk_import_root))
+script_directory = str(script_path.parent)
+if script_directory not in sys.path:
+    sys.path.insert(1, script_directory)
 payload = json.loads(args_path.read_text(encoding="utf-8"))
 
 spec = importlib.util.spec_from_file_location("integral_user_module", script_path)
@@ -215,7 +218,13 @@ if spec is None or spec.loader is None:
     raise RuntimeError(f"Failed to load module from {script_path}")
 
 loaded_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(loaded_module)
+sys.modules[spec.name] = loaded_module
+try:
+    spec.loader.exec_module(loaded_module)
+except Exception:
+    if sys.modules.get(spec.name) is loaded_module:
+        del sys.modules[spec.name]
+    raise
 
 target = getattr(loaded_module, function_name)
 

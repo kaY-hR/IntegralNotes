@@ -69,6 +69,10 @@ interface PersistedWorkspaceState {
   rootPath?: string;
 }
 
+interface EnsureWorkspaceReadyOptions {
+  forceSkillBootstrap?: boolean;
+}
+
 const DATA_DIRECTORY = "Data";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
@@ -177,7 +181,7 @@ export class WorkspaceService {
 
   async setRootPath(nextRootPath: string): Promise<WorkspaceSnapshot> {
     this.rootPath = path.resolve(nextRootPath);
-    await this.ensureWorkspaceReady();
+    await this.ensureWorkspaceReady({ forceSkillBootstrap: true });
     await this.persistState();
 
     const snapshot = await this.getSnapshot();
@@ -189,7 +193,7 @@ export class WorkspaceService {
     return snapshot;
   }
 
-  async ensureWorkspaceReady(): Promise<void> {
+  async ensureWorkspaceReady(options: EnsureWorkspaceReadyOptions = {}): Promise<void> {
     const rootPath = this.getConfiguredRootPath();
 
     await fs.mkdir(rootPath, { recursive: true });
@@ -199,7 +203,9 @@ export class WorkspaceService {
       }),
       fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true })
     ]);
-    await this.syncWorkspaceSkillBootstraps(rootPath);
+    await this.syncWorkspaceSkillBootstraps(rootPath, {
+      force: options.forceSkillBootstrap === true
+    });
     await this.syncManagedDataNotesInternal(rootPath);
   }
 
@@ -223,6 +229,22 @@ export class WorkspaceService {
     }
 
     await this.ensureWorkspaceReady();
+
+    return {
+      rootName: path.basename(rootPath) || rootPath,
+      rootPath,
+      entries: await this.readDirectoryEntries("")
+    };
+  }
+
+  async syncWorkspace(): Promise<WorkspaceSnapshot | null> {
+    const rootPath = this.rootPath;
+
+    if (!rootPath) {
+      return null;
+    }
+
+    await this.ensureWorkspaceReady({ forceSkillBootstrap: true });
 
     return {
       rootName: path.basename(rootPath) || rootPath,
@@ -755,8 +777,13 @@ export class WorkspaceService {
     return `data:${inferMimeType(absolutePath)};base64,${content.toString("base64")}`;
   }
 
-  private async syncWorkspaceSkillBootstraps(rootPath: string): Promise<void> {
-    if (this.bootstrappedSkillRootPaths.has(rootPath)) {
+  private async syncWorkspaceSkillBootstraps(
+    rootPath: string,
+    options: {
+      force?: boolean;
+    } = {}
+  ): Promise<void> {
+    if (!options.force && this.bootstrappedSkillRootPaths.has(rootPath)) {
       return;
     }
 

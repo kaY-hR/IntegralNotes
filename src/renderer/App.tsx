@@ -44,7 +44,10 @@ import { ActivityBar, type ActivityBarItem } from "./ActivityBar";
 import { DataRegistrationDialog } from "./DataRegistrationDialog";
 import { ExternalPluginSidebarView } from "./ExternalPluginSidebarView";
 import { FileTree, type FileTreeInlineEditorState } from "./FileTree";
-import { resetIntegralPluginRuntime } from "./integralPluginRuntime";
+import {
+  resetIntegralPluginRuntime,
+  setIntegralPluginRuntimeCatalog
+} from "./integralPluginRuntime";
 import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { findWorkspaceToolPlugin, workspaceToolPlugins } from "./workspaceToolPlugins";
@@ -1046,6 +1049,11 @@ export function App(): JSX.Element {
     setSelectedTabId(undefined);
   };
 
+  const invalidateWorkspaceRuntime = (): void => {
+    resetIntegralPluginRuntime();
+    setPluginCatalogRevision((current) => current + 1);
+  };
+
   const clearWorkspace = (nextStatusMessage: string): void => {
     shouldAutoOpenInitialFileRef.current = false;
     setInlineEditor(null);
@@ -1055,6 +1063,7 @@ export function App(): JSX.Element {
     setDeleteDialog(null);
     setTrackingIssues([]);
     setTrackingDialogDismissed(false);
+    invalidateWorkspaceRuntime();
     resetOpenTabs();
     setWorkspace(null);
     setSelectedEntryPath("");
@@ -1125,14 +1134,26 @@ export function App(): JSX.Element {
 
   const refreshAssetCatalog = async (): Promise<void> => {
     const catalog = await window.integralNotes.getIntegralAssetCatalog();
+    setIntegralPluginRuntimeCatalog(catalog);
     setAssetCatalog(catalog);
   };
 
-  const refreshWorkspace = async (nextStatus?: string): Promise<void> => {
+  const refreshWorkspace = async (
+    nextStatus?: string,
+    options: {
+      reloadWorkspaceRuntime?: boolean;
+    } = {}
+  ): Promise<void> => {
     setLoadingWorkspace(true);
 
     try {
-      const snapshot = await window.integralNotes.getWorkspaceSnapshot();
+      if (options.reloadWorkspaceRuntime) {
+        invalidateWorkspaceRuntime();
+      }
+
+      const snapshot = options.reloadWorkspaceRuntime
+        ? await window.integralNotes.syncWorkspace()
+        : await window.integralNotes.getWorkspaceSnapshot();
 
       if (!snapshot) {
         clearWorkspace(nextStatus ?? "ワークスペースフォルダが未設定です。フォルダを開いてください。");
@@ -1328,6 +1349,7 @@ export function App(): JSX.Element {
         return;
       }
 
+      invalidateWorkspaceRuntime();
       applyWorkspaceSnapshot(snapshot, {
         resetTabs: true,
         statusMessage: `${snapshot.rootName} を開きました`
@@ -1394,7 +1416,7 @@ export function App(): JSX.Element {
   const synchronizePluginRuntime = async (nextStatusMessage: string): Promise<void> => {
     resetIntegralPluginRuntime();
     setPluginCatalogRevision((current) => current + 1);
-    await refreshInstalledPluginState(nextStatusMessage);
+    await Promise.all([refreshInstalledPluginState(nextStatusMessage), refreshAssetCatalog()]);
   };
 
   const selectSidebarView = (viewId: string): void => {
@@ -1587,7 +1609,7 @@ export function App(): JSX.Element {
     setPluginDialogPendingAction("refresh");
 
     try {
-      await refreshInstalledPluginState("plugin 一覧を更新しました。");
+      await synchronizePluginRuntime("plugin 一覧を更新しました。");
     } finally {
       setPluginDialogPendingAction(null);
     }
@@ -3015,6 +3037,7 @@ export function App(): JSX.Element {
           left.localeCompare(right)
         ),
         workspaceEntries: workspace?.entries ?? [],
+        workspaceRevision: pluginCatalogRevision,
         workspaceRootName: workspace?.rootName ?? null
       });
     }
@@ -3180,7 +3203,9 @@ export function App(): JSX.Element {
             <button
               className="button button--ghost sidebar__action-text"
               onClick={() => {
-                void refreshWorkspace("ワークスペースを更新しました");
+                void refreshWorkspace("ワークスペースを更新しました", {
+                  reloadWorkspaceRuntime: true
+                });
               }}
               type="button"
             >

@@ -257,6 +257,7 @@ export interface IntegralNotesApi {
   ) => Promise<CreateDatasetResult>;
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot | null>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
+  syncWorkspace: () => Promise<WorkspaceSnapshot | null>;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;

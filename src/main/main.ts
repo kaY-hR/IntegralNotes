@@ -260,6 +260,11 @@ function registerIpcHandlers(): void {
     mainWindow?.setTitle(formatWindowTitle(snapshot));
     return snapshot;
   });
+  ipcMain.handle("workspace:sync", async () => {
+    const snapshot = await workspaceService.syncWorkspace();
+    mainWindow?.setTitle(formatWindowTitle(snapshot));
+    return snapshot;
+  });
   ipcMain.handle("workspace:openFolder", async () => {
     if (!mainWindow) {
       return null;

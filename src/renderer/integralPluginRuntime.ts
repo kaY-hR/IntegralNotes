@@ -9,26 +9,39 @@ let assetCatalog: IntegralAssetCatalog = {
   managedFiles: []
 };
 let loadAssetCatalogPromise: Promise<void> | null = null;
+let catalogLoadVersion = 0;
 
 export async function initializeIntegralPluginRuntime(): Promise<void> {
   if (loadAssetCatalogPromise) {
     return loadAssetCatalogPromise;
   }
 
+  const loadVersion = catalogLoadVersion;
   loadAssetCatalogPromise = window.integralNotes
     .getIntegralAssetCatalog()
     .then((catalog) => {
-      assetCatalog = catalog;
+      if (loadVersion === catalogLoadVersion) {
+        assetCatalog = catalog;
+      }
     })
     .catch((error) => {
-      loadAssetCatalogPromise = null;
+      if (loadVersion === catalogLoadVersion) {
+        loadAssetCatalogPromise = null;
+      }
       throw error;
     });
 
   return loadAssetCatalogPromise;
 }
 
+export function setIntegralPluginRuntimeCatalog(catalog: IntegralAssetCatalog): void {
+  catalogLoadVersion += 1;
+  assetCatalog = catalog;
+  loadAssetCatalogPromise = Promise.resolve();
+}
+
 export function resetIntegralPluginRuntime(): void {
+  catalogLoadVersion += 1;
   assetCatalog = {
     datasets: [],
     blockTypes: [],

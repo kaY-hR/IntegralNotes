@@ -22,6 +22,7 @@ interface ProcessChainViewerProps {
   onOpenWorkspaceFile: (relativePath: string) => void;
   onOpenWorkspaceTarget: (target: string) => void;
   workspaceEntries: WorkspaceEntry[];
+  workspaceRevision: number;
 }
 
 interface ParsedNoteBlock {
@@ -101,9 +102,11 @@ export function ProcessChainViewer({
   noteOverrides,
   onOpenWorkspaceFile,
   onOpenWorkspaceTarget,
-  workspaceEntries
+  workspaceEntries,
+  workspaceRevision
 }: ProcessChainViewerProps): JSX.Element {
   const noteCacheRef = useRef<Map<string, string>>(new Map());
+  const noteCacheRevisionRef = useRef(workspaceRevision);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [state, setState] = useState<ProcessChainState>({
     kind: "loading"
@@ -121,6 +124,11 @@ export function ProcessChainViewer({
       setState({
         kind: "loading"
       });
+
+      if (noteCacheRevisionRef.current !== workspaceRevision) {
+        noteCacheRef.current.clear();
+        noteCacheRevisionRef.current = workspaceRevision;
+      }
 
       for (const [relativePath, content] of Object.entries(noteOverrides)) {
         noteCacheRef.current.set(relativePath, content);
@@ -194,7 +202,7 @@ export function ProcessChainViewer({
     return () => {
       cancelled = true;
     };
-  }, [assetCatalog, contextRelativePath, indexableNotePaths, noteOverrides, refreshRevision, workspaceEntries]);
+  }, [assetCatalog, contextRelativePath, indexableNotePaths, noteOverrides, refreshRevision, workspaceEntries, workspaceRevision]);
 
   const graph = state.kind === "ready" ? state.graph : null;
   const columnHeights = graph

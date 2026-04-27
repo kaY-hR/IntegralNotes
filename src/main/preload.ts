@@ -27,6 +27,7 @@ const api: IntegralNotesApi = {
     ipcRenderer.invoke("integral:createDatasetFromWorkspaceEntries", request),
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
+  syncWorkspace: () => ipcRenderer.invoke("workspace:sync"),
   zoomIn: () => adjustZoomLevel("in"),
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),

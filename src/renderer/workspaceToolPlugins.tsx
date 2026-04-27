@@ -13,6 +13,7 @@ export interface WorkspaceToolPluginRenderContext {
   onOpenWorkspaceTarget: (target: string) => void;
   selectedEntryPaths: string[];
   workspaceEntries: WorkspaceEntry[];
+  workspaceRevision: number;
   workspaceRootName: string | null;
 }
 

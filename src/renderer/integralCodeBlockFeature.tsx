@@ -353,7 +353,7 @@ class IntegralNotesBlockView implements NodeView {
         parsed={parsed}
         runState={this.runState}
         selected={this.selected}
-        workspaceEntries={this.options.getWorkspaceEntries?.() ?? []}
+        getWorkspaceEntries={this.options.getWorkspaceEntries ?? (() => [])}
       />
     );
   }
@@ -460,15 +460,16 @@ class IntegralNotesBlockView implements NodeView {
 }
 
 function IntegralBlockPanel({
+  getWorkspaceEntries,
   onAssignInputReference,
   onUpdateOutputConfig,
   onUpdateParams,
   onRun,
   parsed,
   runState,
-  selected,
-  workspaceEntries
+  selected
 }: {
+  getWorkspaceEntries: () => WorkspaceEntry[];
   onAssignInputReference: (slotName: string, inputReference: string | null) => void;
   onUpdateOutputConfig: (slotName: string, nextOutputConfig: IntegralBlockOutputConfig) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
@@ -476,7 +477,6 @@ function IntegralBlockPanel({
   parsed: ParsedIntegralDraft;
   runState: RunState;
   selected: boolean;
-  workspaceEntries: WorkspaceEntry[];
 }): JSX.Element {
   const [slotDialogState, setSlotDialogState] = useState<SlotDialogState>(null);
   const [slotFieldPicker, setSlotFieldPicker] = useState<SlotFieldPickerState | null>(null);
@@ -583,6 +583,7 @@ function IntegralBlockPanel({
     }
   }
 
+  const workspaceEntries = getWorkspaceEntries();
   const workspaceFiles = collectWorkspaceFileSuggestions(workspaceEntries);
   const workspaceDirectories = collectWorkspaceDirectorySuggestions(workspaceEntries);
 

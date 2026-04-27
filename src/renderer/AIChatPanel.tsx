@@ -12,6 +12,7 @@ interface AIChatPanelProps {
   contextRelativePath: string | null;
   noteOverrides: Record<string, string>;
   selectedEntryPaths: string[];
+  workspaceRevision: number;
   workspaceRootName: string | null;
 }
 
@@ -19,6 +20,7 @@ export function AIChatPanel({
   contextRelativePath,
   noteOverrides,
   selectedEntryPaths,
+  workspaceRevision,
   workspaceRootName
 }: AIChatPanelProps): JSX.Element {
   const [apiKeyInput, setApiKeyInput] = useState("");
@@ -66,7 +68,7 @@ export function AIChatPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceRevision]);
 
   useEffect(() => {
     let cancelled = false;
