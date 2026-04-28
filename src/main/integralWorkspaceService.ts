@@ -947,7 +947,8 @@ export class IntegralWorkspaceService {
       await this.refreshOutputDatasetMetadata(outputDatasetMap);
       await this.refreshOutputManagedFileMetadata(
         outputManagedFilePlanMap,
-        sourceBlock.id ?? resolvedBlock.id ?? null
+        sourceBlock.id ?? resolvedBlock.id ?? null,
+        { allowMissingOutputs: true }
       );
       await this.workspaceService.syncManagedDataNotes();
 
@@ -2124,7 +2125,8 @@ export class IntegralWorkspaceService {
         relativePath: string;
       }
     >,
-    createdByBlockId: string | null
+    createdByBlockId: string | null,
+    options: { allowMissingOutputs?: boolean } = {}
   ): Promise<Map<string, IntegralManagedFileSummary>> {
     const createdManagedFiles = new Map<string, IntegralManagedFileSummary>();
 
@@ -2132,6 +2134,10 @@ export class IntegralWorkspaceService {
       const existingPath = await this.resolveIfExists(plan.relativePath);
 
       if (!existingPath) {
+        if (options.allowMissingOutputs === true) {
+          continue;
+        }
+
         throw new Error(`output path が作成されませんでした: ${plan.relativePath}`);
       }
 
