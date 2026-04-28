@@ -5,28 +5,30 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-import type {
-  AiChatContextSummary,
-  AiChatHistorySnapshot,
-  InlineAiTextInsertion,
-  AiChatImageAttachment,
-  AiChatModelOption,
-  AiChatMessage,
-  AiChatMessageDiagnostics,
-  AiChatSession,
-  AiChatSessionSummary,
-  AiChatStatus,
-  AiChatToolTraceEntry,
-  InlinePythonBlockInsertion,
-  CreateAiChatSessionRequest,
-  SaveAiChatSettingsRequest,
-  SaveAiChatSessionRequest,
-  SubmitAiChatRequest,
-  SubmitAiChatResult,
-  SubmitInlineAiInsertionRequest,
-  SubmitInlineAiInsertionResult,
-  SubmitInlinePythonBlockRequest,
-  SubmitInlinePythonBlockResult
+import {
+  DEFAULT_AI_CHAT_SYSTEM_PROMPTS,
+  type AiChatContextSummary,
+  type AiChatHistorySnapshot,
+  type InlineAiTextInsertion,
+  type AiChatImageAttachment,
+  type AiChatModelOption,
+  type AiChatMessage,
+  type AiChatMessageDiagnostics,
+  type AiChatSession,
+  type AiChatSessionSummary,
+  type AiChatStatus,
+  type AiChatSystemPrompts,
+  type AiChatToolTraceEntry,
+  type InlinePythonBlockInsertion,
+  type CreateAiChatSessionRequest,
+  type SaveAiChatSettingsRequest,
+  type SaveAiChatSessionRequest,
+  type SubmitAiChatRequest,
+  type SubmitAiChatResult,
+  type SubmitInlineAiInsertionRequest,
+  type SubmitInlineAiInsertionResult,
+  type SubmitInlinePythonBlockRequest,
+  type SubmitInlinePythonBlockResult
 } from "../shared/aiChat";
 import { AiAgentService, type AiAgentExecutionRuntime } from "./aiAgentService";
 import { WorkspaceService } from "./workspaceService";
@@ -35,6 +37,7 @@ interface PersistedAiChatSettings {
   apiKeyCiphertext?: string;
   apiKeyPlaintext?: string;
   selectedModelId?: string | null;
+  systemPrompts?: Partial<AiChatSystemPrompts>;
 }
 
 interface PersistedAiChatHistoryFile {
@@ -168,6 +171,7 @@ export class AiChatService {
       this.readPersistedSettings()
     ]);
     const selectedModelId = selectValidModelId(settings.selectedModelId ?? null, catalog.models);
+    const systemPrompts = resolveAiChatSystemPrompts(settings);
     const [gatewayAuth, runtimeSelection, byokNotes] = await Promise.all([
       resolveGatewayAuth(settings, workspaceRootPath),
       selectedModelId
@@ -189,6 +193,7 @@ export class AiChatService {
       runtimeAuthConfigured: runtimeSelection.mode !== "stub",
       availableModels: catalog.models,
       catalogRefreshedAt: catalog.refreshedAt,
+      defaultSystemPrompts: DEFAULT_AI_CHAT_SYSTEM_PROMPTS,
       implementationMode: runtimeSelection.mode,
       mcpEnabled: false,
       modelCatalogSource: catalog.source,
@@ -204,6 +209,7 @@ export class AiChatService {
       selectedModelId,
       skillsDirectoryPath:
         workspaceRootPath === null ? null : path.join(workspaceRootPath, ".codex", "skills"),
+      systemPrompts,
       workspaceRootPath
     };
   }
@@ -212,7 +218,11 @@ export class AiChatService {
     const currentSettings = await this.readPersistedSettings();
     const nextSettings: PersistedAiChatSettings = {
       ...currentSettings,
-      selectedModelId: request.modelId
+      selectedModelId: request.modelId,
+      systemPrompts:
+        request.systemPrompts === undefined
+          ? resolveAiChatSystemPrompts(currentSettings)
+          : normalizeAiChatSystemPrompts(request.systemPrompts)
     };
 
     if (typeof request.apiKey === "string") {
@@ -345,6 +355,7 @@ export class AiChatService {
     const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
     const [status, settings] = await Promise.all([this.getStatus(), this.readPersistedSettings()]);
     const selectedModelId = status.selectedModelId ?? FALLBACK_MODELS[0]?.id ?? "openai/gpt-5.4";
+    const systemPrompts = resolveAiChatSystemPrompts(settings);
     const normalizedHistoryResult = await normalizeAiChatHistory(request.history, workspaceRootPath);
     const runtimeSelection = await this.resolveRuntimeSelection({
       modelId: selectedModelId,
@@ -367,7 +378,8 @@ export class AiChatService {
             ...(await this.submitWithAgentRuntime({
               context: request.context,
               history: normalizedHistoryResult.history,
-              runtimeSelection
+              runtimeSelection,
+              systemPrompt: systemPrompts.chatPanel
             }))
           };
     const toolMessages = buildToolMessages(assistantMessage);
@@ -387,7 +399,11 @@ export class AiChatService {
       throw new Error("プロンプトが空です。");
     }
 
-    const { runtimeSelection, status } = await this.resolveCurrentRuntimeSelection();
+    const [{ runtimeSelection, status }, settings] = await Promise.all([
+      this.resolveCurrentRuntimeSelection(),
+      this.readPersistedSettings()
+    ]);
+    const systemPrompts = resolveAiChatSystemPrompts(settings);
 
     if (runtimeSelection.mode === "stub") {
       throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
@@ -406,7 +422,7 @@ export class AiChatService {
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       extraTools: createInlineMarkdownInsertionTools(),
-      instructions: buildInlineInsertionInstructions(),
+      instructions: buildInlineInsertionInstructions(systemPrompts.inlineInsertion),
       maxSteps: TOOL_LOOP_INLINE_INSERTION_MAX_STEPS,
       prompt: buildInlineInsertionPrompt(request, conversationalMessages),
       runtimeSelection,
@@ -452,7 +468,11 @@ export class AiChatService {
       throw new Error("workspace folder is not open.");
     }
 
-    const { runtimeSelection, status } = await this.resolveCurrentRuntimeSelection();
+    const [{ runtimeSelection, status }, settings] = await Promise.all([
+      this.resolveCurrentRuntimeSelection(),
+      this.readPersistedSettings()
+    ]);
+    const systemPrompts = resolveAiChatSystemPrompts(settings);
 
     if (runtimeSelection.mode === "stub") {
       throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
@@ -472,7 +492,7 @@ export class AiChatService {
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       extraTools: createInlinePythonBlockTools(),
-      instructions: buildInlinePythonBlockInstructions(skillPrompt),
+      instructions: buildInlinePythonBlockInstructions(systemPrompts.inlinePythonBlock, skillPrompt),
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
       prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
       runtimeSelection,
@@ -583,7 +603,8 @@ export class AiChatService {
           typeof parsed.apiKeyCiphertext === "string" ? parsed.apiKeyCiphertext : undefined,
         apiKeyPlaintext:
           typeof parsed.apiKeyPlaintext === "string" ? parsed.apiKeyPlaintext : undefined,
-        selectedModelId: typeof parsed.selectedModelId === "string" ? parsed.selectedModelId : null
+        selectedModelId: typeof parsed.selectedModelId === "string" ? parsed.selectedModelId : null,
+        systemPrompts: normalizeAiChatSystemPrompts(parsed.systemPrompts)
       };
     } catch {
       return {};
@@ -746,17 +767,20 @@ export class AiChatService {
   private async submitWithAgentRuntime({
     context,
     history,
-    runtimeSelection
+    runtimeSelection,
+    systemPrompt
   }: {
     context: AiChatContextSummary;
     history: SubmitAiChatRequest["history"];
     runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
+    systemPrompt: string;
   }): Promise<Pick<AiChatMessage, "diagnostics" | "text">> {
     try {
       const result = await this.aiAgentService.submit({
         context,
         history,
-        runtime: runtimeSelection.runtime
+        runtime: runtimeSelection.runtime,
+        systemPrompt
       });
 
       return {
@@ -851,25 +875,11 @@ function buildInlineRuntimeNotConfiguredMessage(status: AiChatStatus): string {
   return `AI runtime が未設定です${model}。AI Chat settings で model と credential を設定してください。`;
 }
 
-function buildInlineInsertionInstructions(): string {
-  return [
-    "You are chatting inside the IntegralNotes inline Markdown insertion popup.",
-    "This popup has the same workspace inspection and persistence tools as the main AI Chat panel, plus insertMarkdownAtCursor for committing the inline insertion.",
-    "Use workspace tools when you need file evidence instead of guessing. Tool calls are allowed and expected when the request depends on workspace files.",
-    "If you discover or receive an image path and need to inspect the image itself, use readWorkspaceImage.",
-    "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument. Do not judge HTML or image contents from filenames or source text alone.",
-    "When reading Markdown and you find a linked or embedded .html/.htm file whose visual content matters, render that HTML path with renderWorkspaceDocument.",
-    "If the user wants real workspace edits outside the insertion, use writeWorkspaceFile. bash/writeFile remains preview-only.",
-    "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
-    "The user is usually asking for text to insert at the editor cursor, not for a general chat answer.",
-    "The app provides Markdown before and after the cursor. The cursor is exactly between those two sections.",
-    "Use the surrounding Markdown, the cursor position, and the user's latest request to infer the intended inserted content.",
-    "If enough information is available, call insertMarkdownAtCursor with the exact Markdown text to insert.",
-    "If the request is underspecified, ask one concise follow-up question and do not call insertMarkdownAtCursor.",
-    "Do not answer with the inserted text as plain assistant prose. The insertion must be delivered through insertMarkdownAtCursor.",
-    "Do not include greetings, explanations, labels, surrounding quotes, or code fences unless they are literally part of the inserted Markdown.",
-    "Preserve the note's language, tone, indentation, list structure, heading level, table style, and surrounding whitespace."
-  ].join("\n");
+function buildInlineInsertionInstructions(systemPrompt: string): string {
+  return normalizeAiChatSystemPromptValue(
+    systemPrompt,
+    DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlineInsertion
+  );
 }
 
 function buildInlineInsertionPrompt(
@@ -965,29 +975,12 @@ function parseInlineMarkdownInsertion(
   }
 }
 
-function buildInlinePythonBlockInstructions(skillPrompt: string): string {
+function buildInlinePythonBlockInstructions(systemPrompt: string, skillPrompt: string): string {
   const lines = [
-    "You are chatting inside the IntegralNotes inline Python block popup.",
-    "This popup has the same workspace inspection and persistence tools as the main AI Chat panel, plus insertPythonBlock for committing the inline block insertion.",
-    "Use workspace tools when you need file evidence instead of guessing. Tool calls are allowed and expected when the request depends on workspace files.",
-    "If you discover or receive an image path and need to inspect the image itself, use readWorkspaceImage.",
-    "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument. Do not judge HTML or image contents from filenames or source text alone.",
-    "When reading Markdown and you find a linked or embedded .html/.htm file whose visual content matters, render that HTML path with renderWorkspaceDocument.",
-    "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
-    "Help the user converge on a Python analysis block. Ask a concise follow-up question if the request is underspecified.",
-    "When the block is ready, implement it as a real workspace Python file by using writeWorkspaceFile.",
-    "Use the implement-integral-block skill rules below as the system contract for the Python file.",
-    "Prefer a new file under scripts/ai_blocks/ with a descriptive snake_case name unless the user asks for a specific path.",
-    "Do not modify the active note. The app will insert the itg-notes block after you return.",
-    "The script must expose a top-level @integral_block-decorated callable, normally def main(inputs, outputs, params) -> None.",
-    "Do not group files with different roles or user intent into one .idts output just for convenience.",
-    "Use .idts outputs only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same format and role.",
-    "Make user-facing renderables their own output slots. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other files the user is meant to inspect directly.",
-    "Set auto_insert_to_work_note=True for user-facing renderable output slots that should appear under the block.",
-    "Keep CSV/TSV/JSON and other machine-readable or intermediate outputs in separate output slots, with auto_insert_to_work_note omitted or false unless the user explicitly wants that file as the visible result.",
-    "After saving the script and only when ready to insert, call the insertPythonBlock tool with scriptPath, functionName, and a short summary.",
-    "Do not call insertPythonBlock before writeWorkspaceFile has saved the Python file.",
-    "Do not return JSON as a substitute for insertPythonBlock.",
+    normalizeAiChatSystemPromptValue(
+      systemPrompt,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlinePythonBlock
+    ),
     ""
   ];
 
@@ -1508,6 +1501,38 @@ function normalizeIsoTimestamp(value: unknown): string | null {
 
 function normalizeNullableString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveAiChatSystemPrompts(settings: PersistedAiChatSettings): AiChatSystemPrompts {
+  return normalizeAiChatSystemPrompts(settings.systemPrompts);
+}
+
+function normalizeAiChatSystemPrompts(value: unknown): AiChatSystemPrompts {
+  const prompts = isRecord(value) ? value : {};
+
+  return {
+    chatPanel: normalizeAiChatSystemPromptValue(
+      prompts.chatPanel,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.chatPanel
+    ),
+    inlineInsertion: normalizeAiChatSystemPromptValue(
+      prompts.inlineInsertion,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlineInsertion
+    ),
+    inlinePythonBlock: normalizeAiChatSystemPromptValue(
+      prompts.inlinePythonBlock,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlinePythonBlock
+    )
+  };
+}
+
+function normalizeAiChatSystemPromptValue(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  return normalized.length > 0 ? normalized : fallback;
 }
 
 function createChatSessionId(): string {
