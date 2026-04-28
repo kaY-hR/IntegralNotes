@@ -83,6 +83,7 @@ interface InlineAiPromptState {
   afterText: string;
   anchorPos: number;
   beforeText: string;
+  documentMarkdown: string;
   error: string | null;
   isSubmitting: boolean;
   messages: AiChatMessage[];
@@ -606,6 +607,7 @@ export function MilkdownEditor({
       afterText: trigger.afterText,
       anchorPos: trigger.replaceFrom,
       beforeText: trigger.beforeText,
+      documentMarkdown: lastSyncedMarkdownRef.current,
       error: null,
       isSubmitting: false,
       messages: [],
@@ -673,7 +675,9 @@ export function MilkdownEditor({
           afterText: current.afterText,
           beforeText: current.beforeText,
           context: buildInlineAiContextSummary(current),
+          documentMarkdown: current.documentMarkdown,
           history: current.messages,
+          insertionPosition: current.anchorPos,
           prompt: current.prompt,
           sessionId: current.sessionId,
           sourceNotePath: relativePath
@@ -701,7 +705,9 @@ export function MilkdownEditor({
           afterText: current.afterText,
           beforeText: current.beforeText,
           context: buildInlineAiContextSummary(current),
+          documentMarkdown: current.documentMarkdown,
           history: current.messages,
+          insertionPosition: current.anchorPos,
           prompt: current.prompt,
           sessionId: current.sessionId,
           sourceNotePath: relativePath
@@ -790,7 +796,7 @@ export function MilkdownEditor({
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
-    activeDocumentExcerpt: buildInlineAiExcerpt(state.beforeText, state.afterText),
+    activeDocumentExcerpt: buildInlineAiExcerpt(state),
     activeDocumentKind: "markdown",
     activeDocumentName: getFileName(relativePath),
     activeRelativePath: relativePath,
@@ -1036,7 +1042,7 @@ export function MilkdownEditor({
                   <span className="editor-ai-popup__message-role">
                     {formatInlineAiMessageRole(message)}
                   </span>
-                  <pre className="editor-ai-popup__message-text">{message.text}</pre>
+                  <pre className="editor-ai-popup__message-text">{formatInlineAiMessageText(message)}</pre>
                 </article>
               ))}
             </div>
@@ -1220,13 +1226,8 @@ function computeInlineAiTriggerState(
     const popupLayout = computePopupLayout(coords);
 
     return {
-      afterText: view.state.doc.textBetween(
-        replaceTo,
-        Math.min(view.state.doc.content.size, replaceTo + 6000),
-        "\n",
-        "\0"
-      ),
-      beforeText: view.state.doc.textBetween(Math.max(0, replaceFrom - 6000), replaceFrom, "\n", "\0"),
+      afterText: view.state.doc.textBetween(replaceTo, view.state.doc.content.size, "\n", "\0"),
+      beforeText: view.state.doc.textBetween(0, replaceFrom, "\n", "\0"),
       mode: marker === "??" ? "insert-text" : "python-block",
       replaceFrom,
       replaceTo,
@@ -1248,6 +1249,19 @@ function formatInlineAiMessageRole(message: AiChatMessage): string {
   }
 
   return "You";
+}
+
+function formatInlineAiMessageText(message: AiChatMessage): string {
+  if (message.role !== "tool" || !message.toolTraceEntry) {
+    return message.text;
+  }
+
+  return [
+    `tool: ${message.toolTraceEntry.toolName}`,
+    `status: ${message.toolTraceEntry.status}`,
+    `input: ${message.toolTraceEntry.inputSummary}`,
+    `output: ${message.toolTraceEntry.outputSummary}`
+  ].join("\n");
 }
 
 function computeLinkCompletionState(
@@ -1502,14 +1516,30 @@ function toWorkspaceLinkLabel(fileName: string): string {
   return fileName.slice(0, -3);
 }
 
-function buildInlineAiExcerpt(beforeText: string, afterText: string): string {
+function buildInlineAiExcerpt(state: InlineAiPromptState): string {
   return [
+    `open document source: ${state.documentMarkdown.length > 0 ? "current editor state" : "(empty)"}`,
+    `insertion position: ${state.anchorPos}`,
+    `open markdown length: ${state.documentMarkdown.length} chars`,
+    "",
     "before cursor:",
-    beforeText,
+    truncateInlinePopupContext(state.beforeText, "tail"),
     "",
     "after cursor:",
-    afterText
+    truncateInlinePopupContext(state.afterText, "head")
   ].join("\n");
+}
+
+function truncateInlinePopupContext(value: string, side: "head" | "tail"): string {
+  const maxLength = 2000;
+
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return side === "head"
+    ? `${value.slice(0, maxLength)}\n[truncated ${value.length - maxLength} chars]`
+    : `[truncated ${value.length - maxLength} chars]\n${value.slice(-maxLength)}`;
 }
 
 function getFileName(relativePath: string): string {

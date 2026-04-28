@@ -105,6 +105,8 @@ const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".bmp", ".gif", ".jpeg", ".jpg", ".
 const MAX_PERSISTED_CHAT_SESSIONS = 50;
 const MAX_IMAGE_ATTACHMENT_FILE_BYTES = 8_000_000;
 const MAX_INLINE_AI_CONTEXT_CHARS = 6_000;
+const MAX_INLINE_AI_DOCUMENT_CHARS = 30_000;
+const TOOL_LOOP_INLINE_INSERTION_MAX_STEPS = 8;
 const TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS = 8;
 const WORKSPACE_ENV_FILENAMES = [".env.local", ".env"] as const;
 const FALLBACK_MODELS: AiChatModelOption[] = [
@@ -405,7 +407,7 @@ export class AiChatService {
       context: request.context,
       extraTools: createInlineMarkdownInsertionTools(),
       instructions: buildInlineInsertionInstructions(),
-      maxSteps: 4,
+      maxSteps: TOOL_LOOP_INLINE_INSERTION_MAX_STEPS,
       prompt: buildInlineInsertionPrompt(request, conversationalMessages),
       runtimeSelection,
       useWorkspaceTools: true
@@ -852,7 +854,14 @@ function buildInlineRuntimeNotConfiguredMessage(status: AiChatStatus): string {
 function buildInlineInsertionInstructions(): string {
   return [
     "You are chatting inside the IntegralNotes inline Markdown insertion popup.",
-    "The user is asking for text to insert at the editor cursor, not for a general chat answer.",
+    "This popup has the same workspace inspection and persistence tools as the main AI Chat panel, plus insertMarkdownAtCursor for committing the inline insertion.",
+    "Use workspace tools when you need file evidence instead of guessing. Tool calls are allowed and expected when the request depends on workspace files.",
+    "If you discover or receive an image path and need to inspect the image itself, use readWorkspaceImage.",
+    "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument. Do not judge HTML or image contents from filenames or source text alone.",
+    "When reading Markdown and you find a linked or embedded .html/.htm file whose visual content matters, render that HTML path with renderWorkspaceDocument.",
+    "If the user wants real workspace edits outside the insertion, use writeWorkspaceFile. bash/writeFile remains preview-only.",
+    "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
+    "The user is usually asking for text to insert at the editor cursor, not for a general chat answer.",
     "The app provides Markdown before and after the cursor. The cursor is exactly between those two sections.",
     "Use the surrounding Markdown, the cursor position, and the user's latest request to infer the intended inserted content.",
     "If enough information is available, call insertMarkdownAtCursor with the exact Markdown text to insert.",
@@ -873,6 +882,11 @@ function buildInlineInsertionPrompt(
     "",
     `Source note path: ${request.sourceNotePath}`,
     `Active path: ${request.context.activeRelativePath ?? "(none)"}`,
+    `Insertion position: ${formatInlineInsertionPosition(request.insertionPosition)}`,
+    `Open Markdown length: ${request.documentMarkdown.length} chars`,
+    "",
+    "Open Markdown document (current editor state):",
+    truncateInlineDocument(request.documentMarkdown),
     "",
     "Markdown before cursor:",
     truncateInlineContext(request.beforeText, "tail"),
@@ -954,6 +968,12 @@ function parseInlineMarkdownInsertion(
 function buildInlinePythonBlockInstructions(skillPrompt: string): string {
   const lines = [
     "You are chatting inside the IntegralNotes inline Python block popup.",
+    "This popup has the same workspace inspection and persistence tools as the main AI Chat panel, plus insertPythonBlock for committing the inline block insertion.",
+    "Use workspace tools when you need file evidence instead of guessing. Tool calls are allowed and expected when the request depends on workspace files.",
+    "If you discover or receive an image path and need to inspect the image itself, use readWorkspaceImage.",
+    "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument. Do not judge HTML or image contents from filenames or source text alone.",
+    "When reading Markdown and you find a linked or embedded .html/.htm file whose visual content matters, render that HTML path with renderWorkspaceDocument.",
+    "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
     "Help the user converge on a Python analysis block. Ask a concise follow-up question if the request is underspecified.",
     "When the block is ready, implement it as a real workspace Python file by using writeWorkspaceFile.",
     "Use the implement-integral-block skill rules below as the system contract for the Python file.",
@@ -987,6 +1007,12 @@ function buildInlinePythonBlockPrompt(
     formatInlinePythonBlockTranscript(messages),
     "",
     `Source note path: ${request.sourceNotePath}`,
+    `Active path: ${request.context.activeRelativePath ?? "(none)"}`,
+    `Insertion position: ${formatInlineInsertionPosition(request.insertionPosition)}`,
+    `Open Markdown length: ${request.documentMarkdown.length} chars`,
+    "",
+    "Open Markdown document (current editor state):",
+    truncateInlineDocument(request.documentMarkdown),
     "",
     "Text before cursor:",
     truncateInlineContext(request.beforeText, "tail"),
@@ -1134,6 +1160,29 @@ function truncateInlineContext(value: string, side: "head" | "tail"): string {
   return side === "head"
     ? value.slice(0, MAX_INLINE_AI_CONTEXT_CHARS)
     : value.slice(-MAX_INLINE_AI_CONTEXT_CHARS);
+}
+
+function truncateInlineDocument(value: string): string {
+  if (value.length === 0) {
+    return "(empty)";
+  }
+
+  if (value.length <= MAX_INLINE_AI_DOCUMENT_CHARS) {
+    return value;
+  }
+
+  const halfLength = Math.floor(MAX_INLINE_AI_DOCUMENT_CHARS / 2);
+  const omittedLength = value.length - MAX_INLINE_AI_DOCUMENT_CHARS;
+
+  return [
+    value.slice(0, halfLength),
+    `[... truncated ${omittedLength} chars from the middle of the open Markdown document ...]`,
+    value.slice(-halfLength)
+  ].join("\n");
+}
+
+function formatInlineInsertionPosition(value: number): string {
+  return Number.isFinite(value) ? `${Math.max(0, Math.floor(value))}` : "(unknown)";
 }
 
 function escapeRegExp(value: string): string {
