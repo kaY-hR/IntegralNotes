@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent
+} from "react";
 
 import {
   DEFAULT_AI_CHAT_SYSTEM_PROMPTS,
@@ -479,17 +486,41 @@ export function AIChatPanel({
       return;
     }
 
+    await attachImageFiles(files);
+    event.target.value = "";
+  };
+
+  const handlePasteImages = async (event: ClipboardEvent<HTMLTextAreaElement>): Promise<void> => {
+    if (isSubmitting) {
+      return;
+    }
+
+    const files = extractImageFilesFromClipboardData(event.clipboardData);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    await attachImageFiles(files);
+  };
+
+  const attachImageFiles = async (files: readonly File[]): Promise<void> => {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
     setErrorMessage(null);
 
     try {
-      const nextAttachments = await Promise.all(files.map((file) => createImageAttachment(file)));
+      const nextAttachments = await Promise.all(imageFiles.map((file) => createImageAttachment(file)));
       setComposerAttachments((currentAttachments) =>
         mergeImageAttachments(currentAttachments, nextAttachments)
       );
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
-    } finally {
-      event.target.value = "";
     }
   };
 
@@ -692,6 +723,9 @@ export function AIChatPanel({
               event.preventDefault();
               void handleSubmit();
             }
+          }}
+          onPaste={(event) => {
+            void handlePasteImages(event);
           }}
           placeholder="workspace に対してやりたいことを書く"
           rows={5}
@@ -1343,6 +1377,39 @@ function formatContextWindow(value: number): string {
 
 function createChatMessageId(role: "assistant" | "tool" | "user"): string {
   return `chat-${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function extractImageFilesFromClipboardData(clipboardData: DataTransfer): File[] {
+  const imageFiles: File[] = [];
+  const seenKeys = new Set<string>();
+
+  const pushImageFile = (file: File | null | undefined): void => {
+    if (!file || !file.type.startsWith("image/")) {
+      return;
+    }
+
+    const key = `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+    if (seenKeys.has(key)) {
+      return;
+    }
+
+    seenKeys.add(key);
+    imageFiles.push(file);
+  };
+
+  for (const item of Array.from(clipboardData.items)) {
+    if (item.kind !== "file") {
+      continue;
+    }
+
+    pushImageFile(item.getAsFile());
+  }
+
+  for (const file of Array.from(clipboardData.files)) {
+    pushImageFile(file);
+  }
+
+  return imageFiles;
 }
 
 async function createImageAttachment(file: File): Promise<AiChatImageAttachment> {
