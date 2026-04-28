@@ -297,6 +297,7 @@ function buildAgentInstructions(
     "Always end with a short assistant answer after tool use. Never leave the final response empty.",
     "If you discover an image path and need to inspect the image itself, use readWorkspaceImage.",
     "If markdown/html layout or embedded charts matter, use renderWorkspaceDocument to inspect the rendered page visually.",
+    "When reading markdown, if you find a linked or embedded .html/.htm file and the user is asking about its visual content, render that HTML path with renderWorkspaceDocument instead of judging from the markdown text alone.",
     "If the user wants real workspace edits, use writeWorkspaceFile. bash/writeFile remains preview-only.",
     "Do not claim that real workspace files were saved unless the app explicitly tells you persistence happened.",
     ""
@@ -368,6 +369,7 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "Workspace files are preloaded into the sandbox for this request. Text files include real content; binary or oversized files may appear as placeholder stubs so they remain discoverable via find/ls.",
     "Use readWorkspaceImage when you need to inspect an image file in the real workspace by path.",
     "Use renderWorkspaceDocument when you need a visual rendering of a markdown/html/text workspace file, including embedded HTML charts.",
+    "When markdown contains a linked or embedded .html/.htm path and visual content matters, call renderWorkspaceDocument on that HTML path rather than relying only on the markdown source.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
     "Use writeWorkspaceFile when you need to persist a real workspace text edit.",
     "Do not tell the user that files were saved; instead describe preview changes or proposed edits."
