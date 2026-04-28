@@ -526,6 +526,20 @@ function createPersistentWorkspaceTools(
   getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
 ): ToolSet {
   return {
+    insertPythonBlock: tool({
+      description:
+        "Signal that the inline Python block popup should insert an itg-notes block for an already-saved workspace Python callable. Use this only after writeWorkspaceFile saved the .py file and the requested block is ready to insert.",
+      inputSchema: z.object({
+        functionName: z.string().min(1),
+        scriptPath: z.string().min(1),
+        summary: z.string().optional()
+      }),
+      execute: async ({ functionName, scriptPath, summary }) => ({
+        functionName,
+        scriptPath,
+        summary: typeof summary === "string" ? summary : ""
+      })
+    }),
     resolveManagedDataByPath: tool({
       description:
         "Resolve a workspace path to the managed data ID and metadata used by IntegralNotes. Use this before writing itg-notes block inputs from paths.",
@@ -823,6 +837,14 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return input.id;
   }
 
+  if (toolName === "insertPythonBlock" && isRecord(input)) {
+    const scriptPath = typeof input.scriptPath === "string" ? input.scriptPath : "(unknown script)";
+    const functionName =
+      typeof input.functionName === "string" ? input.functionName : "(unknown function)";
+
+    return `${scriptPath}:${functionName}`;
+  }
+
   return summarizeUnknownValue(input);
 }
 
@@ -855,6 +877,20 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
       typeof output.created === "boolean" ? (output.created ? "created" : "updated") : "saved";
 
     return `${created}: ${output.path}`;
+  }
+
+  if (
+    toolName === "insertPythonBlock" &&
+    isRecord(output) &&
+    typeof output.scriptPath === "string" &&
+    typeof output.functionName === "string"
+  ) {
+    const summary =
+      typeof output.summary === "string" && output.summary.trim().length > 0
+        ? ` | ${truncateTraceText(output.summary.trim())}`
+        : "";
+
+    return `${output.scriptPath}:${output.functionName}${summary}`;
   }
 
   if (toolName === "readWorkspaceImage" && isRecord(output) && typeof output.path === "string") {

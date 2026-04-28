@@ -126,12 +126,24 @@ export interface SubmitInlinePythonBlockRequest {
   afterText: string;
   beforeText: string;
   context: AiChatContextSummary;
+  history: AiChatMessage[];
   prompt: string;
+  sessionId?: string | null;
   sourceNotePath: string;
 }
 
-export interface SubmitInlinePythonBlockResult {
-  assistantText: string;
+export interface InlinePythonBlockInsertion {
   functionName: string;
   scriptPath: string;
+  summary?: string;
+}
+
+export interface SubmitInlinePythonBlockResult {
+  assistantText?: string;
+  functionName?: string;
+  insertion: InlinePythonBlockInsertion | null;
+  messages: AiChatMessage[];
+  scriptPath?: string;
+  sessionId: string;
+  userMessage: AiChatMessage;
 }

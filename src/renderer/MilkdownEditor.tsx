@@ -12,7 +12,7 @@ import type {
   IntegralAssetCatalog,
   IntegralBlockTypeDefinition
 } from "../shared/integral";
-import type { AiChatContextSummary } from "../shared/aiChat";
+import type { AiChatContextSummary, AiChatMessage, InlinePythonBlockInsertion } from "../shared/aiChat";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
@@ -85,8 +85,10 @@ interface InlineAiPromptState {
   beforeText: string;
   error: string | null;
   isSubmitting: boolean;
+  messages: AiChatMessage[];
   mode: InlineAiMode;
   prompt: string;
+  sessionId: string | null;
   x: number;
   y: number;
 }
@@ -606,8 +608,10 @@ export function MilkdownEditor({
       beforeText: trigger.beforeText,
       error: null,
       isSubmitting: false,
+      messages: [],
       mode: trigger.mode,
       prompt: "",
+      sessionId: null,
       x: trigger.x,
       y: trigger.y
     };
@@ -678,32 +682,29 @@ export function MilkdownEditor({
           afterText: current.afterText,
           beforeText: current.beforeText,
           context: buildInlineAiContextSummary(current),
+          history: current.messages,
           prompt: current.prompt,
+          sessionId: current.sessionId,
           sourceNotePath: relativePath
         });
-        const snapshot = await window.integralNotes.syncWorkspace();
+        const nextMessages = [...current.messages, result.userMessage, ...result.messages];
 
-        if (snapshot) {
-          onWorkspaceSnapshotChangedRef.current(
-            snapshot,
-            `${result.scriptPath} を AI で作成しました`
-          );
+        if (!result.insertion) {
+          const nextState = {
+            ...current,
+            error: null,
+            isSubmitting: false,
+            messages: nextMessages,
+            prompt: "",
+            sessionId: result.sessionId
+          };
+
+          inlineAiPromptRef.current = nextState;
+          setInlineAiPrompt(nextState);
+          return;
         }
 
-        const catalog = await window.integralNotes.getIntegralAssetCatalog();
-        onIntegralAssetCatalogChangedRef.current(catalog);
-
-        const blockType = `${result.scriptPath}:${result.functionName}`;
-        const definition =
-          catalog.blockTypes.find(
-            (candidate) =>
-              candidate.pluginId === GENERAL_ANALYSIS_PLUGIN_ID && candidate.blockType === blockType
-          ) ?? null;
-        const blockMarkdown = definition
-          ? toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)))
-          : createPythonIntegralBlockMarkdown(blockType);
-
-        insertMarkdownAtPosition(current.anchorPos, blockMarkdown);
+        await insertInlinePythonBlockResult(current.anchorPos, result.insertion);
       }
 
       inlineAiPromptRef.current = null;
@@ -738,6 +739,35 @@ export function MilkdownEditor({
       insert(markdown)(ctx);
       view.focus();
     });
+  };
+
+  const insertInlinePythonBlockResult = async (
+    anchorPos: number,
+    insertion: InlinePythonBlockInsertion
+  ): Promise<void> => {
+    const snapshot = await window.integralNotes.syncWorkspace();
+
+    if (snapshot) {
+      onWorkspaceSnapshotChangedRef.current(
+        snapshot,
+        `${insertion.scriptPath} を AI で作成しました`
+      );
+    }
+
+    const catalog = await window.integralNotes.getIntegralAssetCatalog();
+    onIntegralAssetCatalogChangedRef.current(catalog);
+
+    const blockType = `${insertion.scriptPath}:${insertion.functionName}`;
+    const definition =
+      catalog.blockTypes.find(
+        (candidate) =>
+          candidate.pluginId === GENERAL_ANALYSIS_PLUGIN_ID && candidate.blockType === blockType
+      ) ?? null;
+    const blockMarkdown = definition
+      ? toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)))
+      : createPythonIntegralBlockMarkdown(blockType);
+
+    insertMarkdownAtPosition(anchorPos, blockMarkdown);
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
@@ -977,6 +1007,21 @@ export function MilkdownEditor({
               ×
             </button>
           </div>
+          {inlineAiPrompt.mode === "python-block" && inlineAiPrompt.messages.length > 0 ? (
+            <div className="editor-ai-popup__messages">
+              {inlineAiPrompt.messages.map((message) => (
+                <article
+                  className={`editor-ai-popup__message editor-ai-popup__message--${message.role}`}
+                  key={message.id}
+                >
+                  <span className="editor-ai-popup__message-role">
+                    {formatInlineAiMessageRole(message)}
+                  </span>
+                  <pre className="editor-ai-popup__message-text">{message.text}</pre>
+                </article>
+              ))}
+            </div>
+          ) : null}
           <textarea
             className="editor-ai-popup__input"
             disabled={inlineAiPrompt.isSubmitting}
@@ -998,7 +1043,9 @@ export function MilkdownEditor({
             placeholder={
               inlineAiPrompt.mode === "insert-text"
                 ? "挿入したい内容を指示"
-                : "実装したい解析 block を指示"
+                : inlineAiPrompt.messages.length > 0
+                  ? "追加の指示や回答を入力"
+                  : "実装したい解析 block を指示"
             }
             ref={inlineAiTextareaRef}
             rows={4}
@@ -1021,7 +1068,11 @@ export function MilkdownEditor({
               disabled={inlineAiPrompt.isSubmitting || inlineAiPrompt.prompt.trim().length === 0}
               type="submit"
             >
-              {inlineAiPrompt.isSubmitting ? "送信中..." : "送信"}
+              {inlineAiPrompt.isSubmitting
+                ? "送信中..."
+                : inlineAiPrompt.mode === "python-block" && inlineAiPrompt.messages.length > 0
+                  ? "返信"
+                  : "送信"}
             </button>
           </div>
         </form>
@@ -1164,6 +1215,18 @@ function computeInlineAiTriggerState(
   } catch {
     return null;
   }
+}
+
+function formatInlineAiMessageRole(message: AiChatMessage): string {
+  if (message.role === "assistant") {
+    return "Assistant";
+  }
+
+  if (message.role === "tool") {
+    return "Tool";
+  }
+
+  return "You";
 }
 
 function computeLinkCompletionState(

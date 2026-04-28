@@ -14,6 +14,7 @@ import type {
   AiChatSessionSummary,
   AiChatStatus,
   AiChatToolTraceEntry,
+  InlinePythonBlockInsertion,
   CreateAiChatSessionRequest,
   SaveAiChatSettingsRequest,
   SaveAiChatSessionRequest,
@@ -426,37 +427,72 @@ export class AiChatService {
       throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
     }
 
+    const normalizedPriorMessages = request.history
+      .map(normalizeAiChatMessageForPersistence)
+      .filter(isDefined);
+    const userMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      id: createChatMessageId("user"),
+      role: "user",
+      text: prompt
+    };
+    const conversationalMessages = [...normalizedPriorMessages, userMessage];
     const skillPrompt = await readImplementIntegralBlockSkillPrompt(workspaceRootPath);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       instructions: buildInlinePythonBlockInstructions(skillPrompt),
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
-      prompt: buildInlinePythonBlockPrompt(request),
+      prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
       runtimeSelection,
       useWorkspaceTools: true
     });
-    const parsed = parseInlinePythonBlockResult(result.text, result.diagnostics.toolTrace);
-    const scriptPath = normalizeGeneratedScriptPath(parsed.scriptPath);
-    const functionName = normalizeGeneratedFunctionName(parsed.functionName);
-    const absoluteScriptPath = this.workspaceService.getAbsolutePath(scriptPath);
-    const stats = await fs.stat(absoluteScriptPath).catch(() => null);
+    const insertion = parseInlinePythonBlockInsertion(result.diagnostics.toolTrace);
 
-    if (!stats?.isFile()) {
-      throw new Error(`AI が Python script を保存しませんでした: ${scriptPath}`);
+    if (insertion) {
+      const absoluteScriptPath = this.workspaceService.getAbsolutePath(insertion.scriptPath);
+      const stats = await fs.stat(absoluteScriptPath).catch(() => null);
+
+      if (!stats?.isFile()) {
+        throw new Error(`AI が Python script を保存しませんでした: ${insertion.scriptPath}`);
+      }
+
+      const scriptSource = await fs.readFile(absoluteScriptPath, "utf8");
+
+      if (!containsDiscoverableIntegralCallable(scriptSource, insertion.functionName)) {
+        throw new Error(
+          `${insertion.scriptPath} に @integral_block 直下の def ${insertion.functionName}(...) が見つかりません。`
+        );
+      }
     }
 
-    const scriptSource = await fs.readFile(absoluteScriptPath, "utf8");
-
-    if (!containsDiscoverableIntegralCallable(scriptSource, functionName)) {
-      throw new Error(
-        `${scriptPath} に @integral_block 直下の def ${functionName}(...) が見つかりません。`
-      );
-    }
+    const assistantMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      diagnostics: result.diagnostics,
+      id: createChatMessageId("assistant"),
+      role: "assistant",
+      text: result.text
+    };
+    const toolMessages = buildToolMessages(assistantMessage);
+    const responseMessages = [...toolMessages, assistantMessage];
+    const sessionId = await this.persistInlinePythonBlockSession({
+      context: request.context,
+      messages: [...conversationalMessages, ...responseMessages],
+      sessionId: request.sessionId ?? null,
+      workspaceRootPath
+    });
 
     return {
       assistantText: result.text,
-      functionName,
-      scriptPath
+      ...(insertion
+        ? {
+            functionName: insertion.functionName,
+            scriptPath: insertion.scriptPath
+          }
+        : {}),
+      insertion,
+      messages: responseMessages,
+      sessionId,
+      userMessage
     };
   }
 
@@ -549,6 +585,50 @@ export class AiChatService {
       `${JSON.stringify(normalizePersistedHistory(history), null, 2)}\n`,
       "utf8"
     );
+  }
+
+  private async persistInlinePythonBlockSession({
+    context,
+    messages,
+    sessionId,
+    workspaceRootPath
+  }: {
+    context: AiChatContextSummary;
+    messages: AiChatMessage[];
+    sessionId: string | null;
+    workspaceRootPath: string;
+  }): Promise<string> {
+    const history = await this.readPersistedHistory();
+    const now = new Date().toISOString();
+    const normalizedSessionId = normalizeIdentifier(sessionId);
+    const normalizedMessages = messages.map(normalizeAiChatMessageForPersistence).filter(isDefined);
+    const existingSession = normalizedSessionId
+      ? history.sessions.find((candidate) => candidate.id === normalizedSessionId)
+      : undefined;
+    const nextSession: PersistedAiChatSession = existingSession
+      ? {
+          ...existingSession,
+          messages: normalizedMessages,
+          title: deriveSessionTitle(normalizedMessages, existingSession.title),
+          updatedAt: now,
+          workspaceRootName: context.workspaceRootName,
+          workspaceRootPath
+        }
+      : createPersistedChatSession({
+          context,
+          createdAt: now,
+          messages: normalizedMessages,
+          sessionId: normalizedSessionId ?? undefined,
+          workspaceRootPath
+        });
+    const nextHistory = normalizePersistedHistory({
+      activeSessionId: history.activeSessionId ?? nextSession.id,
+      sessions: [nextSession, ...history.sessions.filter((session) => session.id !== nextSession.id)],
+      version: 1
+    });
+
+    await this.writePersistedHistory(nextHistory);
+    return nextSession.id;
   }
 
   private async resolveCurrentRuntimeSelection(): Promise<{
@@ -763,8 +843,9 @@ function buildInlineInsertionPrompt(request: SubmitInlineAiInsertionRequest): st
 
 function buildInlinePythonBlockInstructions(skillPrompt: string): string {
   const lines = [
-    "You are implementing a Python analysis block for IntegralNotes.",
-    "Immediately implement the requested block as a real workspace Python file by using writeWorkspaceFile.",
+    "You are chatting inside the IntegralNotes inline Python block popup.",
+    "Help the user converge on a Python analysis block. Ask a concise follow-up question if the request is underspecified.",
+    "When the block is ready, implement it as a real workspace Python file by using writeWorkspaceFile.",
     "Use the implement-integral-block skill rules below as the system contract for the Python file.",
     "Prefer a new file under scripts/ai_blocks/ with a descriptive snake_case name unless the user asks for a specific path.",
     "Do not modify the active note. The app will insert the itg-notes block after you return.",
@@ -774,8 +855,9 @@ function buildInlinePythonBlockInstructions(skillPrompt: string): string {
     "Make user-facing renderables their own output slots. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other files the user is meant to inspect directly.",
     "Set auto_insert_to_work_note=True for user-facing renderable output slots that should appear under the block.",
     "Keep CSV/TSV/JSON and other machine-readable or intermediate outputs in separate output slots, with auto_insert_to_work_note omitted or false unless the user explicitly wants that file as the visible result.",
-    "After saving the script, return JSON only. No markdown fence, no prose.",
-    'Required JSON shape: {"scriptPath":"scripts/ai_blocks/example.py","functionName":"main","summary":"short summary"}',
+    "After saving the script and only when ready to insert, call the insertPythonBlock tool with scriptPath, functionName, and a short summary.",
+    "Do not call insertPythonBlock before writeWorkspaceFile has saved the Python file.",
+    "Do not return JSON as a substitute for insertPythonBlock.",
     ""
   ];
 
@@ -786,10 +868,13 @@ function buildInlinePythonBlockInstructions(skillPrompt: string): string {
   return lines.join("\n");
 }
 
-function buildInlinePythonBlockPrompt(request: SubmitInlinePythonBlockRequest): string {
+function buildInlinePythonBlockPrompt(
+  request: SubmitInlinePythonBlockRequest,
+  messages: readonly AiChatMessage[]
+): string {
   return [
-    "User request:",
-    request.prompt.trim(),
+    "Popup chat transcript:",
+    formatInlinePythonBlockTranscript(messages),
     "",
     `Source note path: ${request.sourceNotePath}`,
     "",
@@ -799,8 +884,18 @@ function buildInlinePythonBlockPrompt(request: SubmitInlinePythonBlockRequest): 
     "Text after cursor:",
     truncateInlineContext(request.afterText, "head"),
     "",
-    "Implement the Python script now, save it with writeWorkspaceFile, then return the required JSON only."
+    "Respond to the latest user message. If ready, save the Python script with writeWorkspaceFile, then call insertPythonBlock. If more information is needed, ask one concise question and do not call insertPythonBlock."
   ].join("\n");
+}
+
+function formatInlinePythonBlockTranscript(messages: readonly AiChatMessage[]): string {
+  return messages
+    .filter((message) => message.role !== "tool")
+    .map((message) => {
+      const role = message.role === "assistant" ? "Assistant" : "User";
+      return `${role}: ${message.text.trim()}`;
+    })
+    .join("\n\n");
 }
 
 async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string): Promise<string> {
@@ -855,50 +950,32 @@ async function readTextIfExists(filePath: string): Promise<string | null> {
   }
 }
 
-function parseInlinePythonBlockResult(
-  text: string,
+function parseInlinePythonBlockInsertion(
   toolTrace: readonly AiChatToolTraceEntry[]
-): {
-  functionName: string;
-  scriptPath: string;
-} {
-  const parsedJson = parseJsonObjectFromText(text);
-  const jsonScriptPath =
-    parsedJson && typeof parsedJson.scriptPath === "string" ? parsedJson.scriptPath : null;
-  const jsonFunctionName =
-    parsedJson && typeof parsedJson.functionName === "string" ? parsedJson.functionName : null;
-  const traceScriptPath = [...toolTrace]
+): InlinePythonBlockInsertion | null {
+  const insertionTrace = [...toolTrace]
     .reverse()
-    .find((entry) => entry.toolName === "writeWorkspaceFile" && entry.status === "success")
-    ?.outputSummary.match(/^(?:created|updated|saved):\s*(.+)$/u)?.[1];
-  const scriptPath = jsonScriptPath ?? traceScriptPath ?? null;
+    .find((entry) => entry.toolName === "insertPythonBlock" && entry.status === "success");
 
-  if (!scriptPath) {
-    throw new Error("AI の応答から保存済み script path を取得できませんでした。");
+  if (!insertionTrace) {
+    return null;
   }
+
+  const match = /^(.+\.py):([A-Za-z_][A-Za-z0-9_]*)(?:\s*\|\s*(.*))?$/u.exec(
+    insertionTrace.outputSummary.trim()
+  );
+
+  if (!match) {
+    throw new Error("insertPythonBlock tool の結果から script path / function name を取得できませんでした。");
+  }
+
+  const summary = match[3]?.trim();
 
   return {
-    functionName: jsonFunctionName ?? "main",
-    scriptPath
+    functionName: normalizeGeneratedFunctionName(match[2] ?? "main"),
+    scriptPath: normalizeGeneratedScriptPath(match[1] ?? ""),
+    ...(summary ? { summary } : {})
   };
-}
-
-function parseJsonObjectFromText(text: string): Record<string, unknown> | null {
-  const fencedMatch = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text);
-  const candidate = fencedMatch?.[1] ?? text;
-  const startIndex = candidate.indexOf("{");
-  const endIndex = candidate.lastIndexOf("}");
-
-  if (startIndex < 0 || endIndex <= startIndex) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(candidate.slice(startIndex, endIndex + 1)) as unknown;
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeGeneratedScriptPath(scriptPath: string): string {
