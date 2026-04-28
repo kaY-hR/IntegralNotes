@@ -699,10 +699,17 @@ export function MilkdownEditor({
           return;
         }
 
-        insertMarkdownAtPosition(current.anchorPos, result.insertion.text, {
-          marker: "??",
-          originalAfterText: current.afterText
-        });
+        insertMarkdownAtPosition(
+          current.anchorPos,
+          prependInlineAiInitialUserMessage(
+            result.insertion.text,
+            getInitialInlineAiUserMessage(current)
+          ),
+          {
+            marker: "??",
+            originalAfterText: current.afterText
+          }
+        );
       } else {
         const result = await window.integralNotes.submitInlinePythonBlock({
           afterText: current.afterText,
@@ -732,7 +739,12 @@ export function MilkdownEditor({
           return;
         }
 
-        await insertInlinePythonBlockResult(current.anchorPos, result.insertion, current.afterText);
+        await insertInlinePythonBlockResult(
+          current.anchorPos,
+          result.insertion,
+          current.afterText,
+          getInitialInlineAiUserMessage(current)
+        );
       }
 
       inlineAiPromptRef.current = null;
@@ -791,7 +803,8 @@ export function MilkdownEditor({
   const insertInlinePythonBlockResult = async (
     anchorPos: number,
     insertion: InlinePythonBlockInsertion,
-    originalAfterText: string
+    originalAfterText: string,
+    initialUserMessage: string
   ): Promise<void> => {
     const snapshot = await window.integralNotes.syncWorkspace();
 
@@ -815,10 +828,14 @@ export function MilkdownEditor({
       ? toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)))
       : createPythonIntegralBlockMarkdown(blockType);
 
-    insertMarkdownAtPosition(anchorPos, blockMarkdown, {
-      marker: ">>",
-      originalAfterText
-    });
+    insertMarkdownAtPosition(
+      anchorPos,
+      prependInlineAiInitialUserMessage(blockMarkdown, initialUserMessage),
+      {
+        marker: ">>",
+        originalAfterText
+      }
+    );
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
@@ -1554,6 +1571,34 @@ function buildInlineAiExcerpt(state: InlineAiPromptState): string {
     "after cursor:",
     truncateInlinePopupContext(state.afterText, "head")
   ].join("\n");
+}
+
+function getInitialInlineAiUserMessage(state: InlineAiPromptState): string {
+  return (
+    state.messages.find(
+      (message) => message.role === "user" && message.text.trim().length > 0
+    )?.text ?? state.prompt
+  );
+}
+
+function prependInlineAiInitialUserMessage(markdown: string, userMessage: string): string {
+  const trimmedMessage = userMessage.trim();
+
+  if (trimmedMessage.length === 0) {
+    return markdown;
+  }
+
+  return `${toMarkdownCodeFence(trimmedMessage)}\n\n${markdown}`;
+}
+
+function toMarkdownCodeFence(content: string): string {
+  const longestFence = Array.from(content.matchAll(/`{3,}/gu)).reduce(
+    (maxLength, match) => Math.max(maxLength, match[0]?.length ?? 0),
+    0
+  );
+  const fence = "`".repeat(Math.max(3, longestFence + 1));
+
+  return `${fence}\n${content}\n${fence}`;
 }
 
 function truncateInlinePopupContext(value: string, side: "head" | "tail"): string {
