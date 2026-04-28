@@ -554,6 +554,28 @@ function IntegralBlockPanel({
     );
   };
 
+  const resolveStoredOutputReference = (
+    reference: string | null
+  ): IntegralDatasetSummary | IntegralManagedFileSummary | null => {
+    if (!reference) {
+      return null;
+    }
+
+    return datasetMap.get(reference) ?? managedFileMap.get(reference) ?? null;
+  };
+
+  const isExecutedOutputReference = (
+    reference: string | null,
+    blockId: string | undefined
+  ): boolean => {
+    if (!blockId) {
+      return false;
+    }
+
+    const managedData = resolveStoredOutputReference(reference);
+    return managedData?.createdByBlockId === blockId;
+  };
+
   const toStoredDatasetReference = (datasetId: string): string => {
     return datasetId;
   };
@@ -847,11 +869,10 @@ function IntegralBlockPanel({
     blockDefinition?.source === "external-plugin" &&
     blockDefinition.externalPlugin?.rendererMode === "iframe";
   const isExecutedBlock =
-    Boolean(parsed.block) &&
     blockDefinition?.executionMode === "manual" &&
     blockDefinition.outputSlots.length > 0 &&
     blockDefinition.outputSlots.every((slot) =>
-      Boolean(resolveManagedDataNoteTarget(parsed.block.outputs[slot.name] ?? null))
+      isExecutedOutputReference(parsed.block.outputs[slot.name] ?? null, parsed.block.id)
     );
 
   if (!blockDefinition) {
