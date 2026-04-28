@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
-import type {
-  AiChatContextSummary,
-  AiChatHistorySnapshot,
-  AiChatImageAttachment,
-  AiChatMessage,
-  AiChatSessionSummary,
-  AiChatStatus
+import {
+  DEFAULT_AI_CHAT_SYSTEM_PROMPTS,
+  type AiChatContextSummary,
+  type AiChatHistorySnapshot,
+  type AiChatImageAttachment,
+  type AiChatMessage,
+  type AiChatSessionSummary,
+  type AiChatStatus,
+  type AiChatSystemPrompts
 } from "../shared/aiChat";
 import type { WorkspaceFileDocument } from "../shared/workspace";
 
@@ -50,6 +52,9 @@ export function AIChatPanel({
   const [prompt, setPrompt] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [status, setStatus] = useState<AiChatStatus | null>(null);
+  const [systemPromptInputs, setSystemPromptInputs] = useState<AiChatSystemPrompts>(
+    DEFAULT_AI_CHAT_SYSTEM_PROMPTS
+  );
   const messagesRef = useRef<HTMLElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -157,6 +162,14 @@ export function AIChatPanel({
   }, [selectedModelId, status]);
 
   useEffect(() => {
+    if (!isSettingsDialogOpen || !status) {
+      return;
+    }
+
+    setSystemPromptInputs(status.systemPrompts);
+  }, [isSettingsDialogOpen, status]);
+
+  useEffect(() => {
     const hasOpenDialog = isContextDialogOpen || isHistoryDialogOpen || isSettingsDialogOpen;
 
     document.body.classList.toggle("integral-dialog-open", hasOpenDialog);
@@ -231,6 +244,14 @@ export function AIChatPanel({
         return "Stub Runtime";
     }
   }, [status]);
+
+  const systemPromptInputsAreValid = useMemo(
+    () =>
+      systemPromptInputs.chatPanel.trim().length > 0 &&
+      systemPromptInputs.inlineInsertion.trim().length > 0 &&
+      systemPromptInputs.inlinePythonBlock.trim().length > 0,
+    [systemPromptInputs]
+  );
 
   const activeSessionTitle = historySnapshot?.activeSession.title ?? "New chat";
   const sessionCount = historySnapshot?.sessions.length ?? 0;
@@ -334,12 +355,14 @@ export function AIChatPanel({
     try {
       const nextStatus = await window.integralNotes.saveAiChatSettings({
         apiKey: apiKeyInput.trim().length > 0 ? apiKeyInput.trim() : undefined,
-        modelId: selectedModelId || null
+        modelId: selectedModelId || null,
+        systemPrompts: systemPromptInputs
       });
 
       setStatus(nextStatus);
       setApiKeyInput("");
       setSelectedModelId(nextStatus.selectedModelId ?? nextStatus.availableModels[0]?.id ?? "");
+      setSystemPromptInputs(nextStatus.systemPrompts);
       setIsSettingsDialogOpen(false);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -376,6 +399,13 @@ export function AIChatPanel({
     } finally {
       setIsRefreshingModels(false);
     }
+  };
+
+  const updateSystemPromptInput = (key: keyof AiChatSystemPrompts, value: string): void => {
+    setSystemPromptInputs((current) => ({
+      ...current,
+      [key]: value
+    }));
   };
 
   const handleSubmit = async (): Promise<void> => {
@@ -847,8 +877,8 @@ export function AIChatPanel({
           >
             <div className="dialog-card__header">
               <p className="dialog-card__eyebrow">AI Chat</p>
-              <h2>Runtime Settings</h2>
-              <p>model と認証を設定します。current context は別の Context dialog に移しました。</p>
+              <h2>AI Chat Settings</h2>
+              <p>model、認証、chat / ?? / &gt;&gt; のsystem promptを設定します。</p>
             </div>
 
             <div className="dialog-card__body dialog-card__body--ai-chat-settings">
@@ -920,6 +950,73 @@ export function AIChatPanel({
                 ) : null}
               </div>
 
+              <div className="ai-chat-panel__dialog-section">
+                <div className="ai-chat-panel__settings-header">
+                  <div>
+                    <span className="ai-chat-panel__context-label">Prompts</span>
+                    <h3 className="ai-chat-panel__section-title">System Prompts</h3>
+                    <p className="ai-chat-panel__description">
+                      保存すると、通常chat、??のAI挿入、&gt;&gt;のPython block生成に反映されます。
+                    </p>
+                  </div>
+
+                  <button
+                    className="button button--ghost"
+                    disabled={isSavingSettings}
+                    onClick={() => {
+                      setSystemPromptInputs(status?.defaultSystemPrompts ?? DEFAULT_AI_CHAT_SYSTEM_PROMPTS);
+                    }}
+                    type="button"
+                  >
+                    Reset Prompts
+                  </button>
+                </div>
+
+                <div className="ai-chat-panel__prompt-settings">
+                  <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
+                    <span className="ai-chat-panel__context-label">AI Chat panel</span>
+                    <textarea
+                      className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
+                      onChange={(event) => {
+                        updateSystemPromptInput("chatPanel", event.target.value);
+                      }}
+                      rows={7}
+                      value={systemPromptInputs.chatPanel}
+                    />
+                  </label>
+
+                  <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
+                    <span className="ai-chat-panel__context-label">?? AI insertion</span>
+                    <textarea
+                      className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
+                      onChange={(event) => {
+                        updateSystemPromptInput("inlineInsertion", event.target.value);
+                      }}
+                      rows={8}
+                      value={systemPromptInputs.inlineInsertion}
+                    />
+                  </label>
+
+                  <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
+                    <span className="ai-chat-panel__context-label">&gt;&gt; Python block implementation</span>
+                    <textarea
+                      className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
+                      onChange={(event) => {
+                        updateSystemPromptInput("inlinePythonBlock", event.target.value);
+                      }}
+                      rows={9}
+                      value={systemPromptInputs.inlinePythonBlock}
+                    />
+                  </label>
+
+                  {!systemPromptInputsAreValid ? (
+                    <p className="ai-chat-panel__note">
+                      system prompt は3種類とも空にできません。既定値に戻す場合は Reset Prompts を使ってください。
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
               <div className="ai-chat-panel__dialog-meta">
                 <span className="ai-chat-panel__composer-hint">
                   {status?.catalogRefreshedAt
@@ -966,7 +1063,9 @@ export function AIChatPanel({
                 </button>
                 <button
                   className="button button--primary"
-                  disabled={isSavingSettings || selectedModelId.length === 0}
+                  disabled={
+                    isSavingSettings || selectedModelId.length === 0 || !systemPromptInputsAreValid
+                  }
                   onClick={() => {
                     void handleSaveSettings();
                   }}

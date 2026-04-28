@@ -13,15 +13,27 @@ import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
-import type {
-  AiChatContextSummary,
-  AiChatMessage,
-  AiChatMessageDiagnostics,
-  AiChatToolTraceEntry
+import {
+  DEFAULT_AI_CHAT_SYSTEM_PROMPTS,
+  type AiChatContextSummary,
+  type AiChatMessage,
+  type AiChatMessageDiagnostics,
+  type AiChatToolTraceEntry
 } from "../shared/aiChat";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
+
+type AiAgentSystemPrompt = string | null | undefined;
+
+function normalizeSystemPrompt(value: AiAgentSystemPrompt, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
 
 const AGENT_SKILLS_DESTINATION = ".integral-ai-skills";
 const MAX_WORKSPACE_FILE_COUNT = 5_000;
@@ -78,11 +90,13 @@ export class AiAgentService {
   async submit({
     context,
     history,
-    runtime
+    runtime,
+    systemPrompt
   }: {
     context: AiChatContextSummary;
     history: AiChatMessage[];
     runtime: AiAgentExecutionRuntime;
+    systemPrompt?: string | null;
   }): Promise<{
     diagnostics: AiChatMessageDiagnostics;
     text: string;
@@ -90,7 +104,7 @@ export class AiAgentService {
     const { model, providerOptions } = this.createLanguageModel(runtime);
     const toolContext = await this.createToolContext();
     const agent = new ToolLoopAgent({
-      instructions: buildAgentInstructions(context, toolContext),
+      instructions: buildAgentInstructions(context, toolContext, systemPrompt),
       model,
       providerOptions: providerOptions as any,
       stopWhen: stepCountIs(TOOL_LOOP_MAX_STEPS),
@@ -292,20 +306,11 @@ function buildAgentInstructions(
   toolContext: {
     skillCount: number;
     workspaceMounted: boolean;
-  }
+  },
+  systemPrompt?: string | null
 ): string {
   const lines = [
-    "You are the AI Chat inside IntegralNotes.",
-    "Keep responses concise, practical, and focused on the current workspace.",
-    "Use tools when you need to inspect files instead of guessing.",
-    "For repository, code, configuration, file, or implementation questions, inspect the workspace with tools before answering even if an active excerpt is available.",
-    "If the task requires concrete file evidence, search the workspace first.",
-    "Always end with a short assistant answer after tool use. Never leave the final response empty.",
-    "If you discover an image path and need to inspect the image itself, use readWorkspaceImage.",
-    "If markdown/html layout or embedded charts matter, use renderWorkspaceDocument to inspect the rendered page visually.",
-    "When reading markdown, if you find a linked or embedded .html/.htm file and the user is asking about its visual content, render that HTML path with renderWorkspaceDocument instead of judging from the markdown text alone.",
-    "If the user wants real workspace edits, use writeWorkspaceFile. bash/writeFile remains preview-only.",
-    "Do not claim that real workspace files were saved unless the app explicitly tells you persistence happened.",
+    normalizeSystemPrompt(systemPrompt, DEFAULT_AI_CHAT_SYSTEM_PROMPTS.chatPanel),
     ""
   ];
 

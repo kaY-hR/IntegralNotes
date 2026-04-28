@@ -1916,7 +1916,7 @@ textarea:focus-visible {
 }
 
 .dialog-card--ai-chat-settings {
-  width: min(720px, 100%);
+  width: min(860px, 100%);
   max-height: min(760px, calc(100vh - 40px));
 }
 
@@ -3702,6 +3702,23 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   border-radius: 10px;
   background: #ffffff;
   color: #1e2329;
+}
+
+.ai-chat-panel__prompt-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-chat-panel__settings-field--wide {
+  min-width: 0;
+}
+
+.ai-chat-panel__settings-textarea {
+  min-height: 148px;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .ai-chat-panel__icon-button {
