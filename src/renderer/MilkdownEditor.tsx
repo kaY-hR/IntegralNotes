@@ -699,7 +699,10 @@ export function MilkdownEditor({
           return;
         }
 
-        insertMarkdownAtPosition(current.anchorPos, result.insertion.text);
+        insertMarkdownAtPosition(current.anchorPos, result.insertion.text, {
+          marker: "??",
+          originalAfterText: current.afterText
+        });
       } else {
         const result = await window.integralNotes.submitInlinePythonBlock({
           afterText: current.afterText,
@@ -729,7 +732,7 @@ export function MilkdownEditor({
           return;
         }
 
-        await insertInlinePythonBlockResult(current.anchorPos, result.insertion);
+        await insertInlinePythonBlockResult(current.anchorPos, result.insertion, current.afterText);
       }
 
       inlineAiPromptRef.current = null;
@@ -746,7 +749,11 @@ export function MilkdownEditor({
     }
   };
 
-  const insertMarkdownAtPosition = (position: number, markdown: string): void => {
+  const insertMarkdownAtPosition = (
+    position: number,
+    markdown: string,
+    triggerCleanup?: { marker: "??" | ">>"; originalAfterText: string }
+  ): void => {
     const editor = editorRef.current;
 
     if (!editor) {
@@ -755,7 +762,22 @@ export function MilkdownEditor({
 
     editor.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
-      const nextPosition = Math.max(0, Math.min(position, view.state.doc.content.size));
+      let nextPosition = Math.max(0, Math.min(position, view.state.doc.content.size));
+      if (triggerCleanup && !triggerCleanup.originalAfterText.startsWith(triggerCleanup.marker)) {
+        const markerTo = Math.min(
+          nextPosition + triggerCleanup.marker.length,
+          view.state.doc.content.size
+        );
+        const markerAtPosition = view.state.doc.textBetween(nextPosition, markerTo, "\n", "\0");
+
+        if (markerAtPosition === triggerCleanup.marker) {
+          const transaction = view.state.tr.delete(nextPosition, markerTo);
+          transaction.setSelection(TextSelection.create(transaction.doc, nextPosition));
+          view.dispatch(transaction.scrollIntoView());
+          nextPosition = Math.max(0, Math.min(nextPosition, view.state.doc.content.size));
+        }
+      }
+
       view.dispatch(
         view.state.tr
           .setSelection(TextSelection.create(view.state.doc, nextPosition))
@@ -768,7 +790,8 @@ export function MilkdownEditor({
 
   const insertInlinePythonBlockResult = async (
     anchorPos: number,
-    insertion: InlinePythonBlockInsertion
+    insertion: InlinePythonBlockInsertion,
+    originalAfterText: string
   ): Promise<void> => {
     const snapshot = await window.integralNotes.syncWorkspace();
 
@@ -792,7 +815,10 @@ export function MilkdownEditor({
       ? toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)))
       : createPythonIntegralBlockMarkdown(blockType);
 
-    insertMarkdownAtPosition(anchorPos, blockMarkdown);
+    insertMarkdownAtPosition(anchorPos, blockMarkdown, {
+      marker: ">>",
+      originalAfterText
+    });
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
