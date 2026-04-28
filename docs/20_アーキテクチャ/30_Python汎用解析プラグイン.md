@@ -127,12 +127,15 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 - `inputs` は絶対 path または `null`
 - `outputs` は絶対 path または `null`
-- 非 `.idts` input は file path をそのまま渡す
-- `.idts` input は hidden bundle directory path に resolve して渡す
-- 非 `.idts` output は target file path をそのまま渡す
+- note source 上の `in:` は managed data ID を正とし、実行時に current path へ解決する
+- 非 `.idts` input は ID から解決した current file path を渡す
+- `.idts` input は dataset ID から hidden bundle directory path に resolve して渡す
+- note source 上の `out:` は実行前 target path、実行後 output managed data ID とする
+- 非 `.idts` output は実行前 `out:` の target file path をそのまま渡す
 - `.idts` output は hidden bundle directory path を渡す
 - `params` は free-form object をそのまま渡す
 - runner が `analysis-args.json` を読んだ上で target callable を `inputs`, `outputs`, `params` 引数で呼び出す
+- 実行成功後、app は output metadata を作成または更新し、block source の `out:` を生成された ID へ書き換える
 
 ## decorator の所在
 

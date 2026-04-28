@@ -762,6 +762,9 @@
   - `src/renderer/integralCodeBlockFeature.tsx`, `src/renderer/styles.css` を更新し、Python 実行 block の `Inputs` / `Outputs` section 分離、folder picker、dataset 名 textarea、`.idts` suffix 表示を追加した
   - `docs/10_要求`, `docs/20_アーキテクチャ`, `docs/30_設計` の関連文書を新仕様へ更新した
   - `npm run build` が通ることを確認した
+* 2026-04-28 方針変更:
+  - Issue 42 の再設計により、この issue で導入した `outputConfigs` / `out.{dir,name,latest}` / 互換読み取りは廃止対象とする
+  - PoC・リリース前のため、互換読み取りを残さず ID-backed slot I/O を canonical とする
 
 ## [ ] 37. Obsidian 風のグラフビュー plugin を作りたい
 - 優先重み:6
@@ -822,7 +825,7 @@
 * エクスプローラパネルに `全てたたむ` button を追加したい
 * icon は `[-]` のような VS Code と同じ系統のものにしたい
 
-## [ ] 42. managed file / format / path-based slot I/O モデルへ再設計したい
+## [ ] 42. managed file / format / ID-backed slot I/O モデルへ再設計したい
 - 優先重み:9
 - 記載日時:2026-04-18-12:20(UTC+9)
 
@@ -831,21 +834,33 @@
 * managed file の最小 metadata は少なくとも `id / path / hash / formatId / createdByBlockId` としたい
 * `provenance` は専用 enum を持たず、`createdByBlockId: null | BLK-*` で十分としたい
 * format は別 registry で管理し、最小で `id / name / description` を持てばよい
-* block の input / output は `datasetId` ではなく path ベースにしたい
+* block の input は保存上 managed data ID ベースにしたい
+* block の output は実行前は希望保存先 path、実行後は生成 managed data ID にしたい
 * slot 定義は少なくとも `name / extension(s) / format` を持てるようにしたい
 * `.idts` は universal な I/O 単位ではなく、複数 file を束ねたいときだけ使う optional bundle 表現に下げたい
 * `.idts` input は runtime では hidden bundle directory に resolve し、`.idts` output は visible manifest と hidden bundle directory を分けたい
 * 非 `.idts` output は通常の workspace file として生成し、実行成功後に managed file metadata を作成または更新したい
-* Markdown link / image / block source の記法自体は path ベースのまま維持したい
+* Markdown link / image の記法自体は path ベースのまま維持したい
+* `itg-notes` block は authoring 時に path を書けるが、保存時または実行前に ID へ正規化したい
+* 実行済み block は provenance として read-only 表示し、再実行は新しい block 作成で扱いたい
+* `outputConfigs` / `out.{dir,name,latest}` / 互換読み取りは削除し、PoC 中は理想設計を canonical にしたい
 * 外部 rename / move を path/hash tracking で追跡できた場合は、参照元 text file を scan して path を置換するのが望ましい
 * metadata backend は first slice では JSON file でもよいが、中期的には SQLite へ寄せたい
 * まずは次の順で進めたい
   - 文書更新
   - Python SDK の slot schema 拡張
   - discovery parser の object-form slot 対応
-  - general-analysis runner の file path / `.idts` 混在対応
-  - renderer の input/output UI を file path 中心へ更新
+  - general-analysis runner の ID / path / `.idts` 混在対応
+  - renderer の input/output UI を ID 解決 + current path 表示へ更新
   - managed catalog を generic な managed file モデルへ寄せる
+
+* 2026-04-28 再整理:
+  - `in:` は保存上 managed data ID とする。ユーザー/LLM が path を書いた場合は、保存または実行前に ID へ解決する
+  - `out:` は実行前 path、実行後 ID とする
+  - 通常 Markdown link / image は path のままとする
+  - data-note は `noteTargetId` 基準で metadata 側に持つ
+  - metadata JSON は引き続き `.store/.integral/{ID}.json` に置く
+  - 実行済み block は read-only provenance とし、削除だけ可能にする
 
 ## [ ] 43. 解析 block の input 割り当てを popup + filter の keyboard-first UX にしたい
 - 優先重み:7

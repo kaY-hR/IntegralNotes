@@ -14,7 +14,6 @@ import type {
   ImportManagedFilesResult,
   IntegralAssetCatalog,
   IntegralBlockDocument,
-  IntegralBlockOutputConfig,
   IntegralBlockTypeDefinition,
   IntegralDatasetInspection,
   IntegralDatasetSummary,
@@ -25,12 +24,11 @@ import type {
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
+  createDefaultIntegralOutputPath,
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
-  normalizeIntegralBlockOutputConfig,
   normalizeIntegralSlotExtension,
-  normalizeIntegralSlotExtensions,
-  toIntegralOutputDirectoryRelativePath
+  normalizeIntegralSlotExtensions
 } from "../shared/integral";
 import {
   findInstalledPluginViewerByExtension,
@@ -95,6 +93,7 @@ const TEXT_EXTENSIONS = new Set([
   ".yaml",
   ".yml"
 ]);
+const EXTERNAL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/u;
 const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
   ".next",
@@ -265,6 +264,30 @@ export class IntegralWorkspaceService {
       blockTypes: buildBlockTypeCatalog(pythonCallables, externalPlugins),
       managedFiles
     };
+  }
+
+  async resolveManagedDataById(id: string): Promise<IntegralManagedFileSummary | null> {
+    await this.ensureIntegralWorkspaceReady();
+
+    const metadata =
+      (await this.readDatasetMetadata(id.trim())) ??
+      (await this.readManagedFileMetadata(id.trim()));
+
+    return metadata ? this.toManagedFileSummary(metadata) : null;
+  }
+
+  async resolveManagedDataByPath(relativePath: string): Promise<IntegralManagedFileSummary | null> {
+    await this.ensureIntegralWorkspaceReady();
+
+    const workspacePath =
+      resolveWorkspaceMarkdownTarget(relativePath) ?? normalizeRelativePath(relativePath);
+
+    if (workspacePath.length === 0) {
+      return null;
+    }
+
+    const metadata = await this.findManagedDataMetadataByPath(workspacePath);
+    return metadata ? this.toManagedFileSummary(metadata) : null;
   }
 
   async listManagedDataTrackingIssues(): Promise<IntegralManagedDataTrackingIssue[]> {
@@ -775,7 +798,7 @@ export class IntegralWorkspaceService {
         relativePath: string;
       }
     >();
-    const outputFileReferenceMap = new Map<string, string>();
+    const outputMarkdownTargetMap = new Map<string, string>();
     const outputPaths: Record<string, string | null> = {};
     const inputPaths: Record<string, string | null> = {};
 
@@ -794,25 +817,23 @@ export class IntegralWorkspaceService {
       const outputExtension =
         getIntegralSlotPrimaryExtension(outputSlot, DATASET_JSON_EXTENSION) ?? DATASET_JSON_EXTENSION;
       const createdAt = new Date();
-      const outputConfig = normalizeOutputConfigForSlot(
-        resolvedBlock.outputConfigs?.[outputSlot.name],
-        outputSlot.name,
-        resolvedBlock.outputs[outputSlot.name] ?? null
+      const plannedOutputPath = await this.resolvePlannedOutputPath(
+        resolvedBlock.outputs[outputSlot.name] ?? null,
+        outputSlot
       );
-      const manifestDirectoryRelativePath =
-        toIntegralOutputDirectoryRelativePath(outputConfig.directory) ?? DATA_DIRECTORY;
 
       if (isIntegralBundleExtension(outputExtension)) {
         const nextDatasetId = createOpaqueId("DTS");
-        const datasetName = outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name;
+        const datasetName = resolveOutputDisplayName(plannedOutputPath, outputSlot.name);
         const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
-        const datasetManifestPath = await this.createVisibleDatasetManifestRelativePath(
-          manifestDirectoryRelativePath,
-          datasetName,
-          nextDatasetId
-        );
+        const datasetManifestPath = plannedOutputPath;
         const datasetAbsolutePath = this.resolveWorkspacePath(datasetDataPath);
         const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
+
+        if (await pathExists(datasetManifestAbsolutePath)) {
+          throw new Error(`output path は既に存在します。削除するか別の path を指定してください: ${datasetManifestPath}`);
+        }
+
         const metadata: DatasetMetadata = {
           createdAt: createdAt.toISOString(),
           createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
@@ -855,21 +876,23 @@ export class IntegralWorkspaceService {
 
         const datasetSummary = await this.readDatasetSummary(nextDatasetId);
         outputDatasetMap.set(outputSlot.name, datasetSummary);
+        outputMarkdownTargetMap.set(outputSlot.name, toCanonicalWorkspaceTarget(datasetSummary.path));
         outputPaths[outputSlot.name] = datasetAbsolutePath;
         continue;
       }
 
-      const outputRelativePath = await this.createVisibleOutputFileRelativePath(
-        manifestDirectoryRelativePath,
-        outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name,
-        outputExtension
-      );
+      const outputRelativePath = plannedOutputPath;
       const outputAbsolutePath = this.resolveWorkspacePath(outputRelativePath);
+
+      if (await pathExists(outputAbsolutePath)) {
+        throw new Error(`output path は既に存在します。削除するか別の path を指定してください: ${outputRelativePath}`);
+      }
+
       await fs.mkdir(path.dirname(outputAbsolutePath), { recursive: true });
       outputPaths[outputSlot.name] = outputAbsolutePath;
-      outputFileReferenceMap.set(outputSlot.name, toCanonicalWorkspaceTarget(outputRelativePath));
+      outputMarkdownTargetMap.set(outputSlot.name, toCanonicalWorkspaceTarget(outputRelativePath));
       outputManagedFilePlanMap.set(outputSlot.name, {
-        displayName: outputConfig.name.trim().length > 0 ? outputConfig.name.trim() : outputSlot.name,
+        displayName: resolveOutputDisplayName(outputRelativePath, outputSlot.name),
         format: outputSlot.format?.trim() || null,
         noteTargetId:
           (await this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs)) ??
@@ -940,7 +963,7 @@ export class IntegralWorkspaceService {
 
     await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
     await this.refreshOutputDatasetMetadata(outputDatasetMap);
-    await this.refreshOutputManagedFileMetadata(
+    const createdManagedFileMap = await this.refreshOutputManagedFileMetadata(
       outputManagedFilePlanMap,
       sourceBlock.id ?? resolvedBlock.id ?? null
     );
@@ -955,25 +978,20 @@ export class IntegralWorkspaceService {
         })
       )
     ).filter((dataset): dataset is IntegralDatasetSummary => dataset !== null);
-    const createdDatasetMap = new Map(
-      createdDatasets.map((dataset) => [dataset.datasetId, dataset] as const)
-    );
     const outputReferences = Object.fromEntries(
       definition.outputSlots.map((slot) => {
         const datasetId = outputDatasetMap.get(slot.name)?.datasetId ?? null;
-        const dataset = datasetId ? createdDatasetMap.get(datasetId) ?? null : null;
+        const managedFileId = createdManagedFileMap.get(slot.name)?.id ?? null;
         return [
           slot.name,
-          dataset
-            ? toCanonicalWorkspaceTarget(dataset.path)
-            : outputFileReferenceMap.get(slot.name) ?? null
+          datasetId ?? managedFileId ?? null
         ];
       })
     );
     const workNoteMarkdownToAppend = buildWorkNoteProjectionMarkdown(
       definition.outputSlots.flatMap((slot) =>
-        slot.autoInsertToWorkNote && outputReferences[slot.name]
-          ? [outputReferences[slot.name]].filter((value): value is string => value !== null)
+        slot.autoInsertToWorkNote && outputMarkdownTargetMap.get(slot.name)
+          ? [outputMarkdownTargetMap.get(slot.name)].filter((value): value is string => value !== undefined)
           : []
       )
     );
@@ -984,14 +1002,18 @@ export class IntegralWorkspaceService {
         sourceBlock.id,
         definition.outputSlots,
         resolvedBlock.inputs,
-        outputReferences
+        Object.fromEntries(
+          definition.outputSlots.map((slot) => [
+            slot.name,
+            outputMarkdownTargetMap.get(slot.name) ?? null
+          ])
+        )
       );
     }
 
     return {
       block: {
         ...sourceBlock,
-        outputConfigs: resolvedBlock.outputConfigs,
         outputs: {
           ...sourceBlock.outputs,
           ...outputReferences
@@ -1021,10 +1043,10 @@ export class IntegralWorkspaceService {
         continue;
       }
 
-      const metadata = await this.resolveDatasetReferenceMetadata(inputReference);
+      const metadata = await this.resolveManagedDataReferenceMetadata(inputReference);
 
       if (metadata) {
-        resolvedInputs[inputSlot.name] = metadata.datasetId;
+        resolvedInputs[inputSlot.name] = metadata.id;
         continue;
       }
 
@@ -1035,7 +1057,13 @@ export class IntegralWorkspaceService {
         throw new Error(`input path が見つかりません: ${inputReference}`);
       }
 
-      resolvedInputs[inputSlot.name] = toCanonicalWorkspaceTarget(workspacePath);
+      const managedData = await this.findManagedDataMetadataByPath(workspacePath);
+
+      if (!managedData) {
+        throw new Error(`input path は managed data として登録されていません: ${inputReference}`);
+      }
+
+      resolvedInputs[inputSlot.name] = managedData.id;
     }
 
     return {
@@ -1047,27 +1075,32 @@ export class IntegralWorkspaceService {
     };
   }
 
-  private async resolveDatasetReferenceMetadata(reference: string): Promise<DatasetMetadata | null> {
+  private async resolveManagedDataReferenceMetadata(
+    reference: string
+  ): Promise<ManagedDataMetadata | null> {
     const normalizedReference = reference.trim();
 
     if (normalizedReference.length === 0) {
       return null;
     }
 
-    const datasetById = await this.readDatasetMetadata(normalizedReference);
+    return (
+      (await this.readDatasetMetadata(normalizedReference)) ??
+      (await this.readManagedFileMetadata(normalizedReference)) ??
+      (await this.findManagedDataMetadataByPath(
+        resolveWorkspaceMarkdownTarget(normalizedReference) ?? normalizeRelativePath(normalizedReference)
+      ))
+    );
+  }
 
-    if (datasetById) {
-      return datasetById;
+  private async findManagedDataMetadataByPath(relativePath: string): Promise<ManagedDataMetadata | null> {
+    const datasetMetadata = await this.findDatasetMetadataByPath(relativePath);
+
+    if (datasetMetadata) {
+      return datasetMetadata;
     }
 
-    const workspacePath =
-      resolveWorkspaceMarkdownTarget(normalizedReference) ?? normalizeRelativePath(normalizedReference);
-
-    if (workspacePath.length === 0) {
-      return null;
-    }
-
-    return this.findDatasetMetadataByPath(workspacePath);
+    return this.findManagedFileMetadataByPath(relativePath);
   }
 
   private async findDatasetMetadataByPath(relativePath: string): Promise<DatasetMetadata | null> {
@@ -1178,31 +1211,20 @@ export class IntegralWorkspaceService {
   }
 
   private async resolveProjectedManagedDataNoteRelativePath(reference: string): Promise<string | null> {
-    const datasetMetadata = await this.resolveDatasetReferenceMetadata(reference);
+    const metadata = await this.resolveManagedDataReferenceMetadata(reference);
 
-    if (datasetMetadata) {
+    if (metadata?.entityType === "dataset") {
       return createManagedDataNoteRelativePath(
-        normalizeManagedDataNoteTargetId(datasetMetadata.noteTargetId, datasetMetadata.datasetId)
+        normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId)
       );
     }
 
-    const workspacePath = resolveWorkspaceMarkdownTarget(reference) ?? normalizeRelativePath(reference);
-
-    if (workspacePath.length === 0) {
-      return null;
-    }
-
-    const managedFileMetadata = await this.findManagedFileMetadataByPath(workspacePath);
-
-    if (
-      !managedFileMetadata ||
-      !supportsManagedFileDataNote(managedFileMetadata.path, managedFileMetadata.representation)
-    ) {
+    if (!metadata || !supportsManagedFileDataNote(metadata.path, metadata.representation)) {
       return null;
     }
 
     return createManagedDataNoteRelativePath(
-      normalizeManagedDataNoteTargetId(managedFileMetadata.noteTargetId, managedFileMetadata.id)
+      normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id)
     );
   }
 
@@ -1222,25 +1244,17 @@ export class IntegralWorkspaceService {
       return null;
     }
 
-    const datasetMetadata = await this.resolveDatasetReferenceMetadata(inputReference);
+    const metadata = await this.resolveManagedDataReferenceMetadata(inputReference);
 
-    if (datasetMetadata) {
-      return normalizeManagedDataNoteTargetId(datasetMetadata.noteTargetId, datasetMetadata.datasetId);
+    if (metadata?.entityType === "dataset") {
+      return normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId);
     }
 
-    const workspacePath = resolveWorkspaceMarkdownTarget(inputReference) ?? normalizeRelativePath(inputReference);
-
-    if (workspacePath.length === 0) {
+    if (!metadata) {
       return null;
     }
 
-    const managedFileMetadata = await this.findManagedFileMetadataByPath(workspacePath);
-
-    if (!managedFileMetadata) {
-      return null;
-    }
-
-    return normalizeManagedDataNoteTargetId(managedFileMetadata.noteTargetId, managedFileMetadata.id);
+    return normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id);
   }
 
   private async appendMarkdownToNote(relativePath: string, markdownToAppend: string): Promise<void> {
@@ -1867,62 +1881,49 @@ export class IntegralWorkspaceService {
     }
   }
 
-  private async createVisibleOutputFileRelativePath(
-    directoryRelativePath: string,
-    fileNameStem: string,
-    extension: string
+  private async resolvePlannedOutputPath(
+    outputReference: string | null,
+    outputSlot: IntegralSlotDefinition
   ): Promise<string> {
-    const normalizedDirectoryRelativePath = normalizeRelativePath(directoryRelativePath);
-    const outputsRootPath = this.resolveWorkspacePath(
-      normalizedDirectoryRelativePath.length > 0 ? normalizedDirectoryRelativePath : "."
-    );
-    await fs.mkdir(outputsRootPath, { recursive: true });
+    const rawReference =
+      typeof outputReference === "string" && outputReference.trim().length > 0
+        ? outputReference.trim()
+        : createDefaultIntegralOutputPath(outputSlot);
 
-    const normalizedExtension = normalizeIntegralSlotExtension(extension) ?? "";
-    const trimmedStem = fileNameStem.trim();
-    const bareStem = normalizedExtension.length > 0 &&
-      trimmedStem.toLowerCase().endsWith(normalizedExtension)
-      ? trimmedStem.slice(0, -normalizedExtension.length)
-      : trimmedStem;
-    const preferredStem = sanitizeFileStem(bareStem) || "output";
-    let serial = 0;
-
-    while (true) {
-      const suffix = serial === 0 ? "" : `_${serial}`;
-      const relativePath = normalizeRelativePath(
-        `${normalizedDirectoryRelativePath}/${preferredStem}${suffix}${normalizedExtension}`
+    if (await this.resolveManagedDataReferenceMetadata(rawReference)) {
+      throw new Error(
+        `実行済み block は再実行できません。削除して新しい block を作成してください: ${rawReference}`
       );
-
-      if (!(await pathExists(this.resolveWorkspacePath(relativePath)))) {
-        return relativePath;
-      }
-
-      serial += 1;
     }
+
+    const normalizedPath = normalizePlannedWorkspaceOutputPath(rawReference);
+    const outputExtension =
+      getIntegralSlotPrimaryExtension(outputSlot, DATASET_JSON_EXTENSION) ?? DATASET_JSON_EXTENSION;
+    const outputPath = ensureOutputPathExtension(normalizedPath, outputExtension);
+
+    this.resolveWorkspacePath(outputPath);
+    return outputPath;
   }
 
   private async resolveInputExecutionPath(
     inputReference: string,
     inputSlot: IntegralSlotDefinition
   ): Promise<string> {
-    const datasetMetadata = await this.resolveDatasetReferenceMetadata(inputReference);
+    const metadata = await this.resolveManagedDataReferenceMetadata(inputReference);
 
-    if (datasetMetadata) {
-      return this.resolveDatasetReadablePath(datasetMetadata);
+    if (!metadata) {
+      throw new Error(`input managed data が見つかりません: ${inputReference}`);
     }
 
-    const workspacePath =
-      resolveWorkspaceMarkdownTarget(inputReference) ?? normalizeRelativePath(inputReference);
-
-    if (workspacePath.length === 0) {
-      throw new Error(`input path が不正です: ${inputReference}`);
+    if (metadata.entityType === "dataset") {
+      return this.resolveDatasetReadablePath(metadata);
     }
 
-    const absolutePath = this.resolveWorkspacePath(workspacePath);
+    const absolutePath = this.resolveManagedFileContentPath(metadata);
     const stats = await fs.stat(absolutePath).catch(() => null);
 
     if (!stats) {
-      throw new Error(`input path が見つかりません: ${inputReference}`);
+      throw new Error(`input path が見つかりません: ${metadata.path}`);
     }
 
     const allowedExtensions = normalizeIntegralSlotExtensions(inputSlot.extensions);
@@ -2124,18 +2125,20 @@ export class IntegralWorkspaceService {
       }
     >,
     createdByBlockId: string | null
-  ): Promise<void> {
-    for (const plan of outputManagedFilePlanMap.values()) {
+  ): Promise<Map<string, IntegralManagedFileSummary>> {
+    const createdManagedFiles = new Map<string, IntegralManagedFileSummary>();
+
+    for (const [slotName, plan] of outputManagedFilePlanMap) {
       const existingPath = await this.resolveIfExists(plan.relativePath);
 
       if (!existingPath) {
-        continue;
+        throw new Error(`output path が作成されませんでした: ${plan.relativePath}`);
       }
 
       const stats = await fs.stat(existingPath);
 
       if (!stats.isFile() && !stats.isDirectory()) {
-        continue;
+        throw new Error(`output path は file / directory ではありません: ${plan.relativePath}`);
       }
 
       const existingMetadata = await this.findManagedFileMetadataByPath(plan.relativePath);
@@ -2154,7 +2157,10 @@ export class IntegralWorkspaceService {
       };
 
       await this.writeManagedFileMetadata(nextMetadata.id, nextMetadata);
+      createdManagedFiles.set(slotName, this.toManagedFileSummary(nextMetadata));
     }
+
+    return createdManagedFiles;
   }
 
   private async reconcileManagedDataMetadata(): Promise<boolean> {
@@ -2583,12 +2589,7 @@ function normalizeBlockDocument(
     "block-type": definition.blockType,
     id: blockId,
     inputs: normalizeSlotMap(block.inputs, definition.inputSlots),
-    outputs: normalizeSlotMap(block.outputs, definition.outputSlots),
-    outputConfigs: normalizeOutputConfigMap(
-      block.outputConfigs,
-      block.outputs,
-      definition.outputSlots
-    ),
+    outputs: normalizeOutputSlotMap(block.outputs, definition.outputSlots),
     params: isJsonRecord(block.params) ? block.params : {},
     plugin: definition.pluginId
   };
@@ -2609,19 +2610,18 @@ function normalizeSlotMap(
   return normalized;
 }
 
-function normalizeOutputConfigMap(
-  currentValue: Record<string, IntegralBlockOutputConfig | null> | undefined,
-  currentOutputs: Record<string, string | null> | undefined,
+function normalizeOutputSlotMap(
+  currentValue: Record<string, string | null> | undefined,
   slotDefinitions: readonly IntegralSlotDefinition[]
-): Record<string, IntegralBlockOutputConfig | null> {
-  const normalized: Record<string, IntegralBlockOutputConfig | null> = {};
+): Record<string, string | null> {
+  const normalized: Record<string, string | null> = {};
 
   for (const slot of slotDefinitions) {
-    normalized[slot.name] = normalizeOutputConfigForSlot(
-      currentValue?.[slot.name],
-      slot.name,
-      currentOutputs?.[slot.name] ?? null
-    );
+    const value = currentValue?.[slot.name];
+    normalized[slot.name] =
+      typeof value === "string" && value.trim().length > 0
+        ? value.trim()
+        : createDefaultIntegralOutputPath(slot);
   }
 
   return normalized;
@@ -2636,14 +2636,6 @@ function normalizeDatasetName(name: string | undefined, datasetId: string): stri
 
   const normalizedDatasetId = datasetId.trim();
   return normalizedDatasetId.length > 0 ? normalizedDatasetId : "dataset";
-}
-
-function normalizeOutputConfigForSlot(
-  value: IntegralBlockOutputConfig | null | undefined,
-  slotName: string,
-  latestOutputReference?: string | null
-): IntegralBlockOutputConfig {
-  return normalizeIntegralBlockOutputConfig(value, slotName, latestOutputReference);
 }
 
 function createOpaqueId(prefix: "ORD" | "BLK" | "DTS" | "FL"): string {
@@ -3245,6 +3237,63 @@ function sanitizeFileStem(value: string): string {
     .trim()
     .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
     .replace(/[. ]+$/gu, "");
+}
+
+function normalizePlannedWorkspaceOutputPath(value: string): string {
+  const workspaceTarget = resolveWorkspaceMarkdownTarget(value) ?? value;
+  const trimmed = workspaceTarget.trim().replace(/\\/gu, "/");
+
+  if (
+    trimmed.length === 0 ||
+    trimmed.startsWith("#") ||
+    trimmed.startsWith("//") ||
+    trimmed.includes("?") ||
+    trimmed.includes("#") ||
+    EXTERNAL_SCHEME_PATTERN.test(trimmed)
+  ) {
+    throw new Error(`output path が不正です: ${value}`);
+  }
+
+  const withoutPrefix = trimmed
+    .replace(/^\/+/u, "")
+    .replace(/^\.\/+/u, "");
+  const parts = withoutPrefix.split("/").filter(Boolean);
+
+  if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) {
+    throw new Error(`output path が不正です: ${value}`);
+  }
+
+  return parts.join("/");
+}
+
+function ensureOutputPathExtension(relativePath: string, extension: string): string {
+  const normalizedExtension = normalizeIntegralSlotExtension(extension) ?? "";
+
+  if (normalizedExtension.length === 0) {
+    return relativePath;
+  }
+
+  const currentExtension = path.posix.extname(relativePath).toLowerCase();
+
+  if (currentExtension.length === 0) {
+    return `${relativePath}${normalizedExtension}`;
+  }
+
+  if (currentExtension !== normalizedExtension) {
+    throw new Error(
+      `output path の拡張子が slot 定義と一致しません: ${relativePath} (expected ${normalizedExtension})`
+    );
+  }
+
+  return relativePath;
+}
+
+function resolveOutputDisplayName(relativePath: string, fallback: string): string {
+  const baseName = path.posix.basename(relativePath);
+  const extension = path.posix.extname(baseName);
+  const stem = extension.length > 0 ? baseName.slice(0, -extension.length) : baseName;
+  const normalized = stem.trim();
+  return normalized.length > 0 ? normalized : fallback;
 }
 
 function normalizeRelativePath(relativePath: string): string {

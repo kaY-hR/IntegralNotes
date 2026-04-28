@@ -72,9 +72,7 @@ run: scripts/demo_hello_report.py:main
 in: {}
 params: {}
 out:
-  report:
-    dir: /Data
-    name: report
+  report: /Data/report.html
 ```
 
 `run:` は app 内部で次へ正規化する。
@@ -87,13 +85,14 @@ out:
 main process は block 実行時に次を行う。
 
 1. block source を internal normalized form に変換する
-2. input `.idts` path を datasetId に解決する
-3. datasetId を executable path に解決する
-4. output slot ごとに user 指定の `directory` と `name` を正規化する
-5. visible manifest path を `{directory}/{name}.idts` から決め、衝突時は suffix を付ける
-6. output dataset と output directory を確保する
+2. `in:` に path が残っていれば managed data ID へ解決する
+3. input ID を current filesystem path に解決する
+4. input が `.idts` dataset ID なら executable directory path に解決する
+5. 非 `.idts` output は `out:` の target file path をそのまま使う
+6. `.idts` output は visible manifest path と hidden bundle directory を確保する
 7. `.store/.integral/runtime/BLK-.../analysis-args.json` を書く
-8. 実行成功後は output slot ごとの visible `.idts` path を block source の `out.*.latest` に反映する
+8. 実行成功後は output slot ごとの生成 managed data ID を block source の `out:` に反映する
+9. 実行済み block は provenance として read-only 表示にする
 
 `analysis-args.json` の責務は、Python callable へ渡す filesystem-oriented payload を固定形で表現することにある。
 
@@ -105,7 +104,7 @@ main process は block 実行時に次を行う。
     "source": "C:\\Workspace\\Data\\samples"
   },
   "outputs": {
-    "report": "C:\\Workspace\\.store\\objects\\DTS-9X4Q2M1A"
+    "report": "C:\\Workspace\\Data\\report.html"
   },
   "params": {
     "title": "Hello Integral"

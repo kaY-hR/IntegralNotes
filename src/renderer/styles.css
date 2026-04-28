@@ -2958,7 +2958,8 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   color: #91a0af;
 }
 
-.integral-output-slot-row__name {
+.integral-output-slot-row__name,
+.integral-output-slot-row__path {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2967,8 +2968,11 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 }
 
 .editor-surface .milkdown .integral-output-slot-row__name-input,
+.editor-surface .milkdown .integral-output-slot-row__path-input,
 .milkdown .integral-output-slot-row__name-input,
-.integral-output-slot-row__name-input {
+.milkdown .integral-output-slot-row__path-input,
+.integral-output-slot-row__name-input,
+.integral-output-slot-row__path-input {
   width: 100%;
   min-width: 0;
   min-height: 30px;
@@ -2988,10 +2992,16 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 
 .editor-surface .milkdown .integral-output-slot-row__name-input:hover,
 .editor-surface .milkdown .integral-output-slot-row__name-input:focus,
+.editor-surface .milkdown .integral-output-slot-row__path-input:hover,
+.editor-surface .milkdown .integral-output-slot-row__path-input:focus,
 .milkdown .integral-output-slot-row__name-input:hover,
 .milkdown .integral-output-slot-row__name-input:focus,
+.milkdown .integral-output-slot-row__path-input:hover,
+.milkdown .integral-output-slot-row__path-input:focus,
 .integral-output-slot-row__name-input:hover,
-.integral-output-slot-row__name-input:focus {
+.integral-output-slot-row__name-input:focus,
+.integral-output-slot-row__path-input:hover,
+.integral-output-slot-row__path-input:focus {
   background: #ffffff !important;
   border-color: rgb(40, 40, 40) !important;
   box-shadow: inset 0 0 0 1px rgb(40, 40, 40) !important;
@@ -2999,8 +3009,11 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 }
 
 .editor-surface .milkdown .integral-output-slot-row__name-input::placeholder,
+.editor-surface .milkdown .integral-output-slot-row__path-input::placeholder,
 .milkdown .integral-output-slot-row__name-input::placeholder,
-.integral-output-slot-row__name-input::placeholder {
+.milkdown .integral-output-slot-row__path-input::placeholder,
+.integral-output-slot-row__name-input::placeholder,
+.integral-output-slot-row__path-input::placeholder {
   color: #91a0af;
 }
 
