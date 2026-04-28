@@ -123,6 +123,7 @@ export class AiAgentService {
 
   async generateForTask({
     context,
+    extraTools,
     instructions,
     maxSteps = TOOL_LOOP_MAX_STEPS,
     prompt,
@@ -130,6 +131,7 @@ export class AiAgentService {
     useWorkspaceTools
   }: {
     context: AiChatContextSummary;
+    extraTools?: ToolSet;
     instructions: string;
     maxSteps?: number;
     prompt: string;
@@ -147,12 +149,16 @@ export class AiAgentService {
           tools: {},
           workspaceMounted: false
         };
+    const tools = {
+      ...toolContext.tools,
+      ...(extraTools ?? {})
+    };
     const agent = new ToolLoopAgent({
       instructions: buildTaskInstructions(instructions, context, toolContext),
       model,
       providerOptions: providerOptions as any,
       stopWhen: stepCountIs(maxSteps),
-      tools: toolContext.tools
+      tools
     });
     const result = await agent.generate({
       messages: [
@@ -825,6 +831,20 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return input.id;
   }
 
+  if (toolName === "insertPythonBlock" && isRecord(input)) {
+    const scriptPath = typeof input.scriptPath === "string" ? input.scriptPath : "(unknown script)";
+    const functionName =
+      typeof input.functionName === "string" ? input.functionName : "(unknown function)";
+
+    return `${scriptPath}:${functionName}`;
+  }
+
+  if (toolName === "insertMarkdownAtCursor" && isRecord(input)) {
+    const textLength = typeof input.text === "string" ? input.text.length : null;
+
+    return textLength === null ? "markdown insertion" : `${textLength} chars`;
+  }
+
   return summarizeUnknownValue(input);
 }
 
@@ -857,6 +877,31 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
       typeof output.created === "boolean" ? (output.created ? "created" : "updated") : "saved";
 
     return `${created}: ${output.path}`;
+  }
+
+  if (
+    toolName === "insertPythonBlock" &&
+    isRecord(output) &&
+    typeof output.scriptPath === "string" &&
+    typeof output.functionName === "string"
+  ) {
+    const summary =
+      typeof output.summary === "string" && output.summary.trim().length > 0
+        ? ` | ${truncateTraceText(output.summary.trim())}`
+        : "";
+
+    return `${output.scriptPath}:${output.functionName}${summary}`;
+  }
+
+  if (
+    toolName === "insertMarkdownAtCursor" &&
+    isRecord(output) &&
+    typeof output.text === "string"
+  ) {
+    return JSON.stringify({
+      summary: typeof output.summary === "string" ? output.summary : "",
+      text: output.text
+    });
   }
 
   if (toolName === "readWorkspaceImage" && isRecord(output) && typeof output.path === "string") {

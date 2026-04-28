@@ -2524,6 +2524,56 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   font-size: 0.74rem;
 }
 
+.editor-ai-popup {
+  width: min(520px, calc(100vw - 24px));
+}
+
+.editor-ai-popup__messages {
+  display: grid;
+  max-height: 240px;
+  gap: 8px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: #f6f8fa;
+}
+
+.editor-ai-popup__message {
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border: 1px solid #d8e0e8;
+  border-radius: 2px;
+  background: var(--surface-1);
+}
+
+.editor-ai-popup__message--assistant {
+  background: #eef5fb;
+}
+
+.editor-ai-popup__message--tool {
+  background: #f4f0e6;
+}
+
+.editor-ai-popup__message-role {
+  color: var(--text-2);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.editor-ai-popup__message-text {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
 .sidebar-search__error {
   color: #a4262c;
   font-size: 0.74rem;
