@@ -1,19 +1,14 @@
 import type {
   IntegralBlockDocument,
-  IntegralBlockOutputConfig,
   IntegralBlockTypeDefinition
 } from "../shared/integral";
-import {
-  createDefaultIntegralBlockOutputConfig,
-  normalizeIntegralBlockOutputConfig
-} from "../shared/integral";
+import { createDefaultIntegralOutputPath } from "../shared/integral";
 
 import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
 import {
   parseSimpleYamlDocument,
   serializeSimpleYamlDocument,
-  type SimpleYamlObject,
-  type SimpleYamlValue
+  type SimpleYamlObject
 } from "./simpleYaml";
 
 export const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
@@ -62,9 +57,8 @@ export function createInitialIntegralBlock(
     "block-type": definition.blockType,
     id: createBlockId(),
     inputs: Object.fromEntries(definition.inputSlots.map((slot) => [slot.name, null])),
-    outputs: Object.fromEntries(definition.outputSlots.map((slot) => [slot.name, null])),
-    outputConfigs: Object.fromEntries(
-      definition.outputSlots.map((slot) => [slot.name, createDefaultIntegralBlockOutputConfig(slot.name)])
+    outputs: Object.fromEntries(
+      definition.outputSlots.map((slot) => [slot.name, createDefaultIntegralOutputPath(slot)])
     ),
     params: {},
     plugin: definition.pluginId
@@ -81,7 +75,6 @@ export function createPythonIntegralBlockMarkdown(blockType: string): string {
       "block-type": blockType,
       id: createBlockId(),
       inputs: {},
-      outputConfigs: {},
       outputs: {},
       params: {},
       plugin: GENERAL_ANALYSIS_PLUGIN_ID
@@ -138,7 +131,7 @@ export function renderIntegralBlockBody(block: IntegralJsonBlock): JSX.Element {
           {outputEntries.length > 0 ? (
             outputEntries.map(([slotName, datasetId]) => (
               <span className="integral-json-preview__chip" key={`output-${slotName}`}>
-                {slotName}: {datasetId ?? "auto"}
+                {slotName}: {datasetId ?? "null"}
               </span>
             ))
           ) : (
@@ -181,15 +174,12 @@ function parseIntegralYamlSource(content: string): ParsedIntegralBlockSource | n
       return null;
     }
 
-    const normalizedOutputSection = normalizeOutputSection(parsed.out ?? parsed.outputs);
-
     return {
       block: {
         "block-type": blockType,
         id: readOptionalString(parsed.id) ?? undefined,
         inputs: normalizeInputMap(parsed.in ?? parsed.inputs),
-        outputs: normalizedOutputSection.outputs,
-        outputConfigs: normalizedOutputSection.outputConfigs,
+        outputs: normalizeSlotReferenceMap(parsed.out ?? parsed.outputs),
         params: isJsonRecord(parsed.params) ? parsed.params : {},
         plugin
       }
@@ -214,7 +204,9 @@ function buildIntegralYamlDocument(block: IntegralBlockDocument): SimpleYamlObje
     Object.entries(block.inputs).map(([slotName, datasetRef]) => [slotName, datasetRef])
   );
   document.params = block.params;
-  document.out = buildOutputYamlMap(block);
+  document.out = Object.fromEntries(
+    Object.entries(block.outputs).map(([slotName, outputRef]) => [slotName, outputRef])
+  );
 
   return document;
 }
@@ -247,6 +239,10 @@ function StatCard({ label, value }: { label: string; value: string }): JSX.Eleme
 }
 
 function normalizeInputMap(value: unknown): Record<string, string | null> {
+  return normalizeSlotReferenceMap(value);
+}
+
+function normalizeSlotReferenceMap(value: unknown): Record<string, string | null> {
   if (!isJsonRecord(value)) {
     return {};
   }
@@ -258,99 +254,13 @@ function normalizeInputMap(value: unknown): Record<string, string | null> {
         ? candidate.trim()
         : candidate === null
           ? null
-          : `${candidate}`.trim().length > 0
-            ? `${candidate}`.trim()
-            : null
+          : null
     ])
   );
 }
 
-function normalizeOutputSection(value: unknown): {
-  outputConfigs: Record<string, IntegralBlockOutputConfig | null>;
-  outputs: Record<string, string | null>;
-} {
-  if (!isJsonRecord(value)) {
-    return {
-      outputConfigs: {},
-      outputs: {}
-    };
-  }
-
-  const outputs: Record<string, string | null> = {};
-  const outputConfigs: Record<string, IntegralBlockOutputConfig | null> = {};
-
-  for (const [slotName, candidate] of Object.entries(value)) {
-    if (isJsonRecord(candidate)) {
-      outputs[slotName] = normalizeOutputLatestReference(candidate.latest);
-      outputConfigs[slotName] = normalizeIntegralBlockOutputConfig(
-        {
-          directory: readOptionalStringAllowEmpty(candidate.dir ?? candidate.directory) ?? undefined,
-          name: readOptionalStringAllowEmpty(candidate.name) ?? undefined
-        },
-        slotName,
-        outputs[slotName]
-      );
-      continue;
-    }
-
-    outputs[slotName] = normalizeOutputLatestReference(candidate);
-    outputConfigs[slotName] = null;
-  }
-
-  return {
-    outputConfigs,
-    outputs
-  };
-}
-
-function buildOutputYamlMap(block: IntegralBlockDocument): SimpleYamlObject {
-  return Object.fromEntries(
-    Object.entries(block.outputs).map(([slotName, datasetRef]) => {
-      const outputConfig = block.outputConfigs?.[slotName] ?? null;
-
-      if (!outputConfig && datasetRef === null) {
-        return [slotName, "auto"];
-      }
-
-      const outputEntry: SimpleYamlObject = {};
-
-      if (outputConfig) {
-        outputEntry.dir = outputConfig.directory;
-        outputEntry.name = outputConfig.name;
-      }
-
-      if (datasetRef !== null) {
-        outputEntry.latest = datasetRef;
-      }
-
-      return [slotName, Object.keys(outputEntry).length > 0 ? outputEntry : "auto"];
-    })
-  );
-}
-
-function normalizeOutputLatestReference(value: unknown): string | null {
-  if (typeof value === "string") {
-    return value.trim().toLowerCase() === "auto"
-      ? null
-      : value.trim().length > 0
-        ? value.trim()
-        : null;
-  }
-
-  if (value === null) {
-    return null;
-  }
-
-  const serialized = `${value}`.trim();
-  return serialized.toLowerCase() === "auto" ? null : serialized.length > 0 ? serialized : null;
-}
-
 function readOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readOptionalStringAllowEmpty(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
 }
 
 function createBlockId(): string {

@@ -67,10 +67,15 @@
 - `id` は `BLK-...`
 - app は `id` がなければ自動補完する
 - `inputs / outputs` は slot 名を key に持つ
-- `inputs / outputs` の値は workspace relative path または `null`
+- `inputs` の保存値は managed file / dataset ID または `null`
+- `inputs` には authoring 時に workspace relative path を書いてよいが、保存または実行前に ID へ正規化する
+- `outputs` の保存値は、実行前は workspace relative path または `null`、実行後は生成された managed file / dataset ID とする
+- 実行済み block は provenance として扱い、基本的に read-only 表示にする
+- 再実行したい場合は、既存 block を編集して再実行するのではなく、新しい block を作る
 - user-facing な `itg-notes` block source は YAML のみを受け付ける
 - `itg-notes` block では `use:` または `run:` の簡易記法を canonical form とする
 - `run: relative/path.py:function` は内部で `plugin = "general-analysis"` とその callable block-type へ正規化する
+- `outputConfigs` や `out.*.dir/name/latest` のような旧 output 設定 form は持たない
 
 ## 6. Slot 契約
 
@@ -88,8 +93,9 @@
 - `auto_insert_to_work_note` は、その output を block が置かれている作業 note へ `![]()` として自動挿入するかを表す
 - `share_note_with_input` は、その output がどの input の data-note target を共有するかを表す
 - `embed_to_shared_note` は、その output を共有先 data-note に provenance link と `![]()` 付きで追記するかを表す
-- MVP の基本契約は `1 slot = 1 path` とする
-- 複数 file を 1 slot で扱いたい場合は `.idts` bundle を使う
+- MVP の基本契約は `1 slot = 1 managed data reference` とする
+- authoring 時の path は ID 解決のための入力であり、保存上の入力参照は ID を正とする
+- 複数 file を 1 slot で扱いたい場合は `.idts` bundle を使い、その dataset ID を参照する
 
 ## 7. Bundle (`.idts`)
 
@@ -150,8 +156,10 @@
 ## 10. Python 実行
 
 - 実行時には `analysis-args.json` を生成する
+- app は `inputs` の ID を current path へ解決する
+- app は実行前 `outputs` の path を出力先として確定する
 - `inputs / outputs` には Python がそのまま使える絶対 path を渡す
-- 非 `.idts` input は、指定された file path をそのまま渡す
+- 非 `.idts` input は、ID から解決した current file path を渡す
 - `.idts` input は hidden bundle directory へ resolve した path を渡す
 - 非 `.idts` output は、指定された output file path をそのまま渡す
 - `.idts` output は、visible manifest path と hidden bundle directory を app 側で事前に確保し、Python には hidden bundle directory path を渡す
@@ -159,6 +167,8 @@
 - runner は `analysis-args.json` を読んで target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - 成功/失敗判定は exit code のみで行う
 - 実行成功後は output path に対応する managed file metadata を作成または更新する
+- 実行成功後は `out:` の値を生成された managed file / dataset ID へ書き換える
+- 実行済み block の UI は read-only とし、削除だけ可能にする
 - output slot が `auto_insert_to_work_note = true` を持つ場合、app はその output を block 直下へ `![]()` として追記してよい
 - output slot が `share_note_with_input` を持つ場合、app は output の note target を指定 input の note target に合わせる
 - output slot が `embed_to_shared_note = true` を持つ場合、app は共有先 data-note へ provenance link と `![]()` を追記してよい
@@ -184,7 +194,8 @@
 
 - 装置 plugin も共通 block schema を使う
 - 必要なら custom UI を持てる
-- 装置 plugin も path-based slot 契約を使う
+- 装置 plugin も ID-backed slot 契約を使う
+- authoring 補助として path 入力を許可する場合も、保存時または実行前に managed data ID へ正規化する
 
 ## 13. Tracking と参照更新
 

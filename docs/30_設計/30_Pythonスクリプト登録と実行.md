@@ -5,7 +5,8 @@
 - plugin ID は `general-analysis`
 - block-type は `relative/path.py:function`
 - `params` は free-form object
-- `inputs / outputs` は internal normalized form では `Record<string, string | null>`
+- `inputs` は internal normalized form では `Record<string, managedDataId | null>`
+- `outputs` は実行前 `Record<string, workspacePath | null>`、実行後 `Record<string, managedDataId | null>`
 
 ## 1. discovery
 
@@ -93,14 +94,16 @@ out:
   report: /Data/report.html
 ```
 
-slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` path を入れる。
+slot が `.idts` を要求する場合は、authoring 時の `in:` または実行前の `out:` に `.idts` path を入れる。
+保存または実行前に、`in:` は managed data ID へ正規化する。
 
 ## 4. input 割当
 
 各 input slot には次を指定できる。
 
 - slot 制約に合う file path 1 つ
-- `.idts` slot の場合は既存 dataset 1 つ
+- managed file ID 1 つ
+- `.idts` slot の場合は既存 dataset ID 1 つ
 - `.idts` slot の場合は複数 managed file から新しい dataset を作る
 
 `.idts` dataset を新しく作る場合:
@@ -109,7 +112,7 @@ slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` p
 2. app が選択した managed file から新しい dataset を作る
 3. dataset は visible `.idts` として保存される
 4. app は dataset に紐づく data-note を system-managed に作る
-5. block source の `in:` にはその `.idts` path を書く
+5. block source の `in:` にはその dataset ID を書く
 
 ## 5. output 宣言
 
@@ -118,7 +121,8 @@ slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` p
 - block card 上では `Inputs` / `Outputs` を section 分離して表示する
 - output slot には保存先 path を編集できる UI を表示する
 - `.idts` output の場合は manifest path を編集し、中身の hidden bundle directory は app が内部で確保する
-- 実行成功後は output slot ごとの実際の file path または `.idts` path を note source の `out:` へ書き戻す
+- 実行成功後は output slot ごとの生成 managed file / dataset ID を note source の `out:` へ書き戻す
+- 実行済み block は provenance として read-only 表示し、削除だけ可能にする
 - output slot は追加で次を持てる
   - `auto_insert_to_work_note`
   - `share_note_with_input`
@@ -135,11 +139,12 @@ slot が `.idts` を要求する場合は、`in:` または `out:` に `.idts` p
 
 app は実行前に次を行う。
 
-1. input path を検証する
-2. input が `.idts` なら datasetId を解決し、runtime 用 directory path に resolve する
-3. 非 `.idts` output は target file path をそのまま使う
-4. `.idts` output は visible manifest path を確定し、hidden bundle directory を確保する
-5. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
+1. input ID を検証する
+2. authoring path が残っている場合は managed data ID へ正規化する
+3. input が `.idts` dataset ID なら runtime 用 directory path に resolve する
+4. 非 `.idts` output は target file path をそのまま使う
+5. `.idts` output は visible manifest path を確定し、hidden bundle directory を確保する
+6. `analysis-args.json` を `.store/.integral/runtime/BLK-.../` に書く
 
 ## 7. analysis-args.json
 
@@ -186,7 +191,7 @@ app は実行前に次を行う。
 
 - `.idts` output の中身が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
-- 実行成功後、app は output slot ごとの file path または visible `.idts` path を block source の `out:` に反映してよい
+- 実行成功後、app は output slot ごとの生成 managed data ID を block source の `out:` に反映する
 - 実行元 note が分かる場合、app は provenance 用に `note-path#BLK-...` の deep link を生成して data-note へ追記してよい
 
 ## 9. decorator の import 契約

@@ -19,6 +19,7 @@ import type {
   AiChatMessageDiagnostics,
   AiChatToolTraceEntry
 } from "../shared/aiChat";
+import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
@@ -70,7 +71,8 @@ export type AiAgentExecutionRuntime =
 export class AiAgentService {
   constructor(
     private readonly workspaceService: WorkspaceService,
-    private readonly workspaceVisualRenderService: WorkspaceVisualRenderService
+    private readonly workspaceVisualRenderService: WorkspaceVisualRenderService,
+    private readonly getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
   ) {}
 
   async submit({
@@ -261,7 +263,8 @@ export class AiAgentService {
     const persistentWorkspaceTools = createPersistentWorkspaceTools(
       workspaceRootPath,
       this.workspaceService,
-      this.workspaceVisualRenderService
+      this.workspaceVisualRenderService,
+      this.getIntegralWorkspaceService
     );
 
     return {
@@ -519,9 +522,54 @@ async function importEsmModule<T>(specifier: string): Promise<T> {
 function createPersistentWorkspaceTools(
   workspaceRootPath: string,
   workspaceService: WorkspaceService,
-  workspaceVisualRenderService: WorkspaceVisualRenderService
+  workspaceVisualRenderService: WorkspaceVisualRenderService,
+  getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
 ): ToolSet {
   return {
+    resolveManagedDataByPath: tool({
+      description:
+        "Resolve a workspace path to the managed data ID and metadata used by IntegralNotes. Use this before writing itg-notes block inputs from paths.",
+      inputSchema: z.object({
+        path: z.string().min(1)
+      }),
+      execute: async ({ path: targetPath }) => {
+        const integralWorkspaceService = getIntegralWorkspaceService?.() ?? null;
+
+        if (!integralWorkspaceService) {
+          throw new Error("Integral workspace service is not ready.");
+        }
+
+        const result = await integralWorkspaceService.resolveManagedDataByPath(targetPath);
+
+        if (!result) {
+          throw new Error(`Managed data was not found for path: ${targetPath}`);
+        }
+
+        return result;
+      }
+    }),
+    resolveManagedDataById: tool({
+      description:
+        "Resolve an IntegralNotes managed data ID to its current workspace path and metadata. Use this when reading executed itg-notes block inputs or outputs.",
+      inputSchema: z.object({
+        id: z.string().min(1)
+      }),
+      execute: async ({ id }) => {
+        const integralWorkspaceService = getIntegralWorkspaceService?.() ?? null;
+
+        if (!integralWorkspaceService) {
+          throw new Error("Integral workspace service is not ready.");
+        }
+
+        const result = await integralWorkspaceService.resolveManagedDataById(id);
+
+        if (!result) {
+          throw new Error(`Managed data was not found for ID: ${id}`);
+        }
+
+        return result;
+      }
+    }),
     renderWorkspaceDocument: tool({
       description:
         "Render a markdown/html/text workspace file in a hidden browser and return a screenshot for visual inspection. Use this when layout, charts, or rendered appearance matter.",
@@ -767,6 +815,14 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return `${pathValue}${widthValue}${waitValue}`;
   }
 
+  if (toolName === "resolveManagedDataByPath" && isRecord(input) && typeof input.path === "string") {
+    return input.path;
+  }
+
+  if (toolName === "resolveManagedDataById" && isRecord(input) && typeof input.id === "string") {
+    return input.id;
+  }
+
   return summarizeUnknownValue(input);
 }
 
@@ -823,6 +879,15 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
         : "rendered";
 
     return `${output.path} | ${sourceKind} | ${width}x${height} | ${renderReadiness}`;
+  }
+
+  if (
+    (toolName === "resolveManagedDataByPath" || toolName === "resolveManagedDataById") &&
+    isRecord(output) &&
+    typeof output.id === "string" &&
+    typeof output.path === "string"
+  ) {
+    return `${output.id} -> ${output.path}`;
   }
 
   return summarizeUnknownValue(output);

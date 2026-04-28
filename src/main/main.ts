@@ -164,7 +164,11 @@ const workspaceService = new WorkspaceService({
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
 const workspaceVisualRenderService = new WorkspaceVisualRenderService(workspaceService);
-const aiAgentService = new AiAgentService(workspaceService, workspaceVisualRenderService);
+const aiAgentService = new AiAgentService(
+  workspaceService,
+  workspaceVisualRenderService,
+  () => integralWorkspaceService
+);
 const aiChatService = new AiChatService(
   aiAgentService,
   workspaceService,
