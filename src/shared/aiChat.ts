@@ -115,11 +115,23 @@ export interface SubmitInlineAiInsertionRequest {
   afterText: string;
   beforeText: string;
   context: AiChatContextSummary;
+  history: AiChatMessage[];
   prompt: string;
+  sessionId?: string | null;
+  sourceNotePath: string;
+}
+
+export interface InlineAiTextInsertion {
+  summary?: string;
+  text: string;
 }
 
 export interface SubmitInlineAiInsertionResult {
-  text: string;
+  insertion: InlineAiTextInsertion | null;
+  messages: AiChatMessage[];
+  sessionId: string;
+  text?: string;
+  userMessage: AiChatMessage;
 }
 
 export interface SubmitInlinePythonBlockRequest {

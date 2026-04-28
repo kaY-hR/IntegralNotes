@@ -1,11 +1,14 @@
 import { safeStorage } from "electron";
+import { tool, type ToolSet } from "ai";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 
 import type {
   AiChatContextSummary,
   AiChatHistorySnapshot,
+  InlineAiTextInsertion,
   AiChatImageAttachment,
   AiChatModelOption,
   AiChatMessage,
@@ -388,22 +391,48 @@ export class AiChatService {
       throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
     }
 
+    const normalizedPriorMessages = request.history
+      .map(normalizeAiChatMessageForPersistence)
+      .filter(isDefined);
+    const userMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      id: createChatMessageId("user"),
+      role: "user",
+      text: prompt
+    };
+    const conversationalMessages = [...normalizedPriorMessages, userMessage];
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
+      extraTools: createInlineMarkdownInsertionTools(),
       instructions: buildInlineInsertionInstructions(),
-      maxSteps: 1,
-      prompt: buildInlineInsertionPrompt(request),
+      maxSteps: 4,
+      prompt: buildInlineInsertionPrompt(request, conversationalMessages),
       runtimeSelection,
-      useWorkspaceTools: false
+      useWorkspaceTools: true
     });
-    const text = result.text.trim();
-
-    if (text.length === 0) {
-      throw new Error("AI が挿入テキストを返しませんでした。");
-    }
+    const insertion = parseInlineMarkdownInsertion(result.diagnostics.toolTrace);
+    const assistantMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      diagnostics: result.diagnostics,
+      id: createChatMessageId("assistant"),
+      role: "assistant",
+      text: result.text
+    };
+    const toolMessages = buildToolMessages(assistantMessage);
+    const responseMessages = [...toolMessages, assistantMessage];
+    const sessionId = await this.persistInlineAiSession({
+      context: request.context,
+      messages: [...conversationalMessages, ...responseMessages],
+      sessionId: request.sessionId ?? null,
+      workspaceRootPath: this.workspaceService.currentRootPath ?? null
+    });
 
     return {
-      text
+      insertion,
+      messages: responseMessages,
+      sessionId,
+      ...(insertion ? { text: insertion.text } : {}),
+      userMessage
     };
   }
 
@@ -440,6 +469,7 @@ export class AiChatService {
     const skillPrompt = await readImplementIntegralBlockSkillPrompt(workspaceRootPath);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
+      extraTools: createInlinePythonBlockTools(),
       instructions: buildInlinePythonBlockInstructions(skillPrompt),
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
       prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
@@ -474,7 +504,7 @@ export class AiChatService {
     };
     const toolMessages = buildToolMessages(assistantMessage);
     const responseMessages = [...toolMessages, assistantMessage];
-    const sessionId = await this.persistInlinePythonBlockSession({
+    const sessionId = await this.persistInlineAiSession({
       context: request.context,
       messages: [...conversationalMessages, ...responseMessages],
       sessionId: request.sessionId ?? null,
@@ -587,7 +617,7 @@ export class AiChatService {
     );
   }
 
-  private async persistInlinePythonBlockSession({
+  private async persistInlineAiSession({
     context,
     messages,
     sessionId,
@@ -596,7 +626,7 @@ export class AiChatService {
     context: AiChatContextSummary;
     messages: AiChatMessage[];
     sessionId: string | null;
-    workspaceRootPath: string;
+    workspaceRootPath: string | null;
   }): Promise<string> {
     const history = await this.readPersistedHistory();
     const now = new Date().toISOString();
@@ -756,6 +786,7 @@ export class AiChatService {
 
   private async generateTaskWithAgentRuntime({
     context,
+    extraTools,
     instructions,
     maxSteps,
     prompt,
@@ -763,6 +794,7 @@ export class AiChatService {
     useWorkspaceTools
   }: {
     context: AiChatContextSummary;
+    extraTools?: ToolSet;
     instructions: string;
     maxSteps: number;
     prompt: string;
@@ -775,6 +807,7 @@ export class AiChatService {
     try {
       const result = await this.aiAgentService.generateForTask({
         context,
+        extraTools,
         instructions,
         maxSteps,
         prompt,
@@ -818,27 +851,104 @@ function buildInlineRuntimeNotConfiguredMessage(status: AiChatStatus): string {
 
 function buildInlineInsertionInstructions(): string {
   return [
-    "You are an inline Markdown editor assistant inside IntegralNotes.",
-    "Return only the best text to insert at the cursor position.",
-    "Do not include explanations, greetings, labels, surrounding quotes, or code fences unless those characters are the intended inserted text.",
-    "Match the language, tone, formatting, and Markdown style of the surrounding note.",
-    "Use the user's request as the editing instruction, not as text to restate."
+    "You are chatting inside the IntegralNotes inline Markdown insertion popup.",
+    "The user is asking for text to insert at the editor cursor, not for a general chat answer.",
+    "The app provides Markdown before and after the cursor. The cursor is exactly between those two sections.",
+    "Use the surrounding Markdown, the cursor position, and the user's latest request to infer the intended inserted content.",
+    "If enough information is available, call insertMarkdownAtCursor with the exact Markdown text to insert.",
+    "If the request is underspecified, ask one concise follow-up question and do not call insertMarkdownAtCursor.",
+    "Do not answer with the inserted text as plain assistant prose. The insertion must be delivered through insertMarkdownAtCursor.",
+    "Do not include greetings, explanations, labels, surrounding quotes, or code fences unless they are literally part of the inserted Markdown.",
+    "Preserve the note's language, tone, indentation, list structure, heading level, table style, and surrounding whitespace."
   ].join("\n");
 }
 
-function buildInlineInsertionPrompt(request: SubmitInlineAiInsertionRequest): string {
+function buildInlineInsertionPrompt(
+  request: SubmitInlineAiInsertionRequest,
+  messages: readonly AiChatMessage[]
+): string {
   return [
-    "User request:",
-    request.prompt.trim(),
+    "Popup chat transcript:",
+    formatInlinePythonBlockTranscript(messages),
     "",
-    "Text before cursor:",
+    `Source note path: ${request.sourceNotePath}`,
+    `Active path: ${request.context.activeRelativePath ?? "(none)"}`,
+    "",
+    "Markdown before cursor:",
     truncateInlineContext(request.beforeText, "tail"),
     "",
-    "Text after cursor:",
+    "[CURSOR]",
+    "",
+    "Markdown after cursor:",
     truncateInlineContext(request.afterText, "head"),
     "",
-    "Return only the text to insert at the cursor."
+    "Respond to the latest user message. If ready, call insertMarkdownAtCursor with exactly the Markdown that belongs at [CURSOR]."
   ].join("\n");
+}
+
+function createInlineMarkdownInsertionTools(): ToolSet {
+  return {
+    insertMarkdownAtCursor: tool({
+      description:
+        "Insert exact Markdown at the inline editor cursor. Call this only when the content is ready to insert. Do not use this for explanations or questions.",
+      inputSchema: z.object({
+        summary: z.string().optional(),
+        text: z.string().min(1)
+      }),
+      execute: async ({ summary, text }) => ({
+        summary: typeof summary === "string" ? summary : "",
+        text
+      })
+    })
+  };
+}
+
+function createInlinePythonBlockTools(): ToolSet {
+  return {
+    insertPythonBlock: tool({
+      description:
+        "Signal that the inline Python block popup should insert an itg-notes block for an already-saved workspace Python callable. Use this only after writeWorkspaceFile saved the .py file and the requested block is ready to insert.",
+      inputSchema: z.object({
+        functionName: z.string().min(1),
+        scriptPath: z.string().min(1),
+        summary: z.string().optional()
+      }),
+      execute: async ({ functionName, scriptPath, summary }) => ({
+        functionName,
+        scriptPath,
+        summary: typeof summary === "string" ? summary : ""
+      })
+    })
+  };
+}
+
+function parseInlineMarkdownInsertion(
+  toolTrace: readonly AiChatToolTraceEntry[]
+): InlineAiTextInsertion | null {
+  const insertionTrace = [...toolTrace]
+    .reverse()
+    .find((entry) => entry.toolName === "insertMarkdownAtCursor" && entry.status === "success");
+
+  if (!insertionTrace) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(insertionTrace.outputSummary) as unknown;
+
+    if (!isRecord(parsed) || typeof parsed.text !== "string" || parsed.text.length === 0) {
+      throw new Error("invalid insertMarkdownAtCursor payload");
+    }
+
+    const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+
+    return {
+      ...(summary ? { summary } : {}),
+      text: parsed.text
+    };
+  } catch {
+    throw new Error("insertMarkdownAtCursor tool の結果から挿入 Markdown を取得できませんでした。");
+  }
 }
 
 function buildInlinePythonBlockInstructions(skillPrompt: string): string {

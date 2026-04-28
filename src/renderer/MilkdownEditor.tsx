@@ -673,10 +673,29 @@ export function MilkdownEditor({
           afterText: current.afterText,
           beforeText: current.beforeText,
           context: buildInlineAiContextSummary(current),
-          prompt: current.prompt
+          history: current.messages,
+          prompt: current.prompt,
+          sessionId: current.sessionId,
+          sourceNotePath: relativePath
         });
+        const nextMessages = [...current.messages, result.userMessage, ...result.messages];
 
-        insertMarkdownAtPosition(current.anchorPos, result.text);
+        if (!result.insertion) {
+          const nextState = {
+            ...current,
+            error: null,
+            isSubmitting: false,
+            messages: nextMessages,
+            prompt: "",
+            sessionId: result.sessionId
+          };
+
+          inlineAiPromptRef.current = nextState;
+          setInlineAiPrompt(nextState);
+          return;
+        }
+
+        insertMarkdownAtPosition(current.anchorPos, result.insertion.text);
       } else {
         const result = await window.integralNotes.submitInlinePythonBlock({
           afterText: current.afterText,
@@ -1007,7 +1026,7 @@ export function MilkdownEditor({
               ×
             </button>
           </div>
-          {inlineAiPrompt.mode === "python-block" && inlineAiPrompt.messages.length > 0 ? (
+          {inlineAiPrompt.messages.length > 0 ? (
             <div className="editor-ai-popup__messages">
               {inlineAiPrompt.messages.map((message) => (
                 <article
@@ -1042,7 +1061,9 @@ export function MilkdownEditor({
             }}
             placeholder={
               inlineAiPrompt.mode === "insert-text"
-                ? "挿入したい内容を指示"
+                ? inlineAiPrompt.messages.length > 0
+                  ? "追加の指示や回答を入力"
+                  : "挿入したい内容を指示"
                 : inlineAiPrompt.messages.length > 0
                   ? "追加の指示や回答を入力"
                   : "実装したい解析 block を指示"
@@ -1070,7 +1091,7 @@ export function MilkdownEditor({
             >
               {inlineAiPrompt.isSubmitting
                 ? "送信中..."
-                : inlineAiPrompt.mode === "python-block" && inlineAiPrompt.messages.length > 0
+                : inlineAiPrompt.messages.length > 0
                   ? "返信"
                   : "送信"}
             </button>

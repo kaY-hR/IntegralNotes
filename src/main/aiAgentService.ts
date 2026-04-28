@@ -123,6 +123,7 @@ export class AiAgentService {
 
   async generateForTask({
     context,
+    extraTools,
     instructions,
     maxSteps = TOOL_LOOP_MAX_STEPS,
     prompt,
@@ -130,6 +131,7 @@ export class AiAgentService {
     useWorkspaceTools
   }: {
     context: AiChatContextSummary;
+    extraTools?: ToolSet;
     instructions: string;
     maxSteps?: number;
     prompt: string;
@@ -147,12 +149,16 @@ export class AiAgentService {
           tools: {},
           workspaceMounted: false
         };
+    const tools = {
+      ...toolContext.tools,
+      ...(extraTools ?? {})
+    };
     const agent = new ToolLoopAgent({
       instructions: buildTaskInstructions(instructions, context, toolContext),
       model,
       providerOptions: providerOptions as any,
       stopWhen: stepCountIs(maxSteps),
-      tools: toolContext.tools
+      tools
     });
     const result = await agent.generate({
       messages: [
@@ -526,20 +532,6 @@ function createPersistentWorkspaceTools(
   getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
 ): ToolSet {
   return {
-    insertPythonBlock: tool({
-      description:
-        "Signal that the inline Python block popup should insert an itg-notes block for an already-saved workspace Python callable. Use this only after writeWorkspaceFile saved the .py file and the requested block is ready to insert.",
-      inputSchema: z.object({
-        functionName: z.string().min(1),
-        scriptPath: z.string().min(1),
-        summary: z.string().optional()
-      }),
-      execute: async ({ functionName, scriptPath, summary }) => ({
-        functionName,
-        scriptPath,
-        summary: typeof summary === "string" ? summary : ""
-      })
-    }),
     resolveManagedDataByPath: tool({
       description:
         "Resolve a workspace path to the managed data ID and metadata used by IntegralNotes. Use this before writing itg-notes block inputs from paths.",
@@ -845,6 +837,12 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return `${scriptPath}:${functionName}`;
   }
 
+  if (toolName === "insertMarkdownAtCursor" && isRecord(input)) {
+    const textLength = typeof input.text === "string" ? input.text.length : null;
+
+    return textLength === null ? "markdown insertion" : `${textLength} chars`;
+  }
+
   return summarizeUnknownValue(input);
 }
 
@@ -891,6 +889,17 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
         : "";
 
     return `${output.scriptPath}:${output.functionName}${summary}`;
+  }
+
+  if (
+    toolName === "insertMarkdownAtCursor" &&
+    isRecord(output) &&
+    typeof output.text === "string"
+  ) {
+    return JSON.stringify({
+      summary: typeof output.summary === "string" ? output.summary : "",
+      text: output.text
+    });
   }
 
   if (toolName === "readWorkspaceImage" && isRecord(output) && typeof output.path === "string") {
