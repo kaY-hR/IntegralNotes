@@ -4032,8 +4032,7 @@ pre.editor-ai-popup__message-text--plain {
 }
 
 .ai-chat-panel__message--tool {
-  align-self: center;
-  width: min(100%, 680px);
+  align-self: flex-start;
   background: linear-gradient(180deg, rgba(246, 248, 250, 0.98) 0%, rgba(240, 244, 247, 0.98) 100%);
 }
 
