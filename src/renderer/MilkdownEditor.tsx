@@ -778,9 +778,9 @@ export function MilkdownEditor({
 
         insertMarkdownAtPosition(
           current.anchorPos,
-          prependInlineAiInitialUserMessage(
+          prependInlineAiTranscript(
             result.insertion.text,
-            getInitialInlineAiUserMessage(current)
+            buildInlineAiTranscript(nextMessages)
           ),
           {
             marker: "??",
@@ -825,7 +825,7 @@ export function MilkdownEditor({
           current.anchorPos,
           result.insertion,
           current.afterText,
-          getInitialInlineAiUserMessage(current)
+          buildInlineAiTranscript(nextMessages)
         );
       }
 
@@ -891,7 +891,7 @@ export function MilkdownEditor({
     anchorPos: number,
     insertion: InlinePythonBlockInsertion,
     originalAfterText: string,
-    initialUserMessage: string
+    transcript: string
   ): Promise<void> => {
     const snapshot = await window.integralNotes.syncWorkspace();
 
@@ -917,7 +917,7 @@ export function MilkdownEditor({
 
     insertMarkdownAtPosition(
       anchorPos,
-      prependInlineAiInitialUserMessage(blockMarkdown, initialUserMessage),
+      prependInlineAiTranscript(blockMarkdown, transcript),
       {
         marker: ">>",
         originalAfterText
@@ -1689,16 +1689,25 @@ function buildInlineAiExcerpt(state: InlineAiPromptState): string {
   ].join("\n");
 }
 
-function getInitialInlineAiUserMessage(state: InlineAiPromptState): string {
-  return (
-    state.messages.find(
-      (message) => message.role === "user" && message.text.trim().length > 0
-    )?.text ?? state.prompt
-  );
+function buildInlineAiTranscript(messages: readonly AiChatMessage[]): string {
+  return messages
+    .filter((message) => message.role !== "tool")
+    .map((message) => {
+      const text = message.text.trim();
+
+      if (text.length === 0) {
+        return null;
+      }
+
+      const role = message.role === "assistant" ? "Assistant" : "User";
+      return `${role}:\n${text}`;
+    })
+    .filter((entry): entry is string => typeof entry === "string")
+    .join("\n\n");
 }
 
-function prependInlineAiInitialUserMessage(markdown: string, userMessage: string): string {
-  const trimmedMessage = userMessage.trim();
+function prependInlineAiTranscript(markdown: string, transcript: string): string {
+  const trimmedMessage = transcript.trim();
 
   if (trimmedMessage.length === 0) {
     return markdown;
