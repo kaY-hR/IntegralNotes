@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
+import { contextBridge, ipcRenderer, webFrame, webUtils, type IpcRendererEvent } from "electron";
 
 import type { IntegralNotesApi } from "../shared/workspace";
 
@@ -93,7 +93,41 @@ const api: IntegralNotesApi = {
   deleteAiChatSession: (sessionId) => ipcRenderer.invoke("ai-chat:deleteSession", sessionId),
   submitAiChat: (request) => ipcRenderer.invoke("ai-chat:submit", request),
   submitInlineAiInsertion: (request) => ipcRenderer.invoke("ai-chat:submitInlineInsertion", request),
-  submitInlinePythonBlock: (request) => ipcRenderer.invoke("ai-chat:submitInlinePythonBlock", request)
+  submitInlinePythonBlock: (request) => ipcRenderer.invoke("ai-chat:submitInlinePythonBlock", request),
+  onAiHostCommandApprovalRequest: (handler) => {
+    const listener = (_event: IpcRendererEvent, request: Parameters<typeof handler>[0]) => {
+      handler(request);
+    };
+
+    ipcRenderer.on("ai-chat:hostCommandApprovalRequest", listener);
+    return () => {
+      ipcRenderer.removeListener("ai-chat:hostCommandApprovalRequest", listener);
+    };
+  },
+  respondAiHostCommandApproval: (response) =>
+    ipcRenderer.invoke("ai-chat:respondHostCommandApproval", response),
+  cancelAiHostCommandExecution: (requestId) =>
+    ipcRenderer.invoke("ai-chat:cancelHostCommand", requestId),
+  onAiHostCommandExecutionUpdate: (handler) => {
+    const listener = (_event: IpcRendererEvent, update: Parameters<typeof handler>[0]) => {
+      handler(update);
+    };
+
+    ipcRenderer.on("ai-chat:hostCommandExecutionUpdate", listener);
+    return () => {
+      ipcRenderer.removeListener("ai-chat:hostCommandExecutionUpdate", listener);
+    };
+  },
+  onAiHostCommandWorkspaceSynced: (handler) => {
+    const listener = (_event: IpcRendererEvent, event: Parameters<typeof handler>[0]) => {
+      handler(event);
+    };
+
+    ipcRenderer.on("ai-chat:hostCommandWorkspaceSynced", listener);
+    return () => {
+      ipcRenderer.removeListener("ai-chat:hostCommandWorkspaceSynced", listener);
+    };
+  }
 };
 
 contextBridge.exposeInMainWorld("integralNotes", api);

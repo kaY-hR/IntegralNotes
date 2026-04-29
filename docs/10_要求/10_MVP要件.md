@@ -219,3 +219,34 @@
 - block 実行で作られる hidden bundle directory や runtime log は GC 対象にできる
 - user-facing workspace file 自体は app が勝手に消さない
 - 再実行で不要になった旧 bundle は、どこからも参照されなければ GC 対象にできる
+
+## 16. AI Chat CLI tool
+
+- AI Chat panel と inline AI は、共通の host command tool を使って workspace 上で PowerShell command を実行できる
+- tool 名は user-facing には CLI / shell command と表現してよいが、MVP の実体は PowerShell 互換 shell とする
+- tool_call の入力は少なくとも `command` と `purpose` を必須にする
+- `workingDirectory` は optional とし、指定する場合も開いている workspace folder からの相対 path に限定する
+- shell executable path は AI Chat settings で指定できる
+- shell executable path が未設定の場合は `pwsh` を優先し、見つからなければ Windows PowerShell に fallback する
+- PowerShell 起動時は `-NoProfile -NonInteractive` を付け、ユーザー profile に依存しない実行にする
+- `stdin` は MVP では未対応とする
+- tool_call が来たら app は実行前に command / purpose / workingDirectory / timeout / warning を dialog 表示する
+- command は dialog 上で編集できる
+- user が編集して許可した場合、LLM へ返す tool result には編集後 command を含める
+- user が編集していない場合、LLM へ返す tool result には編集後 command を省略する
+- user はメッセージ付きで reject でき、reject 理由は LLM へ tool result として返す
+- MVP では毎回承認を必須にし、session remembered allow は持たない
+- 将来は workspace 配下の allow / deny JSON を読み、Claude / Codex 系の permission schema に寄せる
+- 危険そうな command、workspace 外へのアクセスが疑われる command、network / install 系 command は強い警告を出す
+- 警告が出た場合も、user が明示許可すれば実行できる
+- 実行時の default timeout は 60 秒とする
+- LLM は必要に応じて timeout を指定できる
+- timeout 上限は 300 秒とし、それを超える指定は 300 秒へ丸める
+- timeout 超過時はプロセス停止を試み、LLM へ `status: "timeout"` と partial stdout / stderr を返す
+- 実行中は可能なら stdout / stderr を dialog にリアルタイム表示する
+- 実行中は user が Cancel できる
+- Cancel 時はプロセス停止を試み、LLM へ `status: "cancelled"` と partial stdout / stderr を返す
+- LLM へ返す stdout / stderr はそれぞれ最大 20,000 文字に切り詰める
+- chat transcript には purpose / 承認・拒否・編集有無 / 実行 command / exit code / truncated output summary を残す
+- 実行後は成功/失敗/timeout/cancel に関係なく workspace sync 相当を走らせる
+- この機能は実行前確認と workspace 起点の実行を提供するものであり、Python script 内の任意 file access などを完全に sandbox するものではない

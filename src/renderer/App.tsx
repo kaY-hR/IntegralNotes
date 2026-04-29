@@ -16,6 +16,10 @@ import type {
   ResolveIntegralManagedDataTrackingIssueRequest
 } from "../shared/integral";
 import type {
+  AiHostCommandApprovalRequest,
+  AiHostCommandExecutionUpdate
+} from "../shared/aiChat";
+import type {
   CopyEntriesResult,
   CreateEntryResult,
   DeleteEntriesResult,
@@ -98,6 +102,27 @@ interface DatasetCreationDialogState {
 interface ManagedDataTarget {
   displayName: string;
   targetId: string;
+}
+
+type HostCommandDialogStatus =
+  | "awaiting-approval"
+  | "cancelled"
+  | "completed"
+  | "failed"
+  | "responding"
+  | "running"
+  | "timeout";
+
+interface HostCommandDialogState {
+  command: string;
+  durationMs?: number;
+  exitCode?: number | null;
+  message?: string;
+  rejectReason: string;
+  request: AiHostCommandApprovalRequest;
+  status: HostCommandDialogStatus;
+  stderr: string;
+  stdout: string;
 }
 
 interface OpenWorkspaceFileOptions {
@@ -854,6 +879,65 @@ function toErrorMessage(error: unknown): string {
   return "不明なエラーが発生しました。";
 }
 
+function applyHostCommandExecutionUpdate(
+  current: HostCommandDialogState | null,
+  update: AiHostCommandExecutionUpdate
+): HostCommandDialogState | null {
+  if (!current || current.request.id !== update.id) {
+    return current;
+  }
+
+  switch (update.type) {
+    case "started":
+      return {
+        ...current,
+        status: "running"
+      };
+    case "stdout":
+      return {
+        ...current,
+        stdout: `${current.stdout}${update.chunk ?? ""}`
+      };
+    case "stderr":
+      return {
+        ...current,
+        stderr: `${current.stderr}${update.chunk ?? ""}`
+      };
+    case "finished":
+      return {
+        ...current,
+        durationMs: update.durationMs,
+        exitCode: update.exitCode ?? null,
+        message: update.message,
+        status: "completed"
+      };
+    case "timeout":
+      return {
+        ...current,
+        durationMs: update.durationMs,
+        exitCode: update.exitCode ?? null,
+        message: update.message ?? current.message,
+        status: "timeout"
+      };
+    case "cancelled":
+      return {
+        ...current,
+        durationMs: update.durationMs,
+        exitCode: update.exitCode ?? null,
+        message: update.message ?? current.message,
+        status: "cancelled"
+      };
+    case "failed":
+      return {
+        ...current,
+        durationMs: update.durationMs,
+        exitCode: update.exitCode ?? null,
+        message: update.message ?? current.message,
+        status: "failed"
+      };
+  }
+}
+
 function createWorkspaceSearchRequest(
   state: SearchSidebarState,
   overrides: Partial<WorkspaceSearchRequest> = {}
@@ -965,6 +1049,7 @@ export function App(): JSX.Element {
   const [workspaceSearchError, setWorkspaceSearchError] = useState<string | null>(null);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
+  const [hostCommandDialog, setHostCommandDialog] = useState<HostCommandDialogState | null>(null);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
   const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
@@ -988,7 +1073,8 @@ export function App(): JSX.Element {
     activeTrackingIssue !== null ||
     deleteDialog !== null ||
     datasetCreationDialog !== null ||
-    dataRegistrationDialogOpen;
+    dataRegistrationDialogOpen ||
+    hostCommandDialog !== null;
 
   useEffect(() => {
     openTabsRef.current = openTabs;
@@ -1169,6 +1255,165 @@ export function App(): JSX.Element {
       setStatusMessage(toErrorMessage(error));
     } finally {
       setLoadingWorkspace(false);
+    }
+  };
+
+  useEffect(() => {
+    return window.integralNotes.onAiHostCommandApprovalRequest((request) => {
+      setHostCommandDialog({
+        command: request.command,
+        rejectReason: "",
+        request,
+        status: "awaiting-approval",
+        stderr: "",
+        stdout: ""
+      });
+      setStatusMessage(`AI CLI 実行の承認待ち: ${request.purpose}`);
+    });
+  }, []);
+
+  useEffect(() => {
+    return window.integralNotes.onAiHostCommandExecutionUpdate((update) => {
+      setHostCommandDialog((current) => applyHostCommandExecutionUpdate(current, update));
+    });
+  }, []);
+
+  useEffect(() => {
+    return window.integralNotes.onAiHostCommandWorkspaceSynced((event) => {
+      if (event.snapshot) {
+        applyWorkspaceSnapshot(event.snapshot, {
+          statusMessage: event.message
+        });
+        void Promise.all([refreshManagedDataTrackingIssues(), refreshAssetCatalog()]);
+        return;
+      }
+
+      setStatusMessage(event.message);
+    });
+  });
+
+  const updateHostCommand = (command: string): void => {
+    setHostCommandDialog((current) =>
+      current
+        ? {
+            ...current,
+            command
+          }
+        : current
+    );
+  };
+
+  const updateHostCommandRejectReason = (rejectReason: string): void => {
+    setHostCommandDialog((current) =>
+      current
+        ? {
+            ...current,
+            rejectReason
+          }
+        : current
+    );
+  };
+
+  const approveHostCommand = async (): Promise<void> => {
+    const current = hostCommandDialog;
+
+    if (!current || current.status !== "awaiting-approval") {
+      return;
+    }
+
+    setHostCommandDialog({
+      ...current,
+      status: "responding"
+    });
+
+    try {
+      await window.integralNotes.respondAiHostCommandApproval({
+        command: current.command,
+        decision: "approved",
+        id: current.request.id
+      });
+      setHostCommandDialog((latest) =>
+        latest?.request.id === current.request.id
+          ? {
+              ...latest,
+              status: "running"
+            }
+          : latest
+      );
+    } catch (error) {
+      setHostCommandDialog((latest) =>
+        latest?.request.id === current.request.id
+          ? {
+              ...latest,
+              message: toErrorMessage(error),
+              status: "failed"
+            }
+          : latest
+      );
+    }
+  };
+
+  const rejectHostCommand = async (): Promise<void> => {
+    const current = hostCommandDialog;
+
+    if (!current || current.status !== "awaiting-approval") {
+      return;
+    }
+
+    setHostCommandDialog({
+      ...current,
+      status: "responding"
+    });
+
+    try {
+      await window.integralNotes.respondAiHostCommandApproval({
+        command: current.command,
+        decision: "rejected",
+        id: current.request.id,
+        reason: current.rejectReason
+      });
+      setHostCommandDialog(null);
+      setStatusMessage("AI CLI 実行を拒否しました。");
+    } catch (error) {
+      setHostCommandDialog((latest) =>
+        latest?.request.id === current.request.id
+          ? {
+              ...latest,
+              message: toErrorMessage(error),
+              status: "failed"
+            }
+          : latest
+      );
+    }
+  };
+
+  const cancelHostCommand = async (): Promise<void> => {
+    const current = hostCommandDialog;
+
+    if (!current || (current.status !== "running" && current.status !== "responding")) {
+      return;
+    }
+
+    try {
+      const cancelled = await window.integralNotes.cancelAiHostCommandExecution(current.request.id);
+      setHostCommandDialog((latest) =>
+        latest?.request.id === current.request.id
+          ? {
+              ...latest,
+              message: cancelled ? "Cancel requested." : "Command is not running yet.",
+              status: cancelled ? "running" : latest.status
+            }
+          : latest
+      );
+    } catch (error) {
+      setHostCommandDialog((latest) =>
+        latest?.request.id === current.request.id
+          ? {
+              ...latest,
+              message: toErrorMessage(error)
+            }
+          : latest
+      );
     }
   };
 
@@ -3619,6 +3864,167 @@ export function App(): JSX.Element {
           />
         </section>
       </main>
+
+      {hostCommandDialog ? (
+        <div className="dialog-backdrop">
+          <div className="dialog-card dialog-card--host-command">
+            <div className="dialog-card__header">
+              <p className="dialog-card__eyebrow">AI CLI Approval</p>
+              <h2>PowerShell command の実行確認</h2>
+              <p>
+                LLM が real workspace 上で CLI 実行を要求しています。内容を確認し、必要なら編集してください。
+              </p>
+            </div>
+
+            <div className="dialog-card__body dialog-card__body--host-command">
+              <div className="host-command-dialog__summary">
+                <div className="host-command-dialog__field">
+                  <span>Purpose</span>
+                  <strong>{hostCommandDialog.request.purpose}</strong>
+                </div>
+                <div className="host-command-dialog__field">
+                  <span>Working Directory</span>
+                  <strong>{hostCommandDialog.request.workingDirectory}</strong>
+                </div>
+                <div className="host-command-dialog__field">
+                  <span>Timeout</span>
+                  <strong>
+                    {hostCommandDialog.request.effectiveTimeoutSeconds}s
+                    {hostCommandDialog.request.requestedTimeoutSeconds &&
+                    hostCommandDialog.request.requestedTimeoutSeconds !==
+                      hostCommandDialog.request.effectiveTimeoutSeconds
+                      ? ` (requested ${hostCommandDialog.request.requestedTimeoutSeconds}s)`
+                      : ""}
+                  </strong>
+                </div>
+                <div className="host-command-dialog__field">
+                  <span>Shell</span>
+                  <strong>{hostCommandDialog.request.shellExecutablePath}</strong>
+                </div>
+              </div>
+
+              {hostCommandDialog.request.warnings.length > 0 ? (
+                <div className="host-command-dialog__warnings">
+                  <strong>Strong warning</strong>
+                  {hostCommandDialog.request.warnings.map((warning) => (
+                    <p key={warning.code}>
+                      {warning.code}: {warning.message}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
+              <label className="host-command-dialog__label">
+                <span>Command</span>
+                <textarea
+                  className="host-command-dialog__command"
+                  disabled={hostCommandDialog.status !== "awaiting-approval"}
+                  onChange={(event) => {
+                    updateHostCommand(event.target.value);
+                  }}
+                  rows={8}
+                  value={hostCommandDialog.command}
+                />
+              </label>
+
+              {hostCommandDialog.status === "awaiting-approval" ? (
+                <label className="host-command-dialog__label">
+                  <span>Reject message</span>
+                  <textarea
+                    className="host-command-dialog__reject"
+                    onChange={(event) => {
+                      updateHostCommandRejectReason(event.target.value);
+                    }}
+                    placeholder="reject する場合、LLMへ返す理由を入力できます。"
+                    rows={3}
+                    value={hostCommandDialog.rejectReason}
+                  />
+                </label>
+              ) : null}
+
+              {hostCommandDialog.status !== "awaiting-approval" ? (
+                <div className="host-command-dialog__output">
+                  <div className="host-command-dialog__output-header">
+                    <span>Status: {hostCommandDialog.status}</span>
+                    <span>
+                      exit:{" "}
+                      {hostCommandDialog.exitCode === undefined
+                        ? "running"
+                        : hostCommandDialog.exitCode === null
+                          ? "null"
+                          : hostCommandDialog.exitCode}
+                    </span>
+                    {hostCommandDialog.durationMs ? (
+                      <span>{Math.round(hostCommandDialog.durationMs / 100) / 10}s</span>
+                    ) : null}
+                  </div>
+
+                  {hostCommandDialog.message ? (
+                    <p className="host-command-dialog__message">{hostCommandDialog.message}</p>
+                  ) : null}
+
+                  <div className="host-command-dialog__streams">
+                    <div>
+                      <span>stdout</span>
+                      <pre>{hostCommandDialog.stdout || "(empty)"}</pre>
+                    </div>
+                    <div>
+                      <span>stderr</span>
+                      <pre>{hostCommandDialog.stderr || "(empty)"}</pre>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="dialog-actions">
+                {hostCommandDialog.status === "awaiting-approval" ? (
+                  <>
+                    <button
+                      className="button button--ghost"
+                      onClick={() => {
+                        void rejectHostCommand();
+                      }}
+                      type="button"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      className="button button--primary"
+                      disabled={hostCommandDialog.command.trim().length === 0}
+                      onClick={() => {
+                        void approveHostCommand();
+                      }}
+                      type="button"
+                    >
+                      Approve & Run
+                    </button>
+                  </>
+                ) : hostCommandDialog.status === "running" || hostCommandDialog.status === "responding" ? (
+                  <button
+                    className="button button--ghost"
+                    onClick={() => {
+                      void cancelHostCommand();
+                    }}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                ) : (
+                  <button
+                    className="button button--primary"
+                    onClick={() => {
+                      setHostCommandDialog(null);
+                    }}
+                    type="button"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {contextMenu ? (
         <div

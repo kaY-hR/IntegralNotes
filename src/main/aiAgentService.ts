@@ -16,6 +16,8 @@ import { z } from "zod";
 import {
   DEFAULT_AI_CHAT_SYSTEM_PROMPTS,
   type AiChatContextSummary,
+  type AiHostCommandToolRequest,
+  type AiHostCommandToolResult,
   type AiChatMessage,
   type AiChatMessageDiagnostics,
   type AiChatToolTraceEntry
@@ -62,6 +64,19 @@ const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
 const TOOL_LOOP_MAX_STEPS = 8;
 const WORKSPACE_MOUNT_PATH = "/workspace";
 
+interface AiHostCommandExecutor {
+  execute(
+    request: AiHostCommandToolRequest,
+    options?: {
+      shellExecutablePath?: string | null;
+    }
+  ): Promise<AiHostCommandToolResult>;
+}
+
+interface AiAgentHostCommandOptions {
+  shellExecutablePath?: string | null;
+}
+
 export type AiAgentExecutionRuntime =
   | {
       gatewayApiKey: string;
@@ -84,16 +99,19 @@ export class AiAgentService {
   constructor(
     private readonly workspaceService: WorkspaceService,
     private readonly workspaceVisualRenderService: WorkspaceVisualRenderService,
-    private readonly getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
+    private readonly getIntegralWorkspaceService?: () => IntegralWorkspaceService | null,
+    private readonly hostCommandExecutor?: AiHostCommandExecutor
   ) {}
 
   async submit({
     context,
     history,
     runtime,
+    hostCommand,
     systemPrompt
   }: {
     context: AiChatContextSummary;
+    hostCommand?: AiAgentHostCommandOptions;
     history: AiChatMessage[];
     runtime: AiAgentExecutionRuntime;
     systemPrompt?: string | null;
@@ -102,7 +120,7 @@ export class AiAgentService {
     text: string;
   }> {
     const { model, providerOptions } = this.createLanguageModel(runtime);
-    const toolContext = await this.createToolContext();
+    const toolContext = await this.createToolContext(hostCommand);
     const agent = new ToolLoopAgent({
       instructions: buildAgentInstructions(context, toolContext, systemPrompt),
       model,
@@ -142,10 +160,12 @@ export class AiAgentService {
     maxSteps = TOOL_LOOP_MAX_STEPS,
     prompt,
     runtime,
+    hostCommand,
     useWorkspaceTools
   }: {
     context: AiChatContextSummary;
     extraTools?: ToolSet;
+    hostCommand?: AiAgentHostCommandOptions;
     instructions: string;
     maxSteps?: number;
     prompt: string;
@@ -157,7 +177,7 @@ export class AiAgentService {
   }> {
     const { model, providerOptions } = this.createLanguageModel(runtime);
     const toolContext = useWorkspaceTools
-      ? await this.createToolContext()
+      ? await this.createToolContext(hostCommand)
       : {
           skillCount: 0,
           tools: {},
@@ -244,7 +264,7 @@ export class AiAgentService {
     }
   }
 
-  private async createToolContext(): Promise<{
+  private async createToolContext(hostCommand?: AiAgentHostCommandOptions): Promise<{
     skillCount: number;
     tools: ToolSet;
     workspaceMounted: boolean;
@@ -284,7 +304,9 @@ export class AiAgentService {
       workspaceRootPath,
       this.workspaceService,
       this.workspaceVisualRenderService,
-      this.getIntegralWorkspaceService
+      this.getIntegralWorkspaceService,
+      this.hostCommandExecutor,
+      hostCommand
     );
 
     return {
@@ -383,6 +405,7 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "When markdown contains a linked or embedded .html/.htm path and visual content matters, call renderWorkspaceDocument on that HTML path rather than relying only on the markdown source.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
     "Use writeWorkspaceFile when you need to persist a real workspace text edit.",
+    "Use runShellCommand only when you need a real host PowerShell command. It always asks the user for approval first, and the user may edit or reject the command.",
     "Do not tell the user that files were saved; instead describe preview changes or proposed edits."
   ];
 
@@ -536,9 +559,11 @@ function createPersistentWorkspaceTools(
   workspaceRootPath: string,
   workspaceService: WorkspaceService,
   workspaceVisualRenderService: WorkspaceVisualRenderService,
-  getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
+  getIntegralWorkspaceService?: () => IntegralWorkspaceService | null,
+  hostCommandExecutor?: AiHostCommandExecutor,
+  hostCommandOptions?: AiAgentHostCommandOptions
 ): ToolSet {
-  return {
+  const tools: ToolSet = {
     resolveManagedDataByPath: tool({
       description:
         "Resolve a workspace path to the managed data ID and metadata used by IntegralNotes. Use this before writing itg-notes block inputs from paths.",
@@ -708,6 +733,33 @@ function createPersistentWorkspaceTools(
       }
     })
   };
+
+  if (hostCommandExecutor) {
+    tools.runShellCommand = tool({
+      description:
+        "Run a real PowerShell-compatible command in the user's workspace after explicit user approval. Use this when a live command is needed, such as running tests, scripts, package installers, or workspace-generating commands. The user sees and can edit or reject the command before execution. Provide a concise purpose so the user can judge the request.",
+      inputSchema: z.object({
+        command: z.string().min(1),
+        purpose: z.string().min(1),
+        timeoutSeconds: z.number().int().min(1).optional(),
+        workingDirectory: z.string().optional()
+      }),
+      execute: async ({ command, purpose, timeoutSeconds, workingDirectory }) =>
+        hostCommandExecutor.execute(
+          {
+            command,
+            purpose,
+            ...(typeof timeoutSeconds === "number" ? { timeoutSeconds } : {}),
+            ...(typeof workingDirectory === "string" ? { workingDirectory } : {})
+          },
+          {
+            shellExecutablePath: hostCommandOptions?.shellExecutablePath ?? null
+          }
+        )
+    });
+  }
+
+  return tools;
 }
 
 function toModelMessage(message: AiChatMessage): ModelMessage | null {
@@ -777,6 +829,14 @@ function determineToolTraceStatus(
   toolName: string,
   output: unknown
 ): "error" | "success" {
+  if (toolName === "runShellCommand" && isRecord(output)) {
+    if (output.status === "approved") {
+      return typeof output.exitCode === "number" && output.exitCode === 0 ? "success" : "error";
+    }
+
+    return "error";
+  }
+
   if (toolName === "bash" && isRecord(output) && typeof output.exitCode === "number") {
     return output.exitCode === 0 ? "success" : "error";
   }
@@ -793,6 +853,19 @@ function determineToolTraceStatus(
 }
 
 function summarizeToolInput(toolName: string, input: unknown): string {
+  if (toolName === "runShellCommand" && isRecord(input)) {
+    const command = typeof input.command === "string" ? input.command : "";
+    const purpose = typeof input.purpose === "string" ? input.purpose : "";
+    const workingDirectory =
+      typeof input.workingDirectory === "string" && input.workingDirectory.trim().length > 0
+        ? ` @ ${input.workingDirectory.trim()}`
+        : "";
+
+    return truncateTraceText(
+      [purpose.trim(), `${command.trim()}${workingDirectory}`].filter(Boolean).join(" | ")
+    );
+  }
+
   if (toolName === "bash" && isRecord(input) && typeof input.command === "string") {
     return truncateTraceText(input.command);
   }
@@ -854,6 +927,31 @@ function summarizeToolInput(toolName: string, input: unknown): string {
 }
 
 function summarizeToolOutput(toolName: string, output: unknown): string {
+  if (toolName === "runShellCommand" && isRecord(output)) {
+    const status = typeof output.status === "string" ? output.status : "unknown";
+    const exitCode =
+      typeof output.exitCode === "number"
+        ? `exit ${output.exitCode}`
+        : output.exitCode === null
+          ? "exit null"
+          : "exit ?";
+    const edited = output.edited === true ? "edited" : "original";
+    const stdout =
+      typeof output.stdout === "string" && output.stdout.trim().length > 0
+        ? `stdout: ${truncateTraceText(output.stdout.trim())}`
+        : null;
+    const stderr =
+      typeof output.stderr === "string" && output.stderr.trim().length > 0
+        ? `stderr: ${truncateTraceText(output.stderr.trim())}`
+        : null;
+    const reason =
+      typeof output.reason === "string" && output.reason.trim().length > 0
+        ? `reason: ${truncateTraceText(output.reason.trim())}`
+        : null;
+
+    return [status, exitCode, edited, stdout, stderr, reason].filter(isDefined).join(" | ");
+  }
+
   if (toolName === "bash" && isRecord(output)) {
     const exitCode =
       typeof output.exitCode === "number" ? `exit ${output.exitCode}` : "exit ?";

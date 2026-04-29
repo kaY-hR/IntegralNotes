@@ -5,6 +5,10 @@ import type {
 import type {
   CreateAiChatSessionRequest,
   AiChatHistorySnapshot,
+  AiHostCommandApprovalRequest,
+  AiHostCommandApprovalResponse,
+  AiHostCommandExecutionUpdate,
+  AiHostCommandWorkspaceSyncedEvent,
   SaveAiChatSettingsRequest,
   SaveAiChatSessionRequest,
   AiChatStatus,
@@ -331,6 +335,17 @@ export interface IntegralNotesApi {
   submitInlinePythonBlock: (
     request: SubmitInlinePythonBlockRequest
   ) => Promise<SubmitInlinePythonBlockResult>;
+  onAiHostCommandApprovalRequest: (
+    handler: (request: AiHostCommandApprovalRequest) => void
+  ) => () => void;
+  respondAiHostCommandApproval: (response: AiHostCommandApprovalResponse) => Promise<void>;
+  cancelAiHostCommandExecution: (requestId: string) => Promise<boolean>;
+  onAiHostCommandExecutionUpdate: (
+    handler: (update: AiHostCommandExecutionUpdate) => void
+  ) => () => void;
+  onAiHostCommandWorkspaceSynced: (
+    handler: (event: AiHostCommandWorkspaceSyncedEvent) => void
+  ) => () => void;
 }
 
 

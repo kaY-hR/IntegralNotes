@@ -37,6 +37,7 @@ interface PersistedAiChatSettings {
   apiKeyCiphertext?: string;
   apiKeyPlaintext?: string;
   selectedModelId?: string | null;
+  shellExecutablePath?: string | null;
   systemPrompts?: Partial<AiChatSystemPrompts>;
 }
 
@@ -209,6 +210,7 @@ export class AiChatService {
       selectedModelId,
       skillsDirectoryPath:
         workspaceRootPath === null ? null : path.join(workspaceRootPath, ".codex", "skills"),
+      shellExecutablePath: normalizeNullableString(settings.shellExecutablePath),
       systemPrompts,
       workspaceRootPath
     };
@@ -219,6 +221,10 @@ export class AiChatService {
     const nextSettings: PersistedAiChatSettings = {
       ...currentSettings,
       selectedModelId: request.modelId,
+      shellExecutablePath:
+        request.shellExecutablePath === undefined
+          ? normalizeNullableString(currentSettings.shellExecutablePath)
+          : normalizeNullableString(request.shellExecutablePath),
       systemPrompts:
         request.systemPrompts === undefined
           ? resolveAiChatSystemPrompts(currentSettings)
@@ -377,6 +383,9 @@ export class AiChatService {
             role: "assistant",
             ...(await this.submitWithAgentRuntime({
               context: request.context,
+              hostCommand: {
+                shellExecutablePath: settings.shellExecutablePath ?? null
+              },
               history: normalizedHistoryResult.history,
               runtimeSelection,
               systemPrompt: systemPrompts.chatPanel
@@ -422,6 +431,9 @@ export class AiChatService {
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       extraTools: createInlineMarkdownInsertionTools(),
+      hostCommand: {
+        shellExecutablePath: settings.shellExecutablePath ?? null
+      },
       instructions: buildInlineInsertionInstructions(systemPrompts.inlineInsertion),
       maxSteps: TOOL_LOOP_INLINE_INSERTION_MAX_STEPS,
       prompt: buildInlineInsertionPrompt(request, conversationalMessages),
@@ -492,6 +504,9 @@ export class AiChatService {
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       extraTools: createInlinePythonBlockTools(),
+      hostCommand: {
+        shellExecutablePath: settings.shellExecutablePath ?? null
+      },
       instructions: buildInlinePythonBlockInstructions(systemPrompts.inlinePythonBlock, skillPrompt),
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
       prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
@@ -604,6 +619,7 @@ export class AiChatService {
         apiKeyPlaintext:
           typeof parsed.apiKeyPlaintext === "string" ? parsed.apiKeyPlaintext : undefined,
         selectedModelId: typeof parsed.selectedModelId === "string" ? parsed.selectedModelId : null,
+        shellExecutablePath: normalizeNullableString(parsed.shellExecutablePath),
         systemPrompts: normalizeAiChatSystemPrompts(parsed.systemPrompts)
       };
     } catch {
@@ -724,7 +740,7 @@ export class AiChatService {
         directProvider,
         mode: "direct",
         notes: [
-          `chat 送信は ${describeDirectProviderLabel(directProvider.provider)} + ToolLoopAgent を使います。workspace 探索は bash-tool、image path は readWorkspaceImage、md/html の見た目確認は renderWorkspaceDocument、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。`,
+          `chat 送信は ${describeDirectProviderLabel(directProvider.provider)} + ToolLoopAgent を使います。workspace 探索は bash-tool、image path は readWorkspaceImage、md/html の見た目確認は renderWorkspaceDocument、real save は writeWorkspaceFile、host command は runShellCommand + approval dialog、bash/writeFile は overlay preview 扱いです。`,
           `${describeDirectProviderEnvKey(directProvider.provider)} を ${describeWorkspaceSecretSource(directProvider.source)} から使います。AI Gateway 認証は不要です。`
         ],
         providerLabel: describeDirectProviderLabel(directProvider.provider),
@@ -739,7 +755,7 @@ export class AiChatService {
         gatewayAuth,
         mode: "gateway",
         notes: [
-          "chat 送信は AI Gateway + ToolLoopAgent を使います。workspace 探索は bash-tool、image path は readWorkspaceImage、md/html の見た目確認は renderWorkspaceDocument、real save は writeWorkspaceFile、bash/writeFile は overlay preview 扱いです。",
+          "chat 送信は AI Gateway + ToolLoopAgent を使います。workspace 探索は bash-tool、image path は readWorkspaceImage、md/html の見た目確認は renderWorkspaceDocument、real save は writeWorkspaceFile、host command は runShellCommand + approval dialog、bash/writeFile は overlay preview 扱いです。",
           providerOptions
             ? "選択中 model に対して provider-scoped BYOK credential も付与します。"
             : "選択中 model に対する provider-scoped BYOK credential は未検出です。"
@@ -766,11 +782,15 @@ export class AiChatService {
 
   private async submitWithAgentRuntime({
     context,
+    hostCommand,
     history,
     runtimeSelection,
     systemPrompt
   }: {
     context: AiChatContextSummary;
+    hostCommand?: {
+      shellExecutablePath?: string | null;
+    };
     history: SubmitAiChatRequest["history"];
     runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
     systemPrompt: string;
@@ -778,6 +798,7 @@ export class AiChatService {
     try {
       const result = await this.aiAgentService.submit({
         context,
+        hostCommand,
         history,
         runtime: runtimeSelection.runtime,
         systemPrompt
@@ -813,6 +834,7 @@ export class AiChatService {
   private async generateTaskWithAgentRuntime({
     context,
     extraTools,
+    hostCommand,
     instructions,
     maxSteps,
     prompt,
@@ -821,6 +843,9 @@ export class AiChatService {
   }: {
     context: AiChatContextSummary;
     extraTools?: ToolSet;
+    hostCommand?: {
+      shellExecutablePath?: string | null;
+    };
     instructions: string;
     maxSteps: number;
     prompt: string;
@@ -834,6 +859,7 @@ export class AiChatService {
       const result = await this.aiAgentService.generateForTask({
         context,
         extraTools,
+        hostCommand,
         instructions,
         maxSteps,
         prompt,
@@ -1547,7 +1573,7 @@ function buildStubResponse(
 ): string {
   const lines = [
     "AI Chat runtime stub が応答しています。",
-    "現在は renderer -> preload -> main process の配線まで実装済みで、認証がある場合は direct provider または AI Gateway + ToolLoopAgent + bash-tool を使います。画像は readWorkspaceImage、md/html の視覚レンダリングは renderWorkspaceDocument を使えます。",
+    "現在は renderer -> preload -> main process の配線まで実装済みで、認証がある場合は direct provider または AI Gateway + ToolLoopAgent + bash-tool を使います。画像は readWorkspaceImage、md/html の視覚レンダリングは renderWorkspaceDocument、承認付きCLI実行は runShellCommand を使えます。",
     "実行可能な credential が無いときだけ stub に落ちます。",
     "",
     `provider: ${status.providerLabel}`,

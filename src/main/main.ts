@@ -34,6 +34,7 @@ import {
 } from "./pluginRegistry";
 import { AiAgentService } from "./aiAgentService";
 import { AiChatService } from "./aiChatService";
+import { AiHostCommandService } from "./aiHostCommandService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
@@ -164,10 +165,12 @@ const workspaceService = new WorkspaceService({
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
 const workspaceVisualRenderService = new WorkspaceVisualRenderService(workspaceService);
+const aiHostCommandService = new AiHostCommandService(workspaceService, () => mainWindow);
 const aiAgentService = new AiAgentService(
   workspaceService,
   workspaceVisualRenderService,
-  () => integralWorkspaceService
+  () => integralWorkspaceService,
+  aiHostCommandService
 );
 const aiChatService = new AiChatService(
   aiAgentService,
@@ -630,6 +633,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ai-chat:submitInlinePythonBlock", async (_event, request) =>
     aiChatService.submitInlinePythonBlock(request)
   );
+  aiHostCommandService.registerIpcHandlers(ipcMain);
 }
 
 function getPluginRegistry(): PluginRegistry {

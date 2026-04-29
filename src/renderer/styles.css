@@ -1920,6 +1920,11 @@ textarea:focus-visible {
   max-height: min(760px, calc(100vh - 40px));
 }
 
+.dialog-card--host-command {
+  width: min(980px, 100%);
+  max-height: min(900px, calc(100vh - 40px));
+}
+
 body.integral-dialog-open .milkdown .milkdown-block-handle,
 body.integral-dialog-open .milkdown .milkdown-slash-menu {
   display: none !important;
@@ -2005,6 +2010,13 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   display: grid;
   gap: 14px;
   max-height: min(620px, calc(100vh - 180px));
+  overflow: auto;
+}
+
+.dialog-card__body--host-command {
+  display: grid;
+  gap: 14px;
+  max-height: min(740px, calc(100vh - 180px));
   overflow: auto;
 }
 
@@ -2106,6 +2118,130 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 .dialog-card--asset-picker .dialog-actions .button--primary:hover {
   border-color: var(--accent-strong);
   background: var(--accent-strong);
+}
+
+.host-command-dialog__summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.host-command-dialog__field,
+.host-command-dialog__warnings,
+.host-command-dialog__output {
+  padding: 10px 12px;
+  border: 1px solid rgba(204, 215, 227, 0.9);
+  border-radius: 12px;
+  background: rgba(248, 251, 254, 0.94);
+}
+
+.host-command-dialog__field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.host-command-dialog__field span,
+.host-command-dialog__label span,
+.host-command-dialog__output-header,
+.host-command-dialog__streams span {
+  color: #6b8196;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.host-command-dialog__field strong {
+  overflow-wrap: anywhere;
+  color: #183149;
+  font-size: 0.82rem;
+}
+
+.host-command-dialog__warnings {
+  border-color: rgba(190, 88, 40, 0.34);
+  background: rgba(255, 245, 235, 0.94);
+  color: #7c3215;
+}
+
+.host-command-dialog__warnings strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.host-command-dialog__warnings p {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+}
+
+.host-command-dialog__label {
+  display: grid;
+  gap: 6px;
+}
+
+.host-command-dialog__command,
+.host-command-dialog__reject {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(189, 204, 220, 0.92);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1e2329;
+  font-family: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.host-command-dialog__command:disabled,
+.host-command-dialog__reject:disabled {
+  background: #f2f5f8;
+  color: #566c82;
+}
+
+.host-command-dialog__output {
+  display: grid;
+  gap: 10px;
+}
+
+.host-command-dialog__output-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.host-command-dialog__message {
+  margin: 0;
+  color: #6a4b1f;
+  font-size: 0.78rem;
+}
+
+.host-command-dialog__streams {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.host-command-dialog__streams > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.host-command-dialog__streams pre {
+  min-height: 120px;
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid rgba(214, 224, 234, 0.92);
+  border-radius: 10px;
+  background: #0f1b27;
+  color: #e4edf6;
+  font-family: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .tracking-dialog__summary {

@@ -58,6 +58,7 @@ export function AIChatPanel({
   const [messages, setMessages] = useState<AiChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
+  const [shellExecutablePathInput, setShellExecutablePathInput] = useState("");
   const [status, setStatus] = useState<AiChatStatus | null>(null);
   const [systemPromptInputs, setSystemPromptInputs] = useState<AiChatSystemPrompts>(
     DEFAULT_AI_CHAT_SYSTEM_PROMPTS
@@ -174,6 +175,7 @@ export function AIChatPanel({
     }
 
     setSystemPromptInputs(status.systemPrompts);
+    setShellExecutablePathInput(status.shellExecutablePath ?? "");
   }, [isSettingsDialogOpen, status]);
 
   useEffect(() => {
@@ -363,12 +365,15 @@ export function AIChatPanel({
       const nextStatus = await window.integralNotes.saveAiChatSettings({
         apiKey: apiKeyInput.trim().length > 0 ? apiKeyInput.trim() : undefined,
         modelId: selectedModelId || null,
+        shellExecutablePath:
+          shellExecutablePathInput.trim().length > 0 ? shellExecutablePathInput.trim() : null,
         systemPrompts: systemPromptInputs
       });
 
       setStatus(nextStatus);
       setApiKeyInput("");
       setSelectedModelId(nextStatus.selectedModelId ?? nextStatus.availableModels[0]?.id ?? "");
+      setShellExecutablePathInput(nextStatus.shellExecutablePath ?? "");
       setSystemPromptInputs(nextStatus.systemPrompts);
       setIsSettingsDialogOpen(false);
     } catch (error) {
@@ -970,6 +975,22 @@ export function AIChatPanel({
                         </option>
                       )) ?? <option value="">モデルを読み込み中</option>}
                     </select>
+                  </label>
+
+                  <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
+                    <span className="ai-chat-panel__context-label">PowerShell executable path</span>
+                    <input
+                      className="ai-chat-panel__settings-input"
+                      onChange={(event) => {
+                        setShellExecutablePathInput(event.target.value);
+                      }}
+                      placeholder="未設定なら pwsh を優先し、Windows PowerShell へ fallback"
+                      type="text"
+                      value={shellExecutablePathInput}
+                    />
+                    <p className="ai-chat-panel__note">
+                      runShellCommand tool はこの実行ファイルを `-NoProfile -NonInteractive` 付きで使います。
+                    </p>
                   </label>
                 </div>
 

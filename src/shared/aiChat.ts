@@ -1,3 +1,5 @@
+import type { WorkspaceSnapshot } from "./workspace";
+
 export type AiChatRole = "assistant" | "tool" | "user";
 
 export interface AiChatImageAttachment {
@@ -67,6 +69,7 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "If markdown/html layout or embedded charts matter, use renderWorkspaceDocument to inspect the rendered page visually.",
     "When reading markdown, if you find a linked or embedded .html/.htm file and the user is asking about its visual content, render that HTML path with renderWorkspaceDocument instead of judging from the markdown text alone.",
     "If the user wants real workspace edits, use writeWorkspaceFile. bash/writeFile remains preview-only.",
+    "If the user wants a real CLI command to run, use runShellCommand with command and purpose. The app will show an approval dialog before execution.",
     "Do not claim that real workspace files were saved unless the app explicitly tells you persistence happened."
   ].join("\n"),
   inlineInsertion: [
@@ -77,6 +80,7 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument. Do not judge HTML or image contents from filenames or source text alone.",
     "When reading Markdown and you find a linked or embedded .html/.htm file whose visual content matters, render that HTML path with renderWorkspaceDocument.",
     "If the user wants real workspace edits outside the insertion, use writeWorkspaceFile. bash/writeFile remains preview-only.",
+    "If a real CLI command is needed, use runShellCommand with command and purpose. The app will ask the user for approval.",
     "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
     "The user is usually asking for text to insert at the editor cursor, not for a general chat answer.",
     "The app provides Markdown before and after the cursor. The cursor is exactly between those two sections.",
@@ -94,6 +98,7 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "If you discover or receive an image path and need to inspect the image itself, use readWorkspaceImage.",
     "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument. Do not judge HTML or image contents from filenames or source text alone.",
     "When reading Markdown and you find a linked or embedded .html/.htm file whose visual content matters, render that HTML path with renderWorkspaceDocument.",
+    "If a real CLI command is needed, use runShellCommand with command and purpose. The app will ask the user for approval.",
     "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
     "Help the user converge on a Python analysis block. Ask a concise follow-up question if the request is underspecified.",
     "When the block is ready, implement it as a real workspace Python file by using writeWorkspaceFile.",
@@ -125,6 +130,7 @@ export interface AiChatStatus {
   providerLabel: string;
   selectedModelId: string | null;
   skillsDirectoryPath: string | null;
+  shellExecutablePath: string | null;
   systemPrompts: AiChatSystemPrompts;
   workspaceRootPath: string | null;
 }
@@ -157,6 +163,7 @@ export interface CreateAiChatSessionRequest {
 export interface SaveAiChatSettingsRequest {
   apiKey?: string;
   modelId: string | null;
+  shellExecutablePath?: string | null;
   systemPrompts?: Partial<AiChatSystemPrompts>;
 }
 
@@ -228,4 +235,80 @@ export interface SubmitInlinePythonBlockResult {
   scriptPath?: string;
   sessionId: string;
   userMessage: AiChatMessage;
+}
+
+export interface AiHostCommandWarning {
+  code: string;
+  message: string;
+}
+
+export interface AiHostCommandApprovalRequest {
+  command: string;
+  createdAt: string;
+  effectiveTimeoutSeconds: number;
+  id: string;
+  purpose: string;
+  requestedTimeoutSeconds: number | null;
+  shellExecutablePath: string;
+  warnings: AiHostCommandWarning[];
+  workingDirectory: string;
+  workspaceRootPath: string;
+}
+
+export interface AiHostCommandApprovalResponse {
+  command?: string;
+  decision: "approved" | "rejected";
+  id: string;
+  reason?: string;
+}
+
+export interface AiHostCommandExecutionUpdate {
+  chunk?: string;
+  durationMs?: number;
+  exitCode?: number | null;
+  id: string;
+  message?: string;
+  stream?: "stderr" | "stdout";
+  type: "cancelled" | "failed" | "finished" | "started" | "stderr" | "stdout" | "timeout";
+}
+
+export interface AiHostCommandWorkspaceSyncedEvent {
+  id: string;
+  message: string;
+  snapshot: WorkspaceSnapshot | null;
+}
+
+export interface AiHostCommandToolRequest {
+  command: string;
+  purpose: string;
+  timeoutSeconds?: number;
+  workingDirectory?: string;
+}
+
+export type AiHostCommandToolResultStatus =
+  | "approved"
+  | "cancelled"
+  | "failed"
+  | "rejected"
+  | "timeout";
+
+export interface AiHostCommandToolResult {
+  durationMs?: number;
+  edited: boolean;
+  editedCommand?: string;
+  executedCommand?: string;
+  exitCode: number | null;
+  originalCommand: string;
+  purpose: string;
+  reason?: string;
+  shellExecutablePath?: string;
+  status: AiHostCommandToolResultStatus;
+  stderr: string;
+  stderrTruncated?: boolean;
+  stdout: string;
+  stdoutTruncated?: boolean;
+  timeoutSeconds?: number;
+  warningCodes?: string[];
+  workingDirectory?: string;
+  workspaceSyncError?: string;
 }
