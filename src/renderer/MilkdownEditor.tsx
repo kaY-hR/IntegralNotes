@@ -12,7 +12,13 @@ import type {
   IntegralAssetCatalog,
   IntegralBlockTypeDefinition
 } from "../shared/integral";
-import type { AiChatContextSummary, AiChatMessage, InlinePythonBlockInsertion } from "../shared/aiChat";
+import type {
+  AiChatContextSummary,
+  AiChatMessage,
+  AiChatStreamEvent,
+  AiChatToolTraceEntry,
+  InlinePythonBlockInsertion
+} from "../shared/aiChat";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
@@ -32,6 +38,7 @@ import {
   serializeIntegralBlockContent,
   toIntegralCodeBlock
 } from "./integralBlockRegistry";
+import { AiMarkdown } from "./AiMarkdown";
 import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
@@ -90,6 +97,9 @@ interface InlineAiPromptState {
   mode: InlineAiMode;
   prompt: string;
   sessionId: string | null;
+  streamId: string | null;
+  streamingText: string;
+  streamingToolTrace: AiChatToolTraceEntry[];
   x: number;
   y: number;
 }
@@ -135,6 +145,7 @@ export function MilkdownEditor({
   const analysisCompletionRef = useRef<AnalysisCompletionState | null>(null);
   const inlineAiPromptRef = useRef<InlineAiPromptState | null>(null);
   const inlineAiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeInlineAiStreamIdRef = useRef<string | null>(null);
   const completionPanelRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
   const selectedEntryPathsRef = useRef<string[]>(selectedEntryPaths);
@@ -177,6 +188,7 @@ export function MilkdownEditor({
     if (!isActive) {
       setLinkCompletion(null);
       setAnalysisCompletion(null);
+      activeInlineAiStreamIdRef.current = null;
       setInlineAiPrompt(null);
     }
   }, [isActive]);
@@ -206,6 +218,58 @@ export function MilkdownEditor({
   useEffect(() => {
     inlineAiPromptRef.current = inlineAiPrompt;
   }, [inlineAiPrompt]);
+
+  useEffect(() => {
+    return window.integralNotes.onAiChatStreamEvent((event: AiChatStreamEvent) => {
+      if (event.id !== activeInlineAiStreamIdRef.current) {
+        return;
+      }
+
+      setInlineAiPrompt((current) => {
+        if (!current || current.streamId !== event.id) {
+          return current;
+        }
+
+        let next = current;
+
+        switch (event.type) {
+          case "text-delta":
+            if (event.textDelta) {
+              next = {
+                ...current,
+                streamingText: `${current.streamingText}${event.textDelta}`
+              };
+            }
+            break;
+          case "text-reset":
+            next = {
+              ...current,
+              streamingText: ""
+            };
+            break;
+          case "tool-trace":
+            if (event.toolTrace?.length) {
+              next = {
+                ...current,
+                streamingToolTrace: [...current.streamingToolTrace, ...(event.toolTrace ?? [])]
+              };
+            }
+            break;
+          case "error":
+            next = {
+              ...current,
+              error: event.message ?? "Inline AI streaming failed."
+            };
+            break;
+          default:
+            break;
+        }
+
+        inlineAiPromptRef.current = next;
+        return next;
+      });
+    });
+  }, []);
 
   useEffect(() => {
     if (!inlineAiPrompt) {
@@ -614,6 +678,9 @@ export function MilkdownEditor({
       mode: trigger.mode,
       prompt: "",
       sessionId: null,
+      streamId: null,
+      streamingText: "",
+      streamingToolTrace: [],
       x: trigger.x,
       y: trigger.y
     };
@@ -634,6 +701,7 @@ export function MilkdownEditor({
     }
 
     inlineAiPromptRef.current = null;
+    activeInlineAiStreamIdRef.current = null;
     setInlineAiPrompt(null);
     editorRef.current?.editor.action((ctx) => {
       ctx.get(editorViewCtx).focus();
@@ -660,12 +728,17 @@ export function MilkdownEditor({
       return;
     }
 
+    const streamId = createInlineAiStreamId();
     const submittingState = {
       ...current,
       error: null,
-      isSubmitting: true
+      isSubmitting: true,
+      streamId,
+      streamingText: "",
+      streamingToolTrace: []
     };
 
+    activeInlineAiStreamIdRef.current = streamId;
     inlineAiPromptRef.current = submittingState;
     setInlineAiPrompt(submittingState);
 
@@ -680,7 +753,8 @@ export function MilkdownEditor({
           insertionPosition: current.anchorPos,
           prompt: current.prompt,
           sessionId: current.sessionId,
-          sourceNotePath: relativePath
+          sourceNotePath: relativePath,
+          streamId
         });
         const nextMessages = [...current.messages, result.userMessage, ...result.messages];
 
@@ -691,9 +765,13 @@ export function MilkdownEditor({
             isSubmitting: false,
             messages: nextMessages,
             prompt: "",
-            sessionId: result.sessionId
+            sessionId: result.sessionId,
+            streamId: null,
+            streamingText: "",
+            streamingToolTrace: []
           };
 
+          activeInlineAiStreamIdRef.current = null;
           inlineAiPromptRef.current = nextState;
           setInlineAiPrompt(nextState);
           return;
@@ -701,9 +779,9 @@ export function MilkdownEditor({
 
         insertMarkdownAtPosition(
           current.anchorPos,
-          prependInlineAiInitialUserMessage(
+          prependInlineAiTranscript(
             result.insertion.text,
-            getInitialInlineAiUserMessage(current)
+            buildInlineAiTranscript(nextMessages)
           ),
           {
             marker: "??",
@@ -720,7 +798,8 @@ export function MilkdownEditor({
           insertionPosition: current.anchorPos,
           prompt: current.prompt,
           sessionId: current.sessionId,
-          sourceNotePath: relativePath
+          sourceNotePath: relativePath,
+          streamId
         });
         const nextMessages = [...current.messages, result.userMessage, ...result.messages];
 
@@ -731,9 +810,13 @@ export function MilkdownEditor({
             isSubmitting: false,
             messages: nextMessages,
             prompt: "",
-            sessionId: result.sessionId
+            sessionId: result.sessionId,
+            streamId: null,
+            streamingText: "",
+            streamingToolTrace: []
           };
 
+          activeInlineAiStreamIdRef.current = null;
           inlineAiPromptRef.current = nextState;
           setInlineAiPrompt(nextState);
           return;
@@ -743,19 +826,24 @@ export function MilkdownEditor({
           current.anchorPos,
           result.insertion,
           current.afterText,
-          getInitialInlineAiUserMessage(current)
+          buildInlineAiTranscript(nextMessages)
         );
       }
 
       inlineAiPromptRef.current = null;
+      activeInlineAiStreamIdRef.current = null;
       setInlineAiPrompt(null);
     } catch (error) {
       const nextState = {
         ...current,
         error: toErrorMessage(error),
-        isSubmitting: false
+        isSubmitting: false,
+        streamId: null,
+        streamingText: "",
+        streamingToolTrace: []
       };
 
+      activeInlineAiStreamIdRef.current = null;
       inlineAiPromptRef.current = nextState;
       setInlineAiPrompt(nextState);
     }
@@ -804,7 +892,7 @@ export function MilkdownEditor({
     anchorPos: number,
     insertion: InlinePythonBlockInsertion,
     originalAfterText: string,
-    initialUserMessage: string
+    transcript: string
   ): Promise<void> => {
     const snapshot = await window.integralNotes.syncWorkspace();
 
@@ -830,7 +918,7 @@ export function MilkdownEditor({
 
     insertMarkdownAtPosition(
       anchorPos,
-      prependInlineAiInitialUserMessage(blockMarkdown, initialUserMessage),
+      prependInlineAiTranscript(blockMarkdown, transcript),
       {
         marker: ">>",
         originalAfterText
@@ -1075,7 +1163,7 @@ export function MilkdownEditor({
               ×
             </button>
           </div>
-          {inlineAiPrompt.messages.length > 0 ? (
+          {inlineAiPrompt.messages.length > 0 || inlineAiPrompt.isSubmitting ? (
             <div className="editor-ai-popup__messages">
               {inlineAiPrompt.messages.map((message) => (
                 <article
@@ -1085,9 +1173,48 @@ export function MilkdownEditor({
                   <span className="editor-ai-popup__message-role">
                     {formatInlineAiMessageRole(message)}
                   </span>
-                  <pre className="editor-ai-popup__message-text">{formatInlineAiMessageText(message)}</pre>
+                  {message.role === "tool" ? (
+                    <pre className="editor-ai-popup__message-text editor-ai-popup__message-text--plain">
+                      {formatInlineAiMessageText(message)}
+                    </pre>
+                  ) : (
+                    <AiMarkdown
+                      className="editor-ai-popup__message-text"
+                      compact
+                      text={message.text}
+                    />
+                  )}
                 </article>
               ))}
+              {inlineAiPrompt.isSubmitting ? (
+                <article className="editor-ai-popup__message editor-ai-popup__message--assistant">
+                  <span className="editor-ai-popup__message-role">
+                    {inlineAiPrompt.streamingText.length > 0 ? "Assistant streaming" : "Assistant"}
+                  </span>
+                  {inlineAiPrompt.streamingText.length > 0 ? (
+                    <AiMarkdown
+                      className="editor-ai-popup__message-text"
+                      compact
+                      text={inlineAiPrompt.streamingText}
+                    />
+                  ) : (
+                    <div className="editor-ai-popup__thinking">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
+                  {inlineAiPrompt.streamingToolTrace.length > 0 ? (
+                    <div className="editor-ai-popup__tool-trace">
+                      {inlineAiPrompt.streamingToolTrace.map((entry, index) => (
+                        <code key={`${entry.toolName}-${index}`}>
+                          {entry.toolName}: {entry.outputSummary || entry.inputSummary}
+                        </code>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ) : null}
             </div>
           ) : null}
           <textarea
@@ -1305,6 +1432,10 @@ function formatInlineAiMessageText(message: AiChatMessage): string {
     `input: ${message.toolTraceEntry.inputSummary}`,
     `output: ${message.toolTraceEntry.outputSummary}`
   ].join("\n");
+}
+
+function createInlineAiStreamId(): string {
+  return `inline-ai-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function computeLinkCompletionState(
@@ -1573,16 +1704,25 @@ function buildInlineAiExcerpt(state: InlineAiPromptState): string {
   ].join("\n");
 }
 
-function getInitialInlineAiUserMessage(state: InlineAiPromptState): string {
-  return (
-    state.messages.find(
-      (message) => message.role === "user" && message.text.trim().length > 0
-    )?.text ?? state.prompt
-  );
+function buildInlineAiTranscript(messages: readonly AiChatMessage[]): string {
+  return messages
+    .filter((message) => message.role !== "tool")
+    .map((message) => {
+      const text = message.text.trim();
+
+      if (text.length === 0) {
+        return null;
+      }
+
+      const role = message.role === "assistant" ? "Assistant" : "User";
+      return `${role}:\n${text}`;
+    })
+    .filter((entry): entry is string => typeof entry === "string")
+    .join("\n\n");
 }
 
-function prependInlineAiInitialUserMessage(markdown: string, userMessage: string): string {
-  const trimmedMessage = userMessage.trim();
+function prependInlineAiTranscript(markdown: string, transcript: string): string {
+  const trimmedMessage = transcript.trim();
 
   if (trimmedMessage.length === 0) {
     return markdown;

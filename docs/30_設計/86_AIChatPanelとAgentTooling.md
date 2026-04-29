@@ -33,6 +33,7 @@ Renderer (React)
     -> ai-chat:getStatus / saveSettings / clearApiKey / refreshModels
     -> ai-chat:getHistory / createSession / saveSession / switchSession / deleteSession
     -> ai-chat:submit
+    <- ai-chat:streamEvent
 
 Main Process
   AiChatService
@@ -41,7 +42,7 @@ Main Process
     -> AiAgentService.submit()
 
   AiAgentService
-    -> ToolLoopAgent.generate()
+    -> ToolLoopAgent.stream()
     -> bash-tool runtime
     -> skill tool (.codex/skills)
     -> typed workspace tools
@@ -60,8 +61,9 @@ Main Process
 
 補足:
 
-- 現在は `ToolLoopAgent.stream()` ではなく `ToolLoopAgent.generate()` を使う request/response 方式である
-- renderer は `useChat` transport ではなく、React state + IPC invoke で管理している
+- 現在は `ToolLoopAgent.stream()` の text delta / step finish を `ai-chat:streamEvent` IPC で renderer へ送る
+- final result と履歴保存は従来通り IPC invoke の戻り値で確定させる
+- renderer は `useChat` transport ではなく、React state + IPC invoke + streaming event IPC で管理している
 
 ## UI 設計
 
@@ -77,6 +79,8 @@ Main Process
 - 設定は inline section ではなく `Settings` dialog に分離する
 - current workspace context は `Context` dialog に分離する
 - 本文領域は message list を優先し、composer を panel 下部に固定する
+- assistant 応答中は pending assistant message を出し、text delta を live 追記する
+- tool loop の step が完了したら pending assistant message 内に live tool trace を表示する
 - tool 実行は assistant の内部 state ではなく、独立した `tool` message として transcript に差し込む
 - user は画像ファイルを添付できる
 - prompt 文中に画像 path が書かれている場合も、可能なら画像 attachment 化する
@@ -153,9 +157,11 @@ main process 起動時に proxy を初期化する。
 
 ### 基本
 
-- `AiAgentService` が `ToolLoopAgent.generate()` を呼ぶ
+- `AiAgentService` が `ToolLoopAgent.stream()` を呼ぶ
 - stop 条件は `stepCountIs(8)`
 - renderer には
+  - live text delta
+  - live step-level tool trace
   - final assistant text
   - finish reason
   - model id
@@ -377,7 +383,6 @@ message role は次を持つ。
 
 ## 現時点で未実装
 
-- streaming response
 - chat cancel / abort
 - explicit diff preview / approval UI
 - generic MCP client registry
@@ -403,7 +408,7 @@ message role は次を持つ。
 
 優先度順に見ると、次はこの順が自然である。
 
-1. streaming + cancel
+1. chat cancel / abort
 2. write preview / approval UI
 3. MCP registry
 

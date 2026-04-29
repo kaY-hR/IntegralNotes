@@ -9,6 +9,7 @@ import type {
   AiHostCommandApprovalResponse,
   AiHostCommandExecutionUpdate,
   AiHostCommandWorkspaceSyncedEvent,
+  AiChatStreamEvent,
   SaveAiChatSettingsRequest,
   SaveAiChatSessionRequest,
   AiChatStatus,
@@ -346,6 +347,7 @@ export interface IntegralNotesApi {
   onAiHostCommandWorkspaceSynced: (
     handler: (event: AiHostCommandWorkspaceSyncedEvent) => void
   ) => () => void;
+  onAiChatStreamEvent: (handler: (event: AiChatStreamEvent) => void) => () => void;
 }
 
 

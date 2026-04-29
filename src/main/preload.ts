@@ -127,6 +127,16 @@ const api: IntegralNotesApi = {
     return () => {
       ipcRenderer.removeListener("ai-chat:hostCommandWorkspaceSynced", listener);
     };
+  },
+  onAiChatStreamEvent: (handler) => {
+    const listener = (_event: IpcRendererEvent, event: Parameters<typeof handler>[0]) => {
+      handler(event);
+    };
+
+    ipcRenderer.on("ai-chat:streamEvent", listener);
+    return () => {
+      ipcRenderer.removeListener("ai-chat:streamEvent", listener);
+    };
   }
 };
 
