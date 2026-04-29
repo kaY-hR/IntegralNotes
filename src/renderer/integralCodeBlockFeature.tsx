@@ -1083,8 +1083,7 @@ function IntegralBlockPanel({
                 <span>{blockDefinition.outputSlots.length} slots</span>
               </div>
               {blockDefinition.outputSlots.map((slot, index) => {
-                const outputReference =
-                  parsed.block.outputs[slot.name] ?? createDefaultIntegralOutputPath(slot);
+                const outputReference = parsed.block.outputs[slot.name] ?? null;
                 const outputManagedData = resolveManagedDataNoteTarget(outputReference);
                 const outputFieldValue = outputManagedData
                   ? toWorkspaceReferenceFieldValue(outputReference)
@@ -1116,7 +1115,7 @@ function IntegralBlockPanel({
                               event.target.value.trim().length > 0 ? event.target.value : null
                             );
                           }}
-                          placeholder={createDefaultIntegralOutputPath(slot)}
+                          placeholder={createDefaultIntegralOutputPath(slot, "A1B")}
                           spellCheck={false}
                           type="text"
                           value={outputFieldValue}

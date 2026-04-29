@@ -24,7 +24,7 @@ import type {
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
-  createDefaultIntegralOutputPath,
+  createDefaultIntegralOutputPathWithRandomSuffix,
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
   normalizeIntegralSlotExtension,
@@ -1889,7 +1889,7 @@ export class IntegralWorkspaceService {
     const rawReference =
       typeof outputReference === "string" && outputReference.trim().length > 0
         ? outputReference.trim()
-        : createDefaultIntegralOutputPath(outputSlot);
+        : createDefaultIntegralOutputPathWithRandomSuffix(outputSlot);
 
     if (await this.resolveManagedDataReferenceMetadata(rawReference)) {
       throw new Error(
@@ -2627,7 +2627,7 @@ function normalizeOutputSlotMap(
     normalized[slot.name] =
       typeof value === "string" && value.trim().length > 0
         ? value.trim()
-        : createDefaultIntegralOutputPath(slot);
+        : createDefaultIntegralOutputPathWithRandomSuffix(slot);
   }
 
   return normalized;

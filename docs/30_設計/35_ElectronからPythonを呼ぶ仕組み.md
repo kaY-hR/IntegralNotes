@@ -72,7 +72,7 @@ run: scripts/demo_hello_report.py:main
 in: {}
 params: {}
 out:
-  report: /Data/report.html
+  report: /Data/reportA1B.html
 ```
 
 `run:` は app 内部で次へ正規化する。

@@ -162,6 +162,7 @@ export interface ExecuteIntegralBlockResult {
 }
 
 const DEFAULT_OUTPUT_DIRECTORY = "/Data";
+const OUTPUT_PATH_SUFFIX_BASE = 36 ** 3;
 
 export function normalizeIntegralSlotExtension(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -213,8 +214,24 @@ export function isIntegralBundleExtension(value: string | null | undefined): boo
   return normalizeIntegralSlotExtension(value) === ".idts";
 }
 
-export function createDefaultIntegralOutputPath(slot: IntegralSlotDefinition): string {
+export function createIntegralOutputPathRandomSuffix(): string {
+  return Math.floor(Math.random() * OUTPUT_PATH_SUFFIX_BASE)
+    .toString(36)
+    .padStart(3, "0")
+    .toUpperCase();
+}
+
+export function createDefaultIntegralOutputPath(
+  slot: IntegralSlotDefinition,
+  suffix = ""
+): string {
   const extension = getIntegralSlotPrimaryExtension(slot, ".idts") ?? ".idts";
   const stem = slot.name.trim().length > 0 ? slot.name.trim() : "output";
-  return `${DEFAULT_OUTPUT_DIRECTORY}/${stem}${extension}`;
+  return `${DEFAULT_OUTPUT_DIRECTORY}/${stem}${suffix}${extension}`;
+}
+
+export function createDefaultIntegralOutputPathWithRandomSuffix(
+  slot: IntegralSlotDefinition
+): string {
+  return createDefaultIntegralOutputPath(slot, createIntegralOutputPathRandomSuffix());
 }

@@ -2,7 +2,7 @@ import type {
   IntegralBlockDocument,
   IntegralBlockTypeDefinition
 } from "../shared/integral";
-import { createDefaultIntegralOutputPath } from "../shared/integral";
+import { createDefaultIntegralOutputPathWithRandomSuffix } from "../shared/integral";
 
 import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
 import {
@@ -58,7 +58,10 @@ export function createInitialIntegralBlock(
     id: createBlockId(),
     inputs: Object.fromEntries(definition.inputSlots.map((slot) => [slot.name, null])),
     outputs: Object.fromEntries(
-      definition.outputSlots.map((slot) => [slot.name, createDefaultIntegralOutputPath(slot)])
+      definition.outputSlots.map((slot) => [
+        slot.name,
+        createDefaultIntegralOutputPathWithRandomSuffix(slot)
+      ])
     ),
     params: {},
     plugin: definition.pluginId

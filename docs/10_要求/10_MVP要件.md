@@ -89,6 +89,7 @@
   - `embed_to_shared_note`
 - input slot では `extensions` によって選択可能な file suffix を表せる
 - output slot では `extension` によって生成される file suffix を表せる
+- output slot の初期 file 名は `slot名 + 英数字3桁 + extension` とする
 - `format` は slot が意味的に扱う file type を表す
 - `auto_insert_to_work_note` は、その output を block が置かれている作業 note へ `![]()` として自動挿入するかを表す
 - `share_note_with_input` は、その output がどの input の data-note target を共有するかを表す
