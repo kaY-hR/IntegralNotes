@@ -38,6 +38,7 @@ import {
   serializeIntegralBlockContent,
   toIntegralCodeBlock
 } from "./integralBlockRegistry";
+import { AiMarkdown } from "./AiMarkdown";
 import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
@@ -1172,7 +1173,17 @@ export function MilkdownEditor({
                   <span className="editor-ai-popup__message-role">
                     {formatInlineAiMessageRole(message)}
                   </span>
-                  <pre className="editor-ai-popup__message-text">{formatInlineAiMessageText(message)}</pre>
+                  {message.role === "tool" ? (
+                    <pre className="editor-ai-popup__message-text editor-ai-popup__message-text--plain">
+                      {formatInlineAiMessageText(message)}
+                    </pre>
+                  ) : (
+                    <AiMarkdown
+                      className="editor-ai-popup__message-text"
+                      compact
+                      text={message.text}
+                    />
+                  )}
                 </article>
               ))}
               {inlineAiPrompt.isSubmitting ? (
@@ -1181,7 +1192,11 @@ export function MilkdownEditor({
                     {inlineAiPrompt.streamingText.length > 0 ? "Assistant streaming" : "Assistant"}
                   </span>
                   {inlineAiPrompt.streamingText.length > 0 ? (
-                    <pre className="editor-ai-popup__message-text">{inlineAiPrompt.streamingText}</pre>
+                    <AiMarkdown
+                      className="editor-ai-popup__message-text"
+                      compact
+                      text={inlineAiPrompt.streamingText}
+                    />
                   ) : (
                     <div className="editor-ai-popup__thinking">
                       <span />

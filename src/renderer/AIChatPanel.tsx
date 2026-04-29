@@ -20,6 +20,7 @@ import {
   type AiChatToolTraceEntry
 } from "../shared/aiChat";
 import type { WorkspaceFileDocument } from "../shared/workspace";
+import { AiMarkdown } from "./AiMarkdown";
 
 interface AIChatPanelProps {
   contextRelativePath: string | null;
@@ -674,7 +675,13 @@ export function AIChatPanel({
                 </div>
               ) : null}
 
-              <pre className="ai-chat-panel__message-body">{message.text}</pre>
+              {message.role === "tool" ? (
+                <pre className="ai-chat-panel__message-body ai-chat-panel__message-body--plain">
+                  {message.text}
+                </pre>
+              ) : (
+                <AiMarkdown className="ai-chat-panel__message-body" text={message.text} />
+              )}
 
               {message.role === "tool" && message.toolTraceEntry ? (
                 <div className="ai-chat-panel__message-diagnostics">
@@ -732,7 +739,7 @@ export function AIChatPanel({
               <span>{streamingAssistantText.length > 0 ? "streaming..." : "thinking..."}</span>
             </div>
             {streamingAssistantText.length > 0 ? (
-              <pre className="ai-chat-panel__message-body">{streamingAssistantText}</pre>
+              <AiMarkdown className="ai-chat-panel__message-body" text={streamingAssistantText} />
             ) : (
               <div className="ai-chat-panel__thinking">
                 <span />
