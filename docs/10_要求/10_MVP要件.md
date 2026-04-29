@@ -247,6 +247,8 @@
 - 実行中は user が Cancel できる
 - Cancel 時はプロセス停止を試み、LLM へ `status: "cancelled"` と partial stdout / stderr を返す
 - LLM へ返す stdout / stderr はそれぞれ最大 20,000 文字に切り詰める
+- AI Chat panel と inline AI popup は、assistant text を生成中に live streaming 表示する
+- tool loop の途中で tool 実行が完了した場合、UI は可能な範囲で live tool trace を表示する
 - chat transcript には purpose / 承認・拒否・編集有無 / 実行 command / exit code / truncated output summary を残す
 - 実行後は成功/失敗/timeout/cancel に関係なく workspace sync 相当を走らせる
 - この機能は実行前確認と workspace 起点の実行を提供するものであり、Python script 内の任意 file access などを完全に sandbox するものではない

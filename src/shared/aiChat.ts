@@ -177,6 +177,7 @@ export interface SubmitAiChatRequest {
   context: AiChatContextSummary;
   history: AiChatMessage[];
   prompt: string;
+  streamId?: string | null;
 }
 
 export interface SubmitAiChatResult {
@@ -194,6 +195,7 @@ export interface SubmitInlineAiInsertionRequest {
   prompt: string;
   sessionId?: string | null;
   sourceNotePath: string;
+  streamId?: string | null;
 }
 
 export interface InlineAiTextInsertion {
@@ -219,6 +221,7 @@ export interface SubmitInlinePythonBlockRequest {
   prompt: string;
   sessionId?: string | null;
   sourceNotePath: string;
+  streamId?: string | null;
 }
 
 export interface InlinePythonBlockInsertion {
@@ -311,4 +314,21 @@ export interface AiHostCommandToolResult {
   warningCodes?: string[];
   workingDirectory?: string;
   workspaceSyncError?: string;
+}
+
+export type AiChatStreamEventType =
+  | "error"
+  | "finished"
+  | "started"
+  | "text-delta"
+  | "text-reset"
+  | "tool-trace";
+
+export interface AiChatStreamEvent {
+  createdAt?: string;
+  id: string;
+  message?: string;
+  textDelta?: string;
+  toolTrace?: AiChatToolTraceEntry[];
+  type: AiChatStreamEventType;
 }

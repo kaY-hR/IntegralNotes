@@ -626,12 +626,26 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ai-chat:saveSession", async (_event, request) => aiChatService.saveSession(request));
   ipcMain.handle("ai-chat:switchSession", async (_event, sessionId) => aiChatService.switchSession(sessionId));
   ipcMain.handle("ai-chat:deleteSession", async (_event, sessionId) => aiChatService.deleteSession(sessionId));
-  ipcMain.handle("ai-chat:submit", async (_event, request) => aiChatService.submit(request));
-  ipcMain.handle("ai-chat:submitInlineInsertion", async (_event, request) =>
-    aiChatService.submitInlineInsertion(request)
+  ipcMain.handle("ai-chat:submit", async (event, request) =>
+    aiChatService.submit(request, {
+      onStreamEvent: (streamEvent) => {
+        event.sender.send("ai-chat:streamEvent", streamEvent);
+      }
+    })
   );
-  ipcMain.handle("ai-chat:submitInlinePythonBlock", async (_event, request) =>
-    aiChatService.submitInlinePythonBlock(request)
+  ipcMain.handle("ai-chat:submitInlineInsertion", async (event, request) =>
+    aiChatService.submitInlineInsertion(request, {
+      onStreamEvent: (streamEvent) => {
+        event.sender.send("ai-chat:streamEvent", streamEvent);
+      }
+    })
+  );
+  ipcMain.handle("ai-chat:submitInlinePythonBlock", async (event, request) =>
+    aiChatService.submitInlinePythonBlock(request, {
+      onStreamEvent: (streamEvent) => {
+        event.sender.send("ai-chat:streamEvent", streamEvent);
+      }
+    })
   );
   aiHostCommandService.registerIpcHandlers(ipcMain);
 }

@@ -77,6 +77,12 @@ interface AiAgentHostCommandOptions {
   shellExecutablePath?: string | null;
 }
 
+export interface AiAgentStreamCallbacks {
+  onTextDelta?: (textDelta: string) => void;
+  onTextReset?: () => void;
+  onToolTrace?: (toolTrace: AiChatToolTraceEntry[]) => void;
+}
+
 export type AiAgentExecutionRuntime =
   | {
       gatewayApiKey: string;
@@ -108,12 +114,14 @@ export class AiAgentService {
     history,
     runtime,
     hostCommand,
-    systemPrompt
+    systemPrompt,
+    stream
   }: {
     context: AiChatContextSummary;
     hostCommand?: AiAgentHostCommandOptions;
     history: AiChatMessage[];
     runtime: AiAgentExecutionRuntime;
+    stream?: AiAgentStreamCallbacks;
     systemPrompt?: string | null;
   }): Promise<{
     diagnostics: AiChatMessageDiagnostics;
@@ -128,8 +136,19 @@ export class AiAgentService {
       stopWhen: stepCountIs(TOOL_LOOP_MAX_STEPS),
       tools: toolContext.tools
     });
+    const messages = history.map(toModelMessage).filter(isDefined);
+
+    if (stream) {
+      return this.runStreamingAgent({
+        agent,
+        messages,
+        runtime,
+        stream
+      });
+    }
+
     const result = await agent.generate({
-      messages: history.map(toModelMessage).filter(isDefined)
+      messages
     });
     const toolTrace = buildToolTrace(result.steps);
     const text = result.text.trim();
@@ -161,6 +180,7 @@ export class AiAgentService {
     prompt,
     runtime,
     hostCommand,
+    stream,
     useWorkspaceTools
   }: {
     context: AiChatContextSummary;
@@ -170,6 +190,7 @@ export class AiAgentService {
     maxSteps?: number;
     prompt: string;
     runtime: AiAgentExecutionRuntime;
+    stream?: AiAgentStreamCallbacks;
     useWorkspaceTools: boolean;
   }): Promise<{
     diagnostics: AiChatMessageDiagnostics;
@@ -194,13 +215,24 @@ export class AiAgentService {
       stopWhen: stepCountIs(maxSteps),
       tools
     });
+    const messages: ModelMessage[] = [
+      {
+        content: prompt,
+        role: "user"
+      }
+    ];
+
+    if (stream) {
+      return this.runStreamingAgent({
+        agent,
+        messages,
+        runtime,
+        stream
+      });
+    }
+
     const result = await agent.generate({
-      messages: [
-        {
-          content: prompt,
-          role: "user"
-        }
-      ]
+      messages
     });
     const toolTrace = buildToolTrace(result.steps);
     const text = result.text.trim();
@@ -221,6 +253,76 @@ export class AiAgentService {
         toolTrace
       },
       text: responseText
+    };
+  }
+
+  private async runStreamingAgent({
+    agent,
+    messages,
+    runtime,
+    stream
+  }: {
+    agent: ToolLoopAgent<never, any, any>;
+    messages: ModelMessage[];
+    runtime: AiAgentExecutionRuntime;
+    stream: AiAgentStreamCallbacks;
+  }): Promise<{
+    diagnostics: AiChatMessageDiagnostics;
+    text: string;
+  }> {
+    const result = await agent.stream({
+      messages,
+      onStepFinish: (stepResult) => {
+        const toolTrace = buildToolTrace([stepResult as any]);
+
+        if (toolTrace.length > 0) {
+          stream.onToolTrace?.(toolTrace);
+        }
+      }
+    });
+    let responseText = "";
+    let hasSeenStep = false;
+
+    for await (const part of result.fullStream) {
+      if (part.type === "start-step") {
+        if (hasSeenStep) {
+          stream.onTextReset?.();
+        }
+
+        hasSeenStep = true;
+        responseText = "";
+        continue;
+      }
+
+      if (part.type === "text-delta") {
+        responseText += part.text;
+        stream.onTextDelta?.(part.text);
+        continue;
+      }
+
+      if (part.type === "error") {
+        throw new Error(toStreamErrorMessage(part.error));
+      }
+    }
+
+    const [steps, finishReason] = await Promise.all([result.steps, result.finishReason]);
+    const toolTrace = buildToolTrace(steps as any);
+    const text = responseText.trim();
+    const finalResponseText =
+      text.length > 0 ? text : buildFallbackAssistantText(toolTrace, finishReason ?? null);
+
+    if (finalResponseText.length === 0) {
+      throw new Error("AI agent returned no assistant text.");
+    }
+
+    return {
+      diagnostics: {
+        finishReason: finishReason ?? null,
+        modelId: steps.at(-1)?.model.modelId ?? runtime.modelId,
+        stepCount: steps.length,
+        toolTrace
+      },
+      text: finalResponseText
     };
   }
 
@@ -1067,6 +1169,22 @@ function truncateTraceText(value: string): string {
   }
 
   return `${normalized.slice(0, 177).trimEnd()}...`;
+}
+
+function toStreamErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function buildFallbackAssistantText(

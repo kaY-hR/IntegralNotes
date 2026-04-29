@@ -17,6 +17,7 @@ import {
   type AiChatSession,
   type AiChatSessionSummary,
   type AiChatStatus,
+  type AiChatStreamEvent,
   type AiChatSystemPrompts,
   type AiChatToolTraceEntry,
   type InlinePythonBlockInsertion,
@@ -30,7 +31,11 @@ import {
   type SubmitInlinePythonBlockRequest,
   type SubmitInlinePythonBlockResult
 } from "../shared/aiChat";
-import { AiAgentService, type AiAgentExecutionRuntime } from "./aiAgentService";
+import {
+  AiAgentService,
+  type AiAgentExecutionRuntime,
+  type AiAgentStreamCallbacks
+} from "./aiAgentService";
 import { WorkspaceService } from "./workspaceService";
 
 interface PersistedAiChatSettings {
@@ -103,6 +108,10 @@ type ResolvedAiRuntime =
       notes: string[];
       providerLabel: string;
     };
+
+interface AiChatExecutionOptions {
+  onStreamEvent?: (event: AiChatStreamEvent) => void;
+}
 
 const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
 const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"]);
@@ -351,7 +360,10 @@ export class AiChatService {
     return buildHistorySnapshot(nextHistory);
   }
 
-  async submit(request: SubmitAiChatRequest): Promise<SubmitAiChatResult> {
+  async submit(
+    request: SubmitAiChatRequest,
+    options: AiChatExecutionOptions = {}
+  ): Promise<SubmitAiChatResult> {
     const prompt = request.prompt.trim();
 
     if (prompt.length === 0) {
@@ -368,6 +380,7 @@ export class AiChatService {
       settings,
       workspaceRootPath
     });
+    const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
     const assistantCreatedAt = new Date().toISOString();
     const assistantMessage: AiChatMessage =
       runtimeSelection.mode === "stub"
@@ -388,19 +401,27 @@ export class AiChatService {
               },
               history: normalizedHistoryResult.history,
               runtimeSelection,
+              stream,
               systemPrompt: systemPrompts.chatPanel
             }))
           };
     const toolMessages = buildToolMessages(assistantMessage);
 
-    return {
+    const response: SubmitAiChatResult = {
       messages: [...toolMessages, assistantMessage],
       userMessage: normalizedHistoryResult.updatedUserMessage
     };
+
+    emitAiChatStreamEvent(request.streamId ?? null, options, {
+      type: "finished"
+    });
+
+    return response;
   }
 
   async submitInlineInsertion(
-    request: SubmitInlineAiInsertionRequest
+    request: SubmitInlineAiInsertionRequest,
+    options: AiChatExecutionOptions = {}
   ): Promise<SubmitInlineAiInsertionResult> {
     const prompt = request.prompt.trim();
 
@@ -428,6 +449,7 @@ export class AiChatService {
       text: prompt
     };
     const conversationalMessages = [...normalizedPriorMessages, userMessage];
+    const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       extraTools: createInlineMarkdownInsertionTools(),
@@ -438,6 +460,7 @@ export class AiChatService {
       maxSteps: TOOL_LOOP_INLINE_INSERTION_MAX_STEPS,
       prompt: buildInlineInsertionPrompt(request, conversationalMessages),
       runtimeSelection,
+      stream,
       useWorkspaceTools: true
     });
     const insertion = parseInlineMarkdownInsertion(result.diagnostics.toolTrace);
@@ -457,17 +480,24 @@ export class AiChatService {
       workspaceRootPath: this.workspaceService.currentRootPath ?? null
     });
 
-    return {
+    const response: SubmitInlineAiInsertionResult = {
       insertion,
       messages: responseMessages,
       sessionId,
       ...(insertion ? { text: insertion.text } : {}),
       userMessage
     };
+
+    emitAiChatStreamEvent(request.streamId ?? null, options, {
+      type: "finished"
+    });
+
+    return response;
   }
 
   async submitInlinePythonBlock(
-    request: SubmitInlinePythonBlockRequest
+    request: SubmitInlinePythonBlockRequest,
+    options: AiChatExecutionOptions = {}
   ): Promise<SubmitInlinePythonBlockResult> {
     const prompt = request.prompt.trim();
     const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
@@ -501,6 +531,7 @@ export class AiChatService {
     };
     const conversationalMessages = [...normalizedPriorMessages, userMessage];
     const skillPrompt = await readImplementIntegralBlockSkillPrompt(workspaceRootPath);
+    const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
       extraTools: createInlinePythonBlockTools(),
@@ -511,6 +542,7 @@ export class AiChatService {
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
       prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
       runtimeSelection,
+      stream,
       useWorkspaceTools: true
     });
     const insertion = parseInlinePythonBlockInsertion(result.diagnostics.toolTrace);
@@ -548,7 +580,7 @@ export class AiChatService {
       workspaceRootPath
     });
 
-    return {
+    const response: SubmitInlinePythonBlockResult = {
       assistantText: result.text,
       ...(insertion
         ? {
@@ -561,6 +593,12 @@ export class AiChatService {
       sessionId,
       userMessage
     };
+
+    emitAiChatStreamEvent(request.streamId ?? null, options, {
+      type: "finished"
+    });
+
+    return response;
   }
 
   private async getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
@@ -785,6 +823,7 @@ export class AiChatService {
     hostCommand,
     history,
     runtimeSelection,
+    stream,
     systemPrompt
   }: {
     context: AiChatContextSummary;
@@ -793,6 +832,7 @@ export class AiChatService {
     };
     history: SubmitAiChatRequest["history"];
     runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
+    stream?: AiAgentStreamCallbacks;
     systemPrompt: string;
   }): Promise<Pick<AiChatMessage, "diagnostics" | "text">> {
     try {
@@ -801,6 +841,7 @@ export class AiChatService {
         hostCommand,
         history,
         runtime: runtimeSelection.runtime,
+        stream,
         systemPrompt
       });
 
@@ -839,6 +880,7 @@ export class AiChatService {
     maxSteps,
     prompt,
     runtimeSelection,
+    stream,
     useWorkspaceTools
   }: {
     context: AiChatContextSummary;
@@ -850,6 +892,7 @@ export class AiChatService {
     maxSteps: number;
     prompt: string;
     runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
+    stream?: AiAgentStreamCallbacks;
     useWorkspaceTools: boolean;
   }): Promise<{
     diagnostics: AiChatMessageDiagnostics;
@@ -864,6 +907,7 @@ export class AiChatService {
         maxSteps,
         prompt,
         runtime: runtimeSelection.runtime,
+        stream,
         useWorkspaceTools
       });
 
@@ -899,6 +943,67 @@ function buildInlineRuntimeNotConfiguredMessage(status: AiChatStatus): string {
   const model = status.selectedModelId ? ` (${status.selectedModelId})` : "";
 
   return `AI runtime が未設定です${model}。AI Chat settings で model と credential を設定してください。`;
+}
+
+function createAiAgentStreamCallbacks(
+  streamId: string | null,
+  options: AiChatExecutionOptions
+): AiAgentStreamCallbacks | undefined {
+  const id = normalizeIdentifier(streamId);
+
+  if (!id || !options.onStreamEvent) {
+    return undefined;
+  }
+
+  emitAiChatStreamEvent(id, options, {
+    createdAt: new Date().toISOString(),
+    type: "started"
+  });
+
+  return {
+    onTextDelta: (textDelta) => {
+      if (textDelta.length === 0) {
+        return;
+      }
+
+      emitAiChatStreamEvent(id, options, {
+        textDelta,
+        type: "text-delta"
+      });
+    },
+    onTextReset: () => {
+      emitAiChatStreamEvent(id, options, {
+        type: "text-reset"
+      });
+    },
+    onToolTrace: (toolTrace) => {
+      if (toolTrace.length === 0) {
+        return;
+      }
+
+      emitAiChatStreamEvent(id, options, {
+        toolTrace,
+        type: "tool-trace"
+      });
+    }
+  };
+}
+
+function emitAiChatStreamEvent(
+  streamId: string | null,
+  options: AiChatExecutionOptions,
+  event: Omit<AiChatStreamEvent, "id">
+): void {
+  const id = normalizeIdentifier(streamId);
+
+  if (!id || !options.onStreamEvent) {
+    return;
+  }
+
+  options.onStreamEvent({
+    id,
+    ...event
+  });
 }
 
 function buildInlineInsertionInstructions(systemPrompt: string): string {

@@ -15,7 +15,9 @@ import {
   type AiChatMessage,
   type AiChatSessionSummary,
   type AiChatStatus,
-  type AiChatSystemPrompts
+  type AiChatStreamEvent,
+  type AiChatSystemPrompts,
+  type AiChatToolTraceEntry
 } from "../shared/aiChat";
 import type { WorkspaceFileDocument } from "../shared/workspace";
 
@@ -59,12 +61,15 @@ export function AIChatPanel({
   const [prompt, setPrompt] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [shellExecutablePathInput, setShellExecutablePathInput] = useState("");
+  const [streamingAssistantText, setStreamingAssistantText] = useState("");
+  const [streamingToolTrace, setStreamingToolTrace] = useState<AiChatToolTraceEntry[]>([]);
   const [status, setStatus] = useState<AiChatStatus | null>(null);
   const [systemPromptInputs, setSystemPromptInputs] = useState<AiChatSystemPrompts>(
     DEFAULT_AI_CHAT_SYSTEM_PROMPTS
   );
   const messagesRef = useRef<HTMLElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const activeStreamIdRef = useRef<string | null>(null);
 
   const applyHistoryMetadata = (snapshot: AiChatHistorySnapshot): void => {
     setHistorySnapshot(snapshot);
@@ -211,6 +216,35 @@ export function AIChatPanel({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isContextDialogOpen, isHistoryDialogOpen, isSettingsDialogOpen]);
+
+  useEffect(() => {
+    return window.integralNotes.onAiChatStreamEvent((event: AiChatStreamEvent) => {
+      if (event.id !== activeStreamIdRef.current) {
+        return;
+      }
+
+      switch (event.type) {
+        case "text-delta":
+          if (event.textDelta) {
+            setStreamingAssistantText((current) => `${current}${event.textDelta}`);
+          }
+          break;
+        case "text-reset":
+          setStreamingAssistantText("");
+          break;
+        case "tool-trace":
+          if (event.toolTrace?.length) {
+            setStreamingToolTrace((current) => [...current, ...(event.toolTrace ?? [])]);
+          }
+          break;
+        case "error":
+          setErrorMessage(event.message ?? "AI Chat streaming failed.");
+          break;
+        default:
+          break;
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -454,11 +488,17 @@ export function AIChatPanel({
     setPrompt("");
     setComposerAttachments([]);
 
+    const streamId = createChatStreamId();
+    activeStreamIdRef.current = streamId;
+    setStreamingAssistantText("");
+    setStreamingToolTrace([]);
+
     try {
       const result = await window.integralNotes.submitAiChat({
         context: contextSummary,
         history: nextHistory,
-        prompt: trimmedPrompt
+        prompt: trimmedPrompt,
+        streamId
       });
 
       const finalMessages = [
@@ -480,6 +520,9 @@ export function AIChatPanel({
       setPrompt(trimmedPrompt);
       setComposerAttachments(userMessage.attachments ?? []);
     } finally {
+      activeStreamIdRef.current = null;
+      setStreamingAssistantText("");
+      setStreamingToolTrace([]);
       setIsSubmitting(false);
     }
   };
@@ -686,13 +729,45 @@ export function AIChatPanel({
           <article className="ai-chat-panel__message ai-chat-panel__message--assistant">
             <div className="ai-chat-panel__message-meta">
               <strong>Assistant</strong>
-              <span>thinking...</span>
+              <span>{streamingAssistantText.length > 0 ? "streaming..." : "thinking..."}</span>
             </div>
-            <div className="ai-chat-panel__thinking">
-              <span />
-              <span />
-              <span />
-            </div>
+            {streamingAssistantText.length > 0 ? (
+              <pre className="ai-chat-panel__message-body">{streamingAssistantText}</pre>
+            ) : (
+              <div className="ai-chat-panel__thinking">
+                <span />
+                <span />
+                <span />
+              </div>
+            )}
+            {streamingToolTrace.length > 0 ? (
+              <div className="ai-chat-panel__message-diagnostics">
+                <div className="ai-chat-panel__message-pills">
+                  <span className="ai-chat-panel__message-pill">
+                    live tools: {streamingToolTrace.length}
+                  </span>
+                </div>
+                <div className="ai-chat-panel__trace-list">
+                  {streamingToolTrace.map((entry, index) => (
+                    <div className="ai-chat-panel__trace-entry" key={`${entry.toolName}-${index}`}>
+                      <div className="ai-chat-panel__message-pills">
+                        <span className="ai-chat-panel__message-pill">
+                          {entry.toolName}
+                        </span>
+                        <span
+                          className={`ai-chat-panel__trace-status ai-chat-panel__trace-status--${entry.status}`}
+                        >
+                          {entry.status}
+                        </span>
+                      </div>
+                      <code className="ai-chat-panel__trace-line">
+                        {entry.outputSummary || entry.inputSummary}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </article>
         ) : null}
       </section>
@@ -1398,6 +1473,10 @@ function formatContextWindow(value: number): string {
 
 function createChatMessageId(role: "assistant" | "tool" | "user"): string {
   return `chat-${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createChatStreamId(): string {
+  return `chat-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function extractImageFilesFromClipboardData(clipboardData: DataTransfer): File[] {
