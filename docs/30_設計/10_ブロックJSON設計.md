@@ -193,7 +193,7 @@ app 内部では次の JSON object に正規化する。
 {
     "name": "plot",
     "extension": ".html",
-    "format": "report/html",
+    "datatype": "demo/html-report",
     "auto_insert_to_work_note": True,
     "share_note_with_input": "source",
     "embed_to_shared_note": True,
@@ -232,7 +232,7 @@ MVP では次を block source に入れない。
 - 元ファイルの絶対パス
 - 一時ログ
 - run ID
-- kind 制約 enforcement 情報
+- datatype 継承 / 互換 rule の enforcement 情報
 - `outputConfigs`
 - `out.*.dir/name/latest`
 - `auto` output placeholder

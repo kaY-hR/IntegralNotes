@@ -41,8 +41,9 @@ Do not rely on repository-level product docs, architecture docs, or development 
 - Validate required input paths clearly before doing the real work.
 - Use `options = params or {}` for optional params.
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
+- Use slot `datatype` as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as `{user-id}/peak-table` when the app prompt provides a user ID.
 - Do not group files with different roles or user intent into one `.idts` output just for convenience.
-- Use a `.idts` output only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same format and role.
+- Use a `.idts` output only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same datatype and role.
 - If the user is meant to inspect an output directly, make it its own output slot. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other renderable artifacts.
 - Keep machine-readable or intermediate outputs such as CSV/TSV/JSON separate from user-facing reports unless the user specifically wants that file to be the visible result.
 - If the user wants the result to be viewable in the app, emit at least one renderable file such as `index.html`, `README.txt`, `*.json`, `*.csv`, or an image.

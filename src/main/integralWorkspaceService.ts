@@ -21,12 +21,15 @@ import type {
   IntegralManagedDataTrackingIssue,
   IntegralRenderableFile,
   ResolveIntegralManagedDataTrackingIssueRequest,
+  IntegralParamsSchema,
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPathWithRandomSuffix,
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
+  normalizeIntegralParams,
+  normalizeIntegralParamsSchema,
   normalizeIntegralSlotExtension,
   normalizeIntegralSlotExtensions
 } from "../shared/integral";
@@ -39,16 +42,17 @@ import {
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
 } from "../shared/workspaceLinks";
+import { toDataRegistrationDirectoryRelativePath } from "../shared/appSettings";
 import type {
   WorkspaceDatasetManifestMember,
   WorkspaceFileDocument
 } from "../shared/workspace";
+import type { AppSettingsService } from "./appSettingsService";
 import { PluginRegistry } from "./pluginRegistry";
 import { WorkspaceService, type WorkspaceMutation } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
 
-const DATA_DIRECTORY = "Data";
 const DATASET_JSON_EXTENSION = ".idts";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
@@ -124,9 +128,9 @@ interface ManagedMetadataBase {
 interface DatasetMetadata extends ManagedMetadataBase {
   createdByBlockId: string | null;
   dataPath?: string;
+  datatype: string | null;
   datasetId: string;
   entityType: "dataset";
-  kind: string;
   memberIds?: string[];
   name: string;
   provenance: ManagedDataProvenance;
@@ -135,8 +139,8 @@ interface DatasetMetadata extends ManagedMetadataBase {
 
 interface ManagedFileMetadata extends ManagedMetadataBase {
   createdByBlockId: string | null;
+  datatype: string | null;
   entityType: "managed-file";
-  format: string | null;
   representation: ManagedFileRepresentation;
 }
 
@@ -156,8 +160,8 @@ interface TrackableWorkspaceEntry {
 
 interface DatasetManifest {
   dataPath?: string;
+  datatype?: string;
   datasetId: string;
-  kind: string;
   memberIds?: string[];
   name: string;
   noteTargetId?: string;
@@ -180,6 +184,7 @@ interface PythonCallableSummary {
   functionName: string;
   inputSlots: IntegralSlotDefinition[];
   outputSlots: IntegralSlotDefinition[];
+  paramsSchema?: IntegralParamsSchema;
   relativePath: string;
 }
 
@@ -246,7 +251,8 @@ export class IntegralWorkspaceService {
 
   constructor(
     private readonly workspaceService: WorkspaceService,
-    private readonly pluginRegistry: PluginRegistry
+    private readonly pluginRegistry: PluginRegistry,
+    private readonly appSettingsService: AppSettingsService
   ) {}
 
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
@@ -419,8 +425,9 @@ export class IntegralWorkspaceService {
     const uniqueManagedFileIds = Array.from(new Set(managedFileIds));
     const datasetId = createOpaqueId("DTS");
     const datasetName = normalizeDatasetName(request.name, datasetId);
+    const dataRegistrationDirectory = await this.resolveDataRegistrationDirectory();
     const manifestRelativePath = await this.createVisibleDatasetManifestRelativePath(
-      DATA_DIRECTORY,
+      dataRegistrationDirectory,
       datasetName,
       datasetId
     );
@@ -439,7 +446,6 @@ export class IntegralWorkspaceService {
 
     const manifest: DatasetManifest = {
       datasetId,
-      kind: "source-bundle",
       memberIds,
       name: datasetName,
       noteTargetId: datasetId
@@ -451,12 +457,12 @@ export class IntegralWorkspaceService {
     const datasetMetadata: DatasetMetadata = {
       createdAt: new Date().toISOString(),
       createdByBlockId: null,
+      datatype: null,
       datasetId,
       displayName: datasetName,
       entityType: "dataset",
       hash: await this.computeManagedDataHash(manifestAbsolutePath, "dataset-json"),
       id: datasetId,
-      kind: "source-bundle",
       memberIds,
       name: datasetName,
       noteTargetId: datasetId,
@@ -541,10 +547,10 @@ export class IntegralWorkspaceService {
       datasetId: datasetMetadata.datasetId,
       createdAt: datasetMetadata.createdAt,
       createdByBlockId: datasetMetadata.createdByBlockId,
+      datatype: datasetMetadata.datatype,
       fileNames: relativeFilePaths,
       hash: datasetMetadata.hash,
       hasRenderableFiles: renderables.length > 0,
-      kind: datasetMetadata.kind,
       memberIds: datasetMetadata.memberIds,
       name: datasetMetadata.name,
       noteTargetId: normalizeManagedDataNoteTargetId(
@@ -595,8 +601,8 @@ export class IntegralWorkspaceService {
       content: rawContent,
       datasetManifest: {
         dataPath: manifest.dataPath ?? null,
+        datatype: manifest.datatype ?? null,
         datasetId: manifest.datasetId,
-        datasetKind: manifest.kind,
         datasetName: normalizeDatasetName(manifest.name, manifest.datasetId),
         members,
         noteMarkdown,
@@ -792,8 +798,8 @@ export class IntegralWorkspaceService {
     const outputManagedFilePlanMap = new Map<
       string,
       {
+        datatype: string | null;
         displayName: string;
-        format: string | null;
         noteTargetId?: string;
         relativePath: string;
       }
@@ -838,15 +844,12 @@ export class IntegralWorkspaceService {
           createdAt: createdAt.toISOString(),
           createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
           dataPath: datasetDataPath,
+          datatype: outputSlot.datatype?.trim() || null,
           datasetId: nextDatasetId,
           displayName: datasetName,
           entityType: "dataset",
           hash: "",
           id: nextDatasetId,
-          kind:
-            outputSlot.format?.trim() ||
-            outputSlot.producedKind?.trim() ||
-            `${resolvedBlock["block-type"]}.${outputSlot.name}`,
           noteTargetId:
             (await this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs)) ??
             undefined,
@@ -858,8 +861,8 @@ export class IntegralWorkspaceService {
         };
         const manifest: DatasetManifest = {
           dataPath: datasetDataPath,
+          datatype: metadata.datatype ?? undefined,
           datasetId: nextDatasetId,
-          kind: metadata.kind,
           name: datasetName,
           noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, nextDatasetId)
         };
@@ -892,8 +895,8 @@ export class IntegralWorkspaceService {
       outputPaths[outputSlot.name] = outputAbsolutePath;
       outputMarkdownTargetMap.set(outputSlot.name, toCanonicalWorkspaceTarget(outputRelativePath));
       outputManagedFilePlanMap.set(outputSlot.name, {
+        datatype: outputSlot.datatype?.trim() || null,
         displayName: resolveOutputDisplayName(outputRelativePath, outputSlot.name),
-        format: outputSlot.format?.trim() || null,
         noteTargetId:
           (await this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs)) ??
           undefined,
@@ -1015,6 +1018,10 @@ export class IntegralWorkspaceService {
     return {
       block: {
         ...sourceBlock,
+        inputs: {
+          ...sourceBlock.inputs,
+          ...resolvedBlock.inputs
+        },
         outputs: {
           ...sourceBlock.outputs,
           ...outputReferences
@@ -1375,9 +1382,9 @@ export class IntegralWorkspaceService {
       const metadata: ManagedFileMetadata = {
         createdAt: new Date().toISOString(),
         createdByBlockId: null,
+        datatype: null,
         displayName: path.posix.basename(normalizedPath),
         entityType: "managed-file",
-        format: inferManagedFileFormatId(normalizedPath),
         hash: candidate.hash,
         id: createOpaqueId("FL"),
         path: normalizedPath,
@@ -1573,9 +1580,9 @@ export class IntegralWorkspaceService {
       datasetId: metadata.datasetId,
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
+      datatype: metadata.datatype,
       hash: metadata.hash,
       hasRenderableFiles: renderableCount > 0,
-      kind: metadata.kind,
       memberIds: metadata.memberIds,
       name: metadata.name,
       noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId),
@@ -1690,9 +1697,9 @@ export class IntegralWorkspaceService {
         canOpenDataNote: true,
         createdAt: metadata.createdAt,
         createdByBlockId: metadata.createdByBlockId,
+        datatype: metadata.datatype,
         displayName: metadata.name,
         entityType: metadata.entityType,
-        format: metadata.kind,
         hash: metadata.hash,
         id: metadata.datasetId,
         noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.datasetId),
@@ -1706,9 +1713,9 @@ export class IntegralWorkspaceService {
       canOpenDataNote: supportsManagedFileDataNote(metadata.path, metadata.representation),
       createdAt: metadata.createdAt,
       createdByBlockId: metadata.createdByBlockId,
+      datatype: metadata.datatype,
       displayName: metadata.displayName,
       entityType: metadata.entityType,
-      format: metadata.format,
       hash: metadata.hash,
       id: metadata.id,
       noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, metadata.id),
@@ -1769,8 +1776,8 @@ export class IntegralWorkspaceService {
       createdAt: new Date().toISOString(),
       displayName: path.basename(resolvedSourcePath),
       createdByBlockId: null,
+      datatype: null,
       entityType: "managed-file",
-      format: inferManagedFileFormatId(visiblePath),
       hash: await this.computeManagedDataHash(visibleAbsolutePath, representation),
       id: managedFileId,
       path: visiblePath,
@@ -1811,21 +1818,31 @@ export class IntegralWorkspaceService {
       return path.relative(rootPath, sourceAbsolutePath).split(path.sep).join("/");
     }
 
-    const dataRootPath = this.resolveWorkspacePath(DATA_DIRECTORY);
+    const dataRegistrationDirectory = await this.resolveDataRegistrationDirectory();
+    const dataRootPath = this.resolveWorkspacePath(dataRegistrationDirectory);
     await fs.mkdir(dataRootPath, { recursive: true });
 
-    const preferredRelativePath = `${DATA_DIRECTORY}/${path.basename(sourceAbsolutePath)}`;
+    const preferredRelativePath = normalizeRelativePath(
+      `${dataRegistrationDirectory}/${path.basename(sourceAbsolutePath)}`
+    );
     const preferredAbsolutePath = this.resolveWorkspacePath(preferredRelativePath);
 
     if (!(await pathExists(preferredAbsolutePath))) {
       return preferredRelativePath;
     }
 
-    return `${DATA_DIRECTORY}/${createVisibleAliasEntryName(
-      path.basename(sourceAbsolutePath),
-      managedFileId,
-      representation
-    )}`;
+    return normalizeRelativePath(
+      `${dataRegistrationDirectory}/${createVisibleAliasEntryName(
+        path.basename(sourceAbsolutePath),
+        managedFileId,
+        representation
+      )}`
+    );
+  }
+
+  private async resolveDataRegistrationDirectory(): Promise<string> {
+    const settings = await this.appSettingsService.getSettings();
+    return toDataRegistrationDirectoryRelativePath(settings.dataRegistrationDirectory);
   }
 
   private async copyManagedFileIntoWorkspace(
@@ -2000,7 +2017,9 @@ export class IntegralWorkspaceService {
       !manifest ||
       typeof manifest.datasetId !== "string" ||
       typeof manifest.name !== "string" ||
-      typeof manifest.kind !== "string" ||
+      (manifest.datatype !== undefined &&
+        manifest.datatype !== null &&
+        typeof manifest.datatype !== "string") ||
       (manifest.memberIds !== undefined &&
         (!Array.isArray(manifest.memberIds) ||
           !manifest.memberIds.every((item) => typeof item === "string"))) ||
@@ -2015,8 +2034,11 @@ export class IntegralWorkspaceService {
         typeof manifest.dataPath === "string" && manifest.dataPath.trim().length > 0
           ? normalizeRelativePath(manifest.dataPath)
           : undefined,
+      datatype:
+        typeof manifest.datatype === "string" && manifest.datatype.trim().length > 0
+          ? manifest.datatype.trim()
+          : undefined,
       datasetId: manifest.datasetId.trim(),
-      kind: manifest.kind,
       memberIds: Array.isArray(manifest.memberIds)
         ? manifest.memberIds.map((item) => item.trim()).filter(Boolean)
         : undefined,
@@ -2043,7 +2065,7 @@ export class IntegralWorkspaceService {
     metadata.memberIds = manifest.memberIds;
     metadata.name = normalizeDatasetName(manifest.name, metadata.datasetId);
     metadata.displayName = metadata.name;
-    metadata.kind = manifest.kind;
+    metadata.datatype = manifest.datatype ?? null;
     metadata.noteTargetId = normalizeManagedDataNoteTargetId(
       manifest.noteTargetId,
       metadata.datasetId
@@ -2119,8 +2141,8 @@ export class IntegralWorkspaceService {
     outputManagedFilePlanMap: ReadonlyMap<
       string,
       {
+        datatype: string | null;
         displayName: string;
-        format: string | null;
         noteTargetId?: string;
         relativePath: string;
       }
@@ -2151,9 +2173,9 @@ export class IntegralWorkspaceService {
       const nextMetadata: ManagedFileMetadata = {
         createdAt: existingMetadata?.createdAt ?? new Date().toISOString(),
         createdByBlockId,
+        datatype: plan.datatype,
         displayName: plan.displayName,
         entityType: "managed-file",
-        format: plan.format,
         hash: await this.computeManagedDataHash(existingPath, stats.isDirectory() ? "directory" : "file"),
         id: existingMetadata?.id ?? createOpaqueId("FL"),
         noteTargetId: plan.noteTargetId ?? existingMetadata?.noteTargetId,
@@ -2504,8 +2526,8 @@ function buildShimadzuBlockType(
     ],
     outputSlots: [
       {
-        name: "raw-result",
-        producedKind: "shimadzu-lc.raw-result"
+        datatype: "shimadzu-lc/raw-result",
+        name: "raw-result"
       }
     ],
     pluginDescription: plugin.description,
@@ -2574,6 +2596,7 @@ function buildPythonCallableBlockType(
     executionMode: "manual",
     inputSlots: callable.inputSlots,
     outputSlots: callable.outputSlots,
+    ...(callable.paramsSchema ? { paramsSchema: callable.paramsSchema } : {}),
     pluginDescription: "workspace の .py を走査する汎用 Python 解析 plugin",
     pluginDisplayName: "General Analysis",
     pluginId: GENERAL_ANALYSIS_PLUGIN_ID,
@@ -2596,7 +2619,10 @@ function normalizeBlockDocument(
     id: blockId,
     inputs: normalizeSlotMap(block.inputs, definition.inputSlots),
     outputs: normalizeOutputSlotMap(block.outputs, definition.outputSlots),
-    params: isJsonRecord(block.params) ? block.params : {},
+    params: normalizeIntegralParams(
+      isJsonRecord(block.params) ? block.params : {},
+      definition.paramsSchema
+    ),
     plugin: definition.pluginId
   };
 }
@@ -2704,6 +2730,9 @@ function parsePythonCallableSource(relativePath: string, content: string): Pytho
       extractPythonKeywordSource(decoratorSource, "outputs"),
       "output"
     );
+    const paramsSchema = normalizeIntegralParamsSchema(
+      parsePythonLiteral(extractPythonKeywordSource(decoratorSource, "params"))
+    );
 
     summaries.push({
       blockType: `${relativePath}:${functionName}`,
@@ -2712,6 +2741,7 @@ function parsePythonCallableSource(relativePath: string, content: string): Pytho
       functionName,
       inputSlots,
       outputSlots,
+      ...(paramsSchema ? { paramsSchema } : {}),
       relativePath
     });
   }
@@ -2903,9 +2933,7 @@ function parsePythonSlotDefinition(
   const normalizedExtensions = Array.from(
     new Set([...(listedExtensions ?? []), ...(directExtension ? [directExtension] : [])])
   );
-  const formatValue =
-    parsePythonStringLiteral(extractPythonMappingValue(trimmed, "format")) ??
-    parsePythonStringLiteral(extractPythonMappingValue(trimmed, "kind"));
+  const datatypeValue = parsePythonStringLiteral(extractPythonMappingValue(trimmed, "datatype"));
   const autoInsertToWorkNote =
     direction === "output"
       ? parsePythonBooleanLiteral(extractPythonMappingValue(trimmed, "auto_insert_to_work_note")) ??
@@ -2923,14 +2951,11 @@ function parsePythonSlotDefinition(
       : null;
 
   return {
-    acceptedKinds:
-      direction === "input" && formatValue ? [formatValue] : undefined,
     autoInsertToWorkNote: direction === "output" ? autoInsertToWorkNote : undefined,
+    datatype: datatypeValue ?? undefined,
     extension: direction === "output" ? directExtension ?? normalizedExtensions[0] : undefined,
     extensions: normalizedExtensions.length > 0 ? normalizedExtensions : undefined,
-    format: formatValue ?? undefined,
     name: normalizedName,
-    producedKind: direction === "output" && formatValue ? formatValue : undefined,
     shareNoteWithInput:
       direction === "output" && sharedNoteWithInput ? sharedNoteWithInput : undefined,
     embedToSharedNote: direction === "output" ? embedToSharedNote : undefined
@@ -2953,6 +2978,79 @@ function parsePythonBooleanLiteral(value: string | null): boolean | null {
   }
 
   return null;
+}
+
+function parsePythonLiteral(value: string | null): unknown {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const stringValue = parsePythonStringLiteral(trimmed);
+
+  if (stringValue !== null) {
+    return stringValue;
+  }
+
+  if (trimmed === "True") {
+    return true;
+  }
+
+  if (trimmed === "False") {
+    return false;
+  }
+
+  if (trimmed === "None") {
+    return null;
+  }
+
+  if (/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return splitTopLevelPythonItems(trimmed, "[", "]")
+      .map((item) => parsePythonLiteral(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return parsePythonMappingLiteral(trimmed);
+  }
+
+  return undefined;
+}
+
+function parsePythonMappingLiteral(value: string): Record<string, unknown> | undefined {
+  const result: Record<string, unknown> = {};
+
+  for (const item of splitTopLevelPythonItems(value, "{", "}")) {
+    const pair = splitTopLevelPythonMappingEntry(item);
+
+    if (!pair) {
+      continue;
+    }
+
+    const [rawKey, rawValue] = pair;
+    const key = parsePythonStringLiteral(rawKey) ?? (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(rawKey.trim()) ? rawKey.trim() : null);
+
+    if (!key) {
+      continue;
+    }
+
+    const parsedValue = parsePythonLiteral(rawValue);
+
+    if (parsedValue !== undefined) {
+      result[key] = parsedValue;
+    }
+  }
+
+  return result;
 }
 
 function splitTopLevelPythonItems(
@@ -3057,6 +3155,77 @@ function splitTopLevelPythonItems(
   }
 
   return items;
+}
+
+function splitTopLevelPythonMappingEntry(value: string): [string, string] | null {
+  let quote: '"' | "'" | null = null;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value.charAt(index);
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (character === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (character === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+
+    if (character === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+
+    if (character === ":" && bracketDepth === 0 && braceDepth === 0 && parenDepth === 0) {
+      return [value.slice(0, index).trim(), value.slice(index + 1).trim()];
+    }
+  }
+
+  return null;
 }
 
 function extractPythonMappingValue(source: string, key: string): string | null {
@@ -3517,7 +3686,7 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
     typeof value.createdAt === "string" &&
     typeof value.path === "string" &&
     typeof value.hash === "string" &&
-    typeof value.kind === "string" &&
+    (value.datatype === null || value.datatype === undefined || typeof value.datatype === "string") &&
     (value.displayName === undefined || typeof value.displayName === "string") &&
     value.representation === "dataset-json" &&
     (value.visibility === "visible" || value.visibility === "hidden") &&
@@ -3539,12 +3708,12 @@ function normalizeDatasetMetadata(value: unknown): DatasetMetadata | null {
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
+      datatype: value.datatype ?? null,
       datasetId,
       displayName: name,
       entityType: "dataset",
       hash: value.hash,
       id: datasetId,
-      kind: value.kind,
       dataPath:
         typeof value.dataPath === "string" && value.dataPath.trim().length > 0
           ? normalizeRelativePath(value.dataPath)
@@ -3580,16 +3749,16 @@ function normalizeManagedFileMetadata(value: unknown): ManagedFileMetadata | nul
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
     (value.noteTargetId === undefined || typeof value.noteTargetId === "string") &&
-    (value.format === null || value.format === undefined || typeof value.format === "string")
+    (value.datatype === null || value.datatype === undefined || typeof value.datatype === "string")
   ) {
     const managedFileId = value.id.trim();
 
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
+      datatype: value.datatype ?? null,
       displayName: value.displayName,
       entityType: "managed-file",
-      format: value.format ?? null,
       hash: value.hash,
       id: managedFileId,
       noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, managedFileId),
@@ -3924,20 +4093,6 @@ function isAutoRegisterableManagedFileEntry(
   }
 
   return !isReservedManagedPath(normalizedRelativePath, reservedManagedPaths);
-}
-
-function inferManagedFileFormatId(relativePath: string): string | null {
-  const extension = path.posix.extname(normalizeRelativePath(relativePath)).toLowerCase();
-
-  if (extension.length === 0) {
-    return null;
-  }
-
-  if (extension === ".idts") {
-    return "bundle/idts";
-  }
-
-  return `ext/${extension.slice(1)}`;
 }
 
 function isReservedManagedPath(

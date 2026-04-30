@@ -6,6 +6,9 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import type {
+  SaveAppSettingsRequest
+} from "../shared/appSettings";
+import type {
   CreateDatasetRequest,
   CreateDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
@@ -32,6 +35,7 @@ import {
   PluginRegistry,
   resolveInstalledPluginRootPath
 } from "./pluginRegistry";
+import { AppSettingsService } from "./appSettingsService";
 import { AiAgentService } from "./aiAgentService";
 import { AiChatService } from "./aiChatService";
 import { AiHostCommandService } from "./aiHostCommandService";
@@ -164,6 +168,9 @@ const workspaceService = new WorkspaceService({
   initialRootPath: resolveInitialWorkspacePath(),
   stateFilePath: path.join(app.getPath("userData"), "workspace-state.json")
 });
+const appSettingsService = new AppSettingsService(
+  path.join(app.getPath("userData"), "app-settings.json")
+);
 const workspaceVisualRenderService = new WorkspaceVisualRenderService(workspaceService);
 const aiHostCommandService = new AiHostCommandService(workspaceService, () => mainWindow);
 const aiAgentService = new AiAgentService(
@@ -175,6 +182,7 @@ const aiAgentService = new AiAgentService(
 const aiChatService = new AiChatService(
   aiAgentService,
   workspaceService,
+  appSettingsService,
   path.join(app.getPath("userData"), "ai-chat-settings.json"),
   path.join(app.getPath("userData"), "ai-chat-history.json")
 );
@@ -269,6 +277,10 @@ function registerIpcHandlers(): void {
 
   ipcRegistered = true;
 
+  ipcMain.handle("app-settings:get", async () => appSettingsService.getSettings());
+  ipcMain.handle("app-settings:save", async (_event, request: SaveAppSettingsRequest) =>
+    appSettingsService.saveSettings(request)
+  );
   ipcMain.handle("workspace:getSnapshot", async () => {
     const snapshot = await workspaceService.getSnapshot();
     mainWindow?.setTitle(formatWindowTitle(snapshot));
@@ -694,7 +706,11 @@ if (!hasSingleInstanceLock) {
       installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
     });
     workspaceService.setPluginRegistry(pluginRegistry);
-    integralWorkspaceService = new IntegralWorkspaceService(workspaceService, pluginRegistry);
+    integralWorkspaceService = new IntegralWorkspaceService(
+      workspaceService,
+      pluginRegistry,
+      appSettingsService
+    );
     workspaceService.addMutationListener((mutations) =>
       getIntegralWorkspaceService().handleWorkspaceMutations(mutations)
     );

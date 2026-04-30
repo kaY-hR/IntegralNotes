@@ -25,6 +25,7 @@ The current decorator accepts only these keyword arguments:
 - `description`
 - `inputs`
 - `outputs`
+- `params`
 
 Do not invent additional decorator fields unless the task explicitly changes `scripts/integral/__init__.py`.
 
@@ -40,7 +41,7 @@ Supported object keys:
 - `name`
 - `extension`
 - `extensions`
-- `format`
+- `datatype`
 - `auto_insert_to_work_note`
 - `share_note_with_input`
 - `embed_to_shared_note`
@@ -50,6 +51,7 @@ Notes:
 - `extension` is normalized to lowercase and gets a leading `.` if missing.
 - `extension` is merged into `extensions`.
 - `extensions` may be one string or a sequence of strings.
+- `datatype` is a semantic I/O compatibility label. Prefer namespaced values such as `{user-id}/peak-table` when a user ID is available.
 - duplicate slot names are rejected case-insensitively.
 - boolean fields must be real booleans, not `"true"` or `"false"` strings.
 - `project_to_inputs` is removed and raises an error.
@@ -68,10 +70,10 @@ from integral import integral_block
     display_name="Example Block",
     description="Describe the block in one sentence.",
     inputs=[
-        {"name": "source", "extensions": [".csv"], "format": "table/csv"},
+        {"name": "source", "extensions": [".csv"], "datatype": "user-id/source-table"},
     ],
     outputs=[
-        {"name": "report", "extension": ".html", "format": "report/html"},
+        {"name": "report", "extension": ".html", "datatype": "user-id/html-report"},
     ],
 )
 def main(

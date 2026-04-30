@@ -20,20 +20,20 @@ from integral import integral_block
     display_name="LC Text To Chromatogram",
     description="Aggregate LabSolutions LC text exports from one bundle and emit both chromatogram JSON and an HTML plot.",
     inputs=[
-        {"name": "ASCII text dataset", "extensions": [".idts"], "format": "bundle/idts"},
+        {"name": "ASCII text dataset", "extensions": [".idts"], "datatype": "shimadzu-lc/ascii-text-bundle"},
     ],
     outputs=[
         {
             "name": "LC-bundle-data",
             "extension": ".json",
-            "format": "chromatogram/json",
+            "datatype": "shimadzu-lc/chromatogram-json",
             "share_note_with_input": "ASCII text dataset",
             "embed_to_shared_note": True,
         },
         {
             "name": "LC-plot",
             "extension": ".html",
-            "format": "report/html",
+            "datatype": "shimadzu-lc/chromatogram-plot",
             "auto_insert_to_work_note": True,
             "share_note_with_input": "ASCII text dataset",
             "embed_to_shared_note": True,

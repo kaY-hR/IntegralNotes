@@ -9,7 +9,7 @@
   - `id`
   - `path`
   - `hash`
-  - `formatId`
+  - `datatype`
   - `createdByBlockId`
 - `path` は current canonical workspace relative path とする
 - `hash` は current content identity とする
@@ -38,18 +38,20 @@
 - 保存時は本文だけを更新し、frontmatter は壊さず保持する
 - `見たまま編集` と `body-only raw text` を切り替えられる
 
-## 4. Format
+## 4. Datatype
 
-- format は managed file とは別の registry で管理する
-- MVP の format は少なくとも次を持つ
-  - `id`
-  - `name`
-  - `description`
+- datatype は、解析の入出力を接続できるかを判断するための意味ラベルである
+- datatype は物理的な file format そのものではなく、`extension(s)` や `.idts` 表現とは責務を分ける
+- MVP の datatype は registry や別 ID を持たない任意の string とする
+- output slot は生成する datatype を宣言し、生成された managed file / dataset はその datatype を metadata として持つ
+- input slot は要求する datatype を宣言し、picker / validation は datatype の完全一致を強い候補として扱う
+- datatype が未設定の場合は、`extension(s)` や `.idts` 表現だけで候補を出してよい
+- 運用上、skill や user 定義の datatype は `{userId}/xxxx` のように namespace を付けることを推奨する
 - 例:
-  - `table/csv`
-  - `chromatogram/json`
-  - `bundle/idts`
-  - `report/html`
+  - `shimadzu-lc/chromatogram-json`
+  - `shimadzu-lc/pca-result-bundle`
+  - `demo/table-csv`
+  - `{userId}/html-report`
 
 ## 5. 処理 Block
 
@@ -82,7 +84,7 @@
 - slot は少なくとも次を定義できる
   - `name`
   - `extension` または `extensions`
-  - `format`
+  - `datatype`
 - output slot では追加で次を定義できる
   - `auto_insert_to_work_note`
   - `share_note_with_input`
@@ -90,7 +92,8 @@
 - input slot では `extensions` によって選択可能な file suffix を表せる
 - output slot では `extension` によって生成される file suffix を表せる
 - output slot の初期 file 名は `slot名 + "_" + 英数字3文字 + extension` とする
-- `format` は slot が意味的に扱う file type を表す
+- `datatype` は slot が意味的に要求または生成する data type を表す
+- `.idts` は拡張子で bundle 表現を表すだけであり、datatype そのものではない
 - `auto_insert_to_work_note` は、その output を block が置かれている作業 note へ `![]()` として自動挿入するかを表す
 - `share_note_with_input` は、その output がどの input の data-note target を共有するかを表す
 - `embed_to_shared_note` は、その output を共有先 data-note に provenance link と `![]()` 付きで追記するかを表す
@@ -104,11 +107,13 @@
 - `.idts` 自体は workspace 上の visible file とする
 - `.idts` が指す中身は `.store/objects/{id}/` の hidden directory に置いてよい
 - `.idts` manifest には少なくとも次を持てる
-  - `id`
+  - `datasetId`
   - `name`
-  - `formatId`
-  - `bundleRootPath`
   - `memberIds`
+- `.idts` manifest には必要に応じて次を持てる
+  - `dataPath`
+  - `datatype`
+  - `noteTargetId`
 - 1 file が複数 bundle に所属できる
 - `.idts` は universal な I/O 単位ではなく、bundle が必要な場合にだけ使う
 
@@ -118,7 +123,13 @@
 - `general-analysis` plugin は `cwd` 配下の `.py` を走査し、decorator 付き関数を block-type 候補として動的生成する
 - Python callable の canonical ID は `relative/path.py:function` とする
 - `block-type` はその canonical callable string を使う
-- Python block の `params` は free-form object とし、schema enforcement はしない
+- Python block の `params` 契約は `@integral_block(..., params={...})` の Python literal JSON Schema subset を正とする
+- `params` schema が無い callable では有効な param は空とし、YAML 側の `params:` は削除してよい
+- MVP の `params` schema は root `type: object` と `properties` を扱う
+- MVP の property type は `string / number / integer / boolean` と `enum` に限る
+- MVP の property metadata は `title / description / default / minimum / maximum` を扱う
+- `default` が無い property の初期値は `null` とし、`required` は MVP では扱わない
+- YAML 側の schema 外 param、未対応型 param は保存・フォーム反映・実行前正規化で削除してよい
 
 ## 9. Python Callable Discovery
 
@@ -132,19 +143,42 @@
     display_name="PCA",
     description="CSV から PCA を計算する",
     inputs=[
-        {"name": "samples", "extensions": [".csv"], "format": "table/csv"}
+        {"name": "samples", "extensions": [".csv"], "datatype": "demo/table-csv"}
     ],
     outputs=[
-        {"name": "score", "extension": ".csv", "format": "table/pca-score"},
+        {"name": "score", "extension": ".csv", "datatype": "demo/pca-score-table"},
         {
             "name": "report",
             "extension": ".html",
-            "format": "report/html",
+            "datatype": "demo/pca-report-html",
             "auto_insert_to_work_note": True,
             "share_note_with_input": "samples",
             "embed_to_shared_note": True,
         },
     ],
+    params={
+        "type": "object",
+        "properties": {
+            "n_components": {
+                "type": "integer",
+                "title": "主成分数",
+                "description": "計算する主成分の数",
+                "default": 2,
+                "minimum": 1,
+            },
+            "scale": {
+                "type": "boolean",
+                "title": "標準化",
+                "default": True,
+            },
+            "method": {
+                "type": "string",
+                "title": "手法",
+                "enum": ["pca", "kernel-pca"],
+                "default": "pca",
+            },
+        },
+    },
 )
 ```
 
@@ -153,6 +187,8 @@
 - 候補選択時には `run:` を持つ YAML `itg-notes` block を note へ挿入する
 - `.py` file や補助 file を app 側の専用ディレクトリへ copy しない
 - MVP の scan 契約は `@integral_block(...)` の直後に `def ...(` が続く形とする
+- app は decorator の `params` schema から block 上の param 編集フォームを生成する
+- param 編集フォームは YAML の `params:` を更新する補助 UI であり、source of truth は正規化済みの `itg-notes` YAML と decorator schema の組み合わせとする
 
 ## 10. Python 実行
 
@@ -164,7 +200,8 @@
 - `.idts` input は hidden bundle directory へ resolve した path を渡す
 - 非 `.idts` output は、指定された output file path をそのまま渡す
 - `.idts` output は、visible manifest path と hidden bundle directory を app 側で事前に確保し、Python には hidden bundle directory path を渡す
-- `params` は note source から読んだ object をそのまま渡す
+- `params` は decorator schema に沿って正規化した note source の object を渡す
+- decorator schema に無い param、未対応型 param、schema 外 key は Python 実行 payload から削除する
 - runner は `analysis-args.json` を読んで target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - 成功/失敗判定は exit code のみで行う
 - exit code が非 0 の場合、note 上の実行結果には Python の `stderr` / `stdout` / runner error message を優先して表示する
@@ -176,7 +213,7 @@
 - output slot が `share_note_with_input` を持つ場合、app は output の note target を指定 input の note target に合わせる
 - output slot が `embed_to_shared_note = true` を持つ場合、app は共有先 data-note へ provenance link と `![]()` を追記してよい
 - note への自動反映は append-only とし、古い embed の整理は app ではなくユーザー操作に委ねてよい
-- generated file が持つべき最低限の情報は `createdByBlockId` と `formatId` でよい
+- generated file が持つべき最低限の情報は `createdByBlockId` と `datatype` でよい
 - 実行時の current working directory は workspace root を基本とする
 - `analysis-args.json` や log は `.store/.integral/runtime/` 配下へ置いてよい
 

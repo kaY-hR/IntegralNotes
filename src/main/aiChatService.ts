@@ -42,6 +42,7 @@ import {
   type AiAgentExecutionRuntime,
   type AiAgentStreamCallbacks
 } from "./aiAgentService";
+import type { AppSettingsService } from "./appSettingsService";
 import { WorkspaceService } from "./workspaceService";
 
 interface PersistedAiChatSettings {
@@ -177,6 +178,7 @@ export class AiChatService {
   constructor(
     private readonly aiAgentService: AiAgentService,
     private readonly workspaceService: WorkspaceService,
+    private readonly appSettingsService: AppSettingsService,
     private readonly settingsFilePath: string,
     private readonly historyFilePath: string
   ) {}
@@ -540,9 +542,10 @@ export class AiChatService {
       throw new Error("workspace folder is not open.");
     }
 
-    const [{ runtimeSelection, status }, settings] = await Promise.all([
+    const [{ runtimeSelection, status }, settings, appSettings] = await Promise.all([
       this.resolveCurrentRuntimeSelection(),
-      this.readPersistedSettings()
+      this.readPersistedSettings(),
+      this.appSettingsService.getSettings()
     ]);
     const systemPrompts = resolveAiChatSystemPrompts(settings);
     const requestedSkills = resolveExplicitAiSkillInvocations(
@@ -575,7 +578,11 @@ export class AiChatService {
         shellExecutablePath: settings.shellExecutablePath ?? null
       },
       instructions: appendExplicitSkillInstructions(
-        buildInlinePythonBlockInstructions(systemPrompts.inlinePythonBlock, skillPrompt),
+        buildInlinePythonBlockInstructions(
+          systemPrompts.inlinePythonBlock,
+          skillPrompt,
+          appSettings.userId
+        ),
         requestedSkills
       ),
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
@@ -637,9 +644,10 @@ export class AiChatService {
       throw new Error("workspace folder is not open.");
     }
 
-    const [{ runtimeSelection, status }, settings] = await Promise.all([
+    const [{ runtimeSelection, status }, settings, appSettings] = await Promise.all([
       this.resolveCurrentRuntimeSelection(),
-      this.readPersistedSettings()
+      this.readPersistedSettings(),
+      this.appSettingsService.getSettings()
     ]);
     const systemPrompts = resolveAiChatSystemPrompts(settings);
 
@@ -667,7 +675,8 @@ export class AiChatService {
       },
       instructions: buildPromptlessContinuationInstructions(
         systemPrompts.promptlessContinuation,
-        skillPrompt
+        skillPrompt,
+        appSettings.userId
       ),
       maxSteps: TOOL_LOOP_PROMPTLESS_CONTINUATION_MAX_STEPS,
       prompt: buildPromptlessContinuationPrompt(request, conversationalMessages),
@@ -1308,7 +1317,8 @@ function parseInlineMarkdownInsertion(
 
 function buildPromptlessContinuationInstructions(
   systemPrompt: string,
-  skillPrompt: string
+  skillPrompt: string,
+  userId: string
 ): string {
   const lines = [
     normalizeAiChatSystemPromptValue(
@@ -1317,6 +1327,14 @@ function buildPromptlessContinuationInstructions(
     ),
     ""
   ];
+  const normalizedUserId = userId.trim();
+
+  lines.push(
+    normalizedUserId.length > 0
+      ? `Configured IntegralNotes user ID: ${normalizedUserId}. For new datatype names, prefer the ${normalizedUserId}/... namespace.`
+      : "No IntegralNotes user ID is configured. For new datatype names, use concise descriptive names and prefer a namespace if the user provides one.",
+    ""
+  );
 
   if (skillPrompt.trim().length > 0) {
     lines.push("# Python analysis block implementation contract");
@@ -1396,7 +1414,11 @@ function parsePromptlessContinuationInsertion(
   };
 }
 
-function buildInlinePythonBlockInstructions(systemPrompt: string, skillPrompt: string): string {
+function buildInlinePythonBlockInstructions(
+  systemPrompt: string,
+  skillPrompt: string,
+  userId: string
+): string {
   const lines = [
     normalizeAiChatSystemPromptValue(
       systemPrompt,
@@ -1404,6 +1426,14 @@ function buildInlinePythonBlockInstructions(systemPrompt: string, skillPrompt: s
     ),
     ""
   ];
+  const normalizedUserId = userId.trim();
+
+  lines.push(
+    normalizedUserId.length > 0
+      ? `Configured IntegralNotes user ID: ${normalizedUserId}. For new datatype names, prefer the ${normalizedUserId}/... namespace.`
+      : "No IntegralNotes user ID is configured. For new datatype names, use concise descriptive names and prefer a namespace if the user provides one.",
+    ""
+  );
 
   if (skillPrompt.trim().length > 0) {
     lines.push(skillPrompt.trim());
@@ -1480,8 +1510,12 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
 
   return [
     "Use from integral import integral_block.",
-    "The decorator supports display_name, description, inputs, and outputs.",
-    "Slot objects support name, extension/extensions, format, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "The decorator supports display_name, description, inputs, outputs, and params.",
+    "Slot objects support name, extension/extensions, datatype, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "Use datatype as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as {user-id}/peak-table when a user ID is available.",
+    "Define user-editable parameters with params={...}, using a Python literal JSON Schema subset.",
+    "The supported params schema is root type object with properties whose type is string, number, integer, or boolean. Supported UI metadata: title, description, default, enum, minimum, maximum.",
+    "Decorator params is the source of truth. Do not rely on undeclared YAML params; schema-external params are removed by the app.",
     "Do not group files with different roles or user intent into one .idts output just for convenience.",
     "Use .idts outputs only when multiple files of the same nature are generated as one set.",
     "Make user-facing renderables such as HTML reports, plots, images, SVG/PNG/JPEG/WebP files, and readable Markdown/text reports their own output slots.",

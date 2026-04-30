@@ -3,6 +3,10 @@ import type {
   ResolvedPluginViewer
 } from "./plugins";
 import type {
+  AppSettings,
+  SaveAppSettingsRequest
+} from "./appSettings";
+import type {
   CreateAiChatSessionRequest,
   AiChatHistorySnapshot,
   AiHostCommandApprovalRequest,
@@ -69,8 +73,8 @@ export interface WorkspaceDatasetManifestMember {
 export interface WorkspaceDatasetManifestView {
   dataPath: string | null;
   datasetId: string;
-  datasetKind: string;
   datasetName: string;
+  datatype: string | null;
   members: WorkspaceDatasetManifestMember[];
   noteMarkdown: string | null;
   noteTargetId: string;
@@ -265,6 +269,8 @@ export interface SelectWorkspaceFileRequest {
 }
 
 export interface IntegralNotesApi {
+  getAppSettings: () => Promise<AppSettings>;
+  saveAppSettings: (request: SaveAppSettingsRequest) => Promise<AppSettings>;
   createDataset: (request: CreateDatasetRequest) => Promise<CreateDatasetResult>;
   createDatasetFromWorkspaceEntries: (
     request: CreateDatasetFromWorkspaceEntriesRequest

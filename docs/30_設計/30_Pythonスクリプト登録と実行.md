@@ -21,15 +21,15 @@ from integral import integral_block
     display_name="PCA",
     description="数値テーブルに対して主成分分析を行う",
     inputs=[
-        {"name": "samples", "extensions": [".csv"], "format": "table/csv"},
-        {"name": "labels", "extensions": [".csv"], "format": "table/csv"},
+        {"name": "samples", "extensions": [".csv"], "datatype": "demo/table-csv"},
+        {"name": "labels", "extensions": [".csv"], "datatype": "demo/table-csv"},
     ],
     outputs=[
-        {"name": "score", "extension": ".csv", "format": "table/pca-score"},
+        {"name": "score", "extension": ".csv", "datatype": "demo/pca-score-table"},
         {
             "name": "report",
             "extension": ".html",
-            "format": "report/html",
+            "datatype": "demo/pca-report-html",
             "auto_insert_to_work_note": True,
             "share_note_with_input": "samples",
             "embed_to_shared_note": True,
@@ -46,7 +46,7 @@ def main(inputs, outputs, params):
 - `description`
 - `inputs`
 - `outputs`
-- slot ごとの `extension(s)` / `format`
+- slot ごとの `extension(s)` / `datatype`
 - output slot ごとの `auto_insert_to_work_note` / `share_note_with_input` / `embed_to_shared_note`
 
 ### 現行 scan 条件

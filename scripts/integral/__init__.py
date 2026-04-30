@@ -20,7 +20,7 @@ TFunc = TypeVar("TFunc", bound=Callable[..., Any])
 class IntegralSlotSpec:
     name: str
     extensions: tuple[str, ...] = ()
-    format: str | None = None
+    datatype: str | None = None
     auto_insert_to_work_note: bool = False
     share_note_with_input: str | None = None
     embed_to_shared_note: bool = False
@@ -32,6 +32,7 @@ class IntegralBlockSpec:
     description: str = ""
     inputs: tuple[IntegralSlotSpec, ...] = ()
     outputs: tuple[IntegralSlotSpec, ...] = ()
+    params: Mapping[str, Any] | None = None
 
 
 def integral_block(
@@ -40,12 +41,14 @@ def integral_block(
     description: str = "",
     inputs: Sequence[str | Mapping[str, Any]] | None = None,
     outputs: Sequence[str | Mapping[str, Any]] | None = None,
+    params: Mapping[str, Any] | None = None,
 ) -> Callable[[TFunc], TFunc]:
     spec = IntegralBlockSpec(
         display_name=_normalize_optional_string(display_name),
         description=_normalize_optional_string(description) or "",
         inputs=_normalize_slots(inputs, field_name="inputs"),
         outputs=_normalize_slots(outputs, field_name="outputs"),
+        params=_normalize_params_schema(params),
     )
 
     def decorator(func: TFunc) -> TFunc:
@@ -119,7 +122,7 @@ def _normalize_slot(
     return IntegralSlotSpec(
         name=name,
         extensions=extensions,
-        format=_normalize_optional_string(value.get("format")),
+        datatype=_normalize_optional_string(value.get("datatype")),
         auto_insert_to_work_note=_normalize_bool(
             value.get("auto_insert_to_work_note"),
             field_name="auto_insert_to_work_note",
@@ -190,6 +193,24 @@ def _normalize_bool(value: Any, *, field_name: str) -> bool:
         return value
 
     raise ValueError(f"{field_name} must be a boolean.")
+
+
+def _normalize_params_schema(value: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+
+    if not isinstance(value, Mapping):
+        raise ValueError("params must be a JSON Schema-like mapping.")
+
+    if value.get("type") != "object":
+        raise ValueError("params must be an object schema.")
+
+    properties = value.get("properties")
+
+    if not isinstance(properties, Mapping):
+        raise ValueError("params.properties must be a mapping.")
+
+    return dict(value)
 
 
 def _normalize_optional_slot_name(value: Any, *, field_name: str) -> str | None:

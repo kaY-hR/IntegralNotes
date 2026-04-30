@@ -542,9 +542,9 @@ function buildProcessChainGraph({
     const subtitleParts = [normalizedPath];
 
     if (dataset) {
-      subtitleParts.push(dataset.kind || "dataset");
-    } else if (managedFile?.format) {
-      subtitleParts.push(managedFile.format);
+      subtitleParts.push(dataset.datatype ?? dataset.representation);
+    } else if (managedFile?.datatype) {
+      subtitleParts.push(managedFile.datatype);
     } else if (managedFile) {
       subtitleParts.push(managedFile.representation);
     } else if (!workspaceEntry) {

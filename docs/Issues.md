@@ -825,18 +825,18 @@
 * エクスプローラパネルに `全てたたむ` button を追加したい
 * icon は `[-]` のような VS Code と同じ系統のものにしたい
 
-## [ ] 42. managed file / format / ID-backed slot I/O モデルへ再設計したい
+## [ ] 42. managed file / datatype / ID-backed slot I/O モデルへ再設計したい
 - 優先重み:9
 - 記載日時:2026-04-18-12:20(UTC+9)
 
 * `original data / dataset` を universal な中核概念として持つのをやめ、`managed file` を中心に再設計したい
 * `cwd` 内の通常 file は `.store/` などの system-managed path を除き managed file として追跡し、`.md` も管理対象に含めたい
-* managed file の最小 metadata は少なくとも `id / path / hash / formatId / createdByBlockId` としたい
+* managed file の最小 metadata は少なくとも `id / path / hash / datatype / createdByBlockId` としたい
 * `provenance` は専用 enum を持たず、`createdByBlockId: null | BLK-*` で十分としたい
-* format は別 registry で管理し、最小で `id / name / description` を持てばよい
+* datatype は解析間の I/O 互換性を表す任意の string とし、MVP では別 registry / ID を持たない
 * block の input は保存上 managed data ID ベースにしたい
 * block の output は実行前は希望保存先 path、実行後は生成 managed data ID にしたい
-* slot 定義は少なくとも `name / extension(s) / format` を持てるようにしたい
+* slot 定義は少なくとも `name / extension(s) / datatype` を持てるようにしたい
 * `.idts` は universal な I/O 単位ではなく、複数 file を束ねたいときだけ使う optional bundle 表現に下げたい
 * `.idts` input は runtime では hidden bundle directory に resolve し、`.idts` output は visible manifest と hidden bundle directory を分けたい
 * 非 `.idts` output は通常の workspace file として生成し、実行成功後に managed file metadata を作成または更新したい
@@ -870,14 +870,14 @@
 * 今回の論点は「解析 block 全体を GUI から外したい」ではなく、「input slot を popup + filter で素早く選びたい」に絞る
 * 方針として、input 割り当ての基本導線は block / plugin 個別 UI ではなく、app 共通の keyboard-first picker に寄せたい
 * picker は slot 制約に従って候補を絞り込める必要がある
-  - 少なくとも `extension(s)` / `format` / `acceptedKinds` を見て候補を出し分けたい
+  - 少なくとも `extension(s)` / `datatype` を見て候補を出し分けたい
 * 候補一覧では、ユーザーが識別しやすい表示を優先したい
   - 主表示は file 名または dataset 名
-  - 補助表示は relative path, format, kind など
+  - 補助表示は relative path, datatype など
 * ranking では、単なる名前一致だけでなく、今の作業文脈に近いものを上位に出したい
   - 最近使った input
   - 今開いている note に近い folder
-  - slot 制約により近い拡張子 / kind
+  - slot 制約により近い拡張子 / datatype
 * block を `>` popup から挿入した直後、そのまま最初の未設定 input slot picker を開けると流れがよい
 * keyboard 操作は少なくとも次を自然に扱いたい
   - `↑↓` で候補移動
@@ -911,27 +911,17 @@
   - `path#BLK-...` link クリック時に note open + block scroll / highlight
   を行うようにした
 
-## [ ] 45. `kind / format / extension` の責務と matching 規約を規格として整理したい
+## [x] 45. `datatype / extension` の責務と matching 規約を規格として整理したい
 - 優先重み:8
 - 記載日時:2026-04-20-13:07(UTC+9)
+- 対応完了:2026-04-30-13:13(UTC+9)
 
-* 現状は `slot.extensions`, `slot.format`, dataset / managed file の `kind`, output の `producedKind` がそれぞれ存在するが、どれを user-facing picker の filter に使うべきかがまだ曖昧
-* 実際に、Python input slot が `extensions: [".idts"], format: "bundle/idts"` を要求している一方、source bundle の実 dataset は `kind: "source-bundle"` を持っており、`kind` の完全一致だけでは候補が落ちるケースが出た
-* この問題は個別実装で都度吸収するより、まず仕様として次を明確にしたい
-  - `extension`: visible file / manifest の物理表現を表すのか
-  - `format`: slot が意味的に要求する data type を表すのか
-  - `kind`: runtime / provenance / viewer / grouping 用の内部分類なのか
-  - `source-bundle`, `bundle/idts`, `bundle/pca-report` のような値同士を、継承・互換・family としてどう扱うのか
-* 少なくとも input candidate の matching 規約として、次を決めたい
-  - file slot は `extension` を第一条件にするのか
-  - dataset slot は `kind` の exact match を要求するのか
-  - `kind` と `format` がズレる場合、`extension` 一致なら許可してよいのか
-  - `.idts` のような bundle manifest は、`kind` より `representation` / `extension` を優先すべきか
-* Python decorator / callable discovery 側でも、`format` をそのまま renderer の `acceptedKinds` に流す current 契約が妥当か再検討したい
-* docs 上の用語と実装上の field 名も一致させたい
-  - `docs/10_要求`
-  - `docs/20_アーキテクチャ`
-  - `docs/30_設計`
-  - `src/shared/integral.ts`
-  - `src/main/integralWorkspaceService.ts`
-* ゴールは、slot 定義を書いた人が「この input は何を受け付けるのか」を一意に説明でき、renderer / runtime / viewer が同じルールで判断できる状態にすること
+* `kind` は data contract から削除し、`.idts` は拡張子 / representation で識別する
+* `format` という field 名は使わず、解析間の I/O 互換性を表す意味ラベルとして `datatype` を導入する
+* `datatype` は任意の string とし、MVP では別 registry / ID を持たない
+* Python decorator の input slot は要求 datatype、output slot は生成 datatype を `datatype` field で宣言する
+* generated managed file / dataset は output slot の `datatype` を metadata に保存する
+* input candidate matching では datatype の完全一致を強い候補として扱い、datatype が無い場合や一致しない場合でも `extension(s)` / representation が合えば候補に出してよい
+* skill や user 定義の datatype では `{userId}/xxxx` のような namespace を推奨するが、enforcement はしない
+* app settings に任意の `userId` を追加し、LLM が datatype 名を提案するときの namespace prefix として使えるようにする
+* `userId` は空を許容し、空白と file / folder 名に使えない文字を禁止する

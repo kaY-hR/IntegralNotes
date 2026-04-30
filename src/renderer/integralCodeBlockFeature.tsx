@@ -26,12 +26,16 @@ import type {
   IntegralBlockDocument,
   IntegralDatasetSummary,
   IntegralManagedFileSummary,
+  IntegralParamSchemaProperty,
+  IntegralParamsSchema,
+  IntegralParamValue,
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPath,
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
+  normalizeIntegralParams,
   normalizeIntegralSlotExtensions
 } from "../shared/integral";
 import type { WorkspaceEntry } from "../shared/workspace";
@@ -84,7 +88,7 @@ type SlotDialogState = {
 
 type SlotFieldPickerState =
   | {
-      acceptedKinds?: string[];
+      datatype?: string;
       extensions?: string[];
       fieldKey: string;
       kind: "input-dataset";
@@ -93,6 +97,7 @@ type SlotFieldPickerState =
       slotName: string;
     }
   | {
+      datatype?: string;
       extensions?: string[];
       fieldKey: string;
       kind: "input-file";
@@ -874,6 +879,17 @@ function IntegralBlockPanel({
     blockDefinition.outputSlots.every((slot) =>
       isExecutedOutputReference(parsed.block.outputs[slot.name] ?? null, parsed.block.id)
     );
+  const paramsForm = blockDefinition?.paramsSchema ? (
+    <IntegralParamsForm
+      disabled={isExecutedBlock || runState.status === "running"}
+      onUpdateParams={(nextParams) => {
+        setInlineError(null);
+        onUpdateParams(normalizeIntegralParams(nextParams, blockDefinition.paramsSchema));
+      }}
+      params={parsed.block.params}
+      schema={blockDefinition.paramsSchema}
+    />
+  ) : null;
 
   if (!blockDefinition) {
     return (
@@ -937,12 +953,12 @@ function IntegralBlockPanel({
 
         {slotDialogState ? (
           <DatasetPickerDialog
-            acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
+            preferredDatatype={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.datatype}
             onSelect={(datasetId) => {
               onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
@@ -1000,7 +1016,7 @@ function IntegralBlockPanel({
                             openSlotFieldPicker(
                               isBundleInput
                                 ? {
-                                    acceptedKinds: slot.acceptedKinds,
+                                    datatype: slot.datatype,
                                     extensions: normalizeIntegralSlotExtensions([
                                       slot.extension ?? "",
                                       ...(slot.extensions ?? [])
@@ -1011,6 +1027,7 @@ function IntegralBlockPanel({
                                     slotName: slot.name
                                   }
                                 : {
+                                    datatype: slot.datatype,
                                     extensions: normalizeIntegralSlotExtensions([
                                       slot.extension ?? "",
                                       ...(slot.extensions ?? [])
@@ -1209,6 +1226,8 @@ function IntegralBlockPanel({
             onUpdateParams={onUpdateParams}
           />
 
+          {paramsForm}
+
           {slotAssignments}
         </div>
 
@@ -1220,12 +1239,12 @@ function IntegralBlockPanel({
 
         {slotDialogState ? (
           <DatasetPickerDialog
-            acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
+            preferredDatatype={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.datatype}
             onSelect={(datasetId) => {
               onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
@@ -1249,6 +1268,8 @@ function IntegralBlockPanel({
         {blockDefinition.description ? (
           <p className="integral-json-preview__description">{blockDefinition.description}</p>
         ) : null}
+
+        {paramsForm}
 
         {slotAssignments}
 
@@ -1287,12 +1308,12 @@ function IntegralBlockPanel({
 
       {slotDialogState ? (
         <DatasetPickerDialog
-          acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
           defaultDatasetName={slotDialogState.slotName}
           onClose={() => {
             setSlotDialogState(null);
           }}
           onError={setInlineError}
+          preferredDatatype={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.datatype}
           onSelect={(datasetId) => {
             onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
             setSlotDialogState(null);
@@ -1323,6 +1344,189 @@ function RunStateView({ runState }: { runState: RunState }): JSX.Element {
         </ul>
       ) : null}
     </div>
+  );
+}
+
+function IntegralParamsForm({
+  disabled,
+  onUpdateParams,
+  params,
+  schema
+}: {
+  disabled: boolean;
+  onUpdateParams: (nextParams: Record<string, unknown>) => void;
+  params: Record<string, unknown>;
+  schema: IntegralParamsSchema;
+}): JSX.Element | null {
+  const entries = Object.entries(schema.properties);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const normalizedParams = normalizeIntegralParams(params, schema);
+
+  return (
+    <section className="integral-slot-section integral-param-section">
+      <div className="integral-slot-section__header">
+        <strong>Params</strong>
+        <span>{entries.length} fields</span>
+      </div>
+
+      {entries.map(([name, property]) => (
+        <IntegralParamField
+          disabled={disabled}
+          key={name}
+          name={name}
+          onChange={(value) => {
+            onUpdateParams({
+              ...normalizedParams,
+              [name]: value
+            });
+          }}
+          property={property}
+          value={(normalizedParams[name] ?? null) as IntegralParamValue}
+        />
+      ))}
+    </section>
+  );
+}
+
+function IntegralParamField({
+  disabled,
+  name,
+  onChange,
+  property,
+  value
+}: {
+  disabled: boolean;
+  name: string;
+  onChange: (value: IntegralParamValue) => void;
+  property: IntegralParamSchemaProperty;
+  value: IntegralParamValue;
+}): JSX.Element {
+  const label = property.title?.trim() || name;
+
+  return (
+    <div className="integral-param-row">
+      <label className="integral-param-row__meta">
+        <strong>{label}</strong>
+        <span>{name}</span>
+      </label>
+
+      <div className="integral-param-row__field">
+        <IntegralParamControl
+          disabled={disabled}
+          onChange={onChange}
+          property={property}
+          value={value}
+        />
+        {property.description ? (
+          <span className="integral-param-row__description">{property.description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function IntegralParamControl({
+  disabled,
+  onChange,
+  property,
+  value
+}: {
+  disabled: boolean;
+  onChange: (value: IntegralParamValue) => void;
+  property: IntegralParamSchemaProperty;
+  value: IntegralParamValue;
+}): JSX.Element {
+  if (property.enum && property.enum.length > 0) {
+    const selectedIndex = property.enum.findIndex((item) => item === value);
+
+    return (
+      <select
+        className="integral-param-row__input"
+        disabled={disabled}
+        onChange={(event) => {
+          const optionIndex = Number(event.target.value);
+          onChange(Number.isInteger(optionIndex) ? property.enum?.[optionIndex] ?? null : null);
+        }}
+        value={selectedIndex >= 0 ? `${selectedIndex}` : ""}
+      >
+        <option value="">未設定</option>
+        {property.enum.map((option, index) => (
+          <option key={`${index}:${String(option)}`} value={`${index}`}>
+            {String(option)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (property.type === "boolean") {
+    return (
+      <select
+        className="integral-param-row__input"
+        disabled={disabled}
+        onChange={(event) => {
+          onChange(
+            event.target.value === "true"
+              ? true
+              : event.target.value === "false"
+                ? false
+                : null
+          );
+        }}
+        value={value === true ? "true" : value === false ? "false" : ""}
+      >
+        <option value="">未設定</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+    );
+  }
+
+  if (property.type === "number" || property.type === "integer") {
+    return (
+      <input
+        className="integral-param-row__input"
+        disabled={disabled}
+        max={property.maximum}
+        min={property.minimum}
+        onChange={(event) => {
+          const rawValue = event.target.value.trim();
+
+          if (rawValue.length === 0) {
+            onChange(null);
+            return;
+          }
+
+          const numericValue = Number(rawValue);
+
+          if (!Number.isFinite(numericValue)) {
+            onChange(null);
+            return;
+          }
+
+          onChange(property.type === "integer" ? Math.trunc(numericValue) : numericValue);
+        }}
+        step={property.type === "integer" ? 1 : "any"}
+        type="number"
+        value={typeof value === "number" ? `${value}` : ""}
+      />
+    );
+  }
+
+  return (
+    <input
+      className="integral-param-row__input"
+      disabled={disabled}
+      onChange={(event) => {
+        onChange(event.target.value);
+      }}
+      type="text"
+      value={typeof value === "string" ? value : ""}
+    />
   );
 }
 
@@ -1384,54 +1588,75 @@ function resolveSlotFieldPickerOptions({
   const normalizedQuery = slotFieldPicker.query.trim().toLocaleLowerCase("ja");
 
   if (slotFieldPicker.kind === "input-dataset") {
-    const allowedKinds =
-      slotFieldPicker.acceptedKinds?.filter((value) => value.trim().length > 0) ?? [];
+    const preferredDatatype = slotFieldPicker.datatype?.trim() ?? "";
     const allowedExtensions =
       slotFieldPicker.extensions?.filter((value) => value.trim().length > 0) ?? [];
 
     return assetCatalog.datasets
-      .filter((dataset) => {
-        if (allowedKinds.length === 0 && allowedExtensions.length === 0) {
-          return true;
-        }
-
+      .map((dataset) => {
         const lowerPath = dataset.path.toLocaleLowerCase("ja");
-        const matchesKind = allowedKinds.includes(dataset.kind);
+        const matchesDatatype =
+          preferredDatatype.length > 0 && dataset.datatype === preferredDatatype;
         const matchesExtension = allowedExtensions.some((extension) => lowerPath.endsWith(extension));
-
-        return matchesKind || matchesExtension;
+        return {
+          description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.datatype ? `  ${dataset.datatype}` : ""}`,
+          label: dataset.name,
+          priority:
+            preferredDatatype.length === 0 && allowedExtensions.length === 0
+              ? 0
+              : matchesDatatype
+                ? 0
+                : matchesExtension
+                  ? 1
+                  : Number.POSITIVE_INFINITY,
+          value: toStoredDatasetReference(dataset.datasetId)
+        };
       })
-      .map((dataset) => ({
-        description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.kind ? `  ${dataset.kind}` : ""}`,
-        label: dataset.name,
-        value: toStoredDatasetReference(dataset.datasetId)
-      }))
+      .filter((option) => option.priority < Number.POSITIVE_INFINITY)
       .sort((left, right) => {
-        return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+        return (
+          left.priority - right.priority ||
+          scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery)
+        );
       })
-      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
+      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY)
+      .map(({ priority: _priority, ...option }) => option);
   }
 
   if (slotFieldPicker.kind === "input-file") {
+    const preferredDatatype = slotFieldPicker.datatype?.trim() ?? "";
+    const allowedExtensions = slotFieldPicker.extensions ?? [];
+
     return assetCatalog.managedFiles
       .filter((managedFile) => managedFile.entityType === "managed-file")
-      .filter((managedFile) => {
-        if (!slotFieldPicker.extensions || slotFieldPicker.extensions.length === 0) {
-          return true;
-        }
-
+      .map((managedFile) => {
         const lowerPath = managedFile.path.toLocaleLowerCase("ja");
-        return slotFieldPicker.extensions.some((extension) => lowerPath.endsWith(extension));
+        const matchesDatatype =
+          preferredDatatype.length > 0 && managedFile.datatype === preferredDatatype;
+        const matchesExtension = allowedExtensions.some((extension) => lowerPath.endsWith(extension));
+        return {
+          description: `${toCanonicalWorkspaceTarget(managedFile.path)}${managedFile.datatype ? `  ${managedFile.datatype}` : ""}`,
+          label: managedFile.displayName,
+          priority:
+            preferredDatatype.length === 0 && allowedExtensions.length === 0
+              ? 0
+              : matchesDatatype
+                ? 0
+                : matchesExtension
+                  ? 1
+                  : Number.POSITIVE_INFINITY,
+          value: managedFile.id
+        };
       })
-      .map((managedFile) => ({
-        description: toCanonicalWorkspaceTarget(managedFile.path),
-        label: managedFile.displayName,
-        value: managedFile.id
-      }))
+      .filter((option) => option.priority < Number.POSITIVE_INFINITY)
       .sort((left, right) => {
-        return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+        return (
+          left.priority - right.priority ||
+          scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery)
+        );
       })
-      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
+      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY)
+      .map(({ priority: _priority, ...option }) => option);
   }
 }
 
