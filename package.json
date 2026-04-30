@@ -74,14 +74,14 @@
     "@types/node": "^22.13.4",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "electron": "^35.7.5",
+    "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "nodemon": "^3.1.9",
     "typescript": "^5.7.3",
-    "vite": "^5.4.14",
+    "vite": "^8.0.10",
     "wait-on": "^8.0.2"
   }
 }
