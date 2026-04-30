@@ -21,12 +21,15 @@ import type {
   IntegralManagedDataTrackingIssue,
   IntegralRenderableFile,
   ResolveIntegralManagedDataTrackingIssueRequest,
+  IntegralParamsSchema,
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPathWithRandomSuffix,
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
+  normalizeIntegralParams,
+  normalizeIntegralParamsSchema,
   normalizeIntegralSlotExtension,
   normalizeIntegralSlotExtensions
 } from "../shared/integral";
@@ -181,6 +184,7 @@ interface PythonCallableSummary {
   functionName: string;
   inputSlots: IntegralSlotDefinition[];
   outputSlots: IntegralSlotDefinition[];
+  paramsSchema?: IntegralParamsSchema;
   relativePath: string;
 }
 
@@ -2587,6 +2591,7 @@ function buildPythonCallableBlockType(
     executionMode: "manual",
     inputSlots: callable.inputSlots,
     outputSlots: callable.outputSlots,
+    ...(callable.paramsSchema ? { paramsSchema: callable.paramsSchema } : {}),
     pluginDescription: "workspace の .py を走査する汎用 Python 解析 plugin",
     pluginDisplayName: "General Analysis",
     pluginId: GENERAL_ANALYSIS_PLUGIN_ID,
@@ -2609,7 +2614,10 @@ function normalizeBlockDocument(
     id: blockId,
     inputs: normalizeSlotMap(block.inputs, definition.inputSlots),
     outputs: normalizeOutputSlotMap(block.outputs, definition.outputSlots),
-    params: isJsonRecord(block.params) ? block.params : {},
+    params: normalizeIntegralParams(
+      isJsonRecord(block.params) ? block.params : {},
+      definition.paramsSchema
+    ),
     plugin: definition.pluginId
   };
 }
@@ -2717,6 +2725,9 @@ function parsePythonCallableSource(relativePath: string, content: string): Pytho
       extractPythonKeywordSource(decoratorSource, "outputs"),
       "output"
     );
+    const paramsSchema = normalizeIntegralParamsSchema(
+      parsePythonLiteral(extractPythonKeywordSource(decoratorSource, "params"))
+    );
 
     summaries.push({
       blockType: `${relativePath}:${functionName}`,
@@ -2725,6 +2736,7 @@ function parsePythonCallableSource(relativePath: string, content: string): Pytho
       functionName,
       inputSlots,
       outputSlots,
+      ...(paramsSchema ? { paramsSchema } : {}),
       relativePath
     });
   }
@@ -2968,6 +2980,79 @@ function parsePythonBooleanLiteral(value: string | null): boolean | null {
   return null;
 }
 
+function parsePythonLiteral(value: string | null): unknown {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const stringValue = parsePythonStringLiteral(trimmed);
+
+  if (stringValue !== null) {
+    return stringValue;
+  }
+
+  if (trimmed === "True") {
+    return true;
+  }
+
+  if (trimmed === "False") {
+    return false;
+  }
+
+  if (trimmed === "None") {
+    return null;
+  }
+
+  if (/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return splitTopLevelPythonItems(trimmed, "[", "]")
+      .map((item) => parsePythonLiteral(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return parsePythonMappingLiteral(trimmed);
+  }
+
+  return undefined;
+}
+
+function parsePythonMappingLiteral(value: string): Record<string, unknown> | undefined {
+  const result: Record<string, unknown> = {};
+
+  for (const item of splitTopLevelPythonItems(value, "{", "}")) {
+    const pair = splitTopLevelPythonMappingEntry(item);
+
+    if (!pair) {
+      continue;
+    }
+
+    const [rawKey, rawValue] = pair;
+    const key = parsePythonStringLiteral(rawKey) ?? (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(rawKey.trim()) ? rawKey.trim() : null);
+
+    if (!key) {
+      continue;
+    }
+
+    const parsedValue = parsePythonLiteral(rawValue);
+
+    if (parsedValue !== undefined) {
+      result[key] = parsedValue;
+    }
+  }
+
+  return result;
+}
+
 function splitTopLevelPythonItems(
   value: string | null,
   openToken: string,
@@ -3070,6 +3155,77 @@ function splitTopLevelPythonItems(
   }
 
   return items;
+}
+
+function splitTopLevelPythonMappingEntry(value: string): [string, string] | null {
+  let quote: '"' | "'" | null = null;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value.charAt(index);
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (character === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (character === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+
+    if (character === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+
+    if (character === ":" && bracketDepth === 0 && braceDepth === 0 && parenDepth === 0) {
+      return [value.slice(0, index).trim(), value.slice(index + 1).trim()];
+    }
+  }
+
+  return null;
 }
 
 function extractPythonMappingValue(source: string, key: string): string | null {
