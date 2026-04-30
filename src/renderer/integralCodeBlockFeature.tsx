@@ -63,6 +63,10 @@ import {
 interface IntegralCodeBlockFeatureOptions {
   getAnalysisResultDirectory?: () => string | null;
   getWorkspaceEntries?: () => WorkspaceEntry[];
+  onExecuteBlockError?: (payload: {
+    errorMessage: string;
+    previousBlockSource: string;
+  }) => void;
   onExecuteBlockResult?: (payload: {
     previousBlockSource: string;
     result: ExecuteIntegralBlockResult;
@@ -273,7 +277,7 @@ class IntegralNotesBlockView implements NodeView {
 
     return Boolean(
       target.closest(
-        "textarea, button, input, select, label, iframe, .integral-renderable-layout, .integral-renderable-card, .integral-renderable-card__image, .integral-renderable-card__text"
+        "textarea, button, input, select, label, iframe, pre, code, .integral-code-block__log-text, .integral-renderable-layout, .integral-renderable-card, .integral-renderable-card__image, .integral-renderable-card__text"
       )
     );
   }
@@ -476,7 +480,12 @@ class IntegralNotesBlockView implements NodeView {
         return;
       }
 
-      this.runState = createErrorRunState(formatErrorMessage(error));
+      const errorMessage = formatErrorMessage(error);
+      this.runState = createErrorRunState(errorMessage);
+      this.options.onExecuteBlockError?.({
+        errorMessage,
+        previousBlockSource: rawText
+      });
     }
 
     if (!this.destroyed) {
@@ -1425,23 +1434,52 @@ function IntegralBlockPanel({
 }
 
 function RunStateView({ runState }: { runState: RunState }): JSX.Element {
+  const [copyStatus, setCopyStatus] = useState<"copied" | "idle">("idle");
   const kind =
     runState.status === "success"
       ? "success"
       : runState.status === "running"
         ? "success"
         : "error";
+  const logText = runState.logLines.join("\n").trim();
+
+  const copyLog = async (): Promise<void> => {
+    if (!logText) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(logText);
+      setCopyStatus("copied");
+      window.setTimeout(() => {
+        setCopyStatus("idle");
+      }, 1200);
+    } catch {
+      setCopyStatus("idle");
+    }
+  };
 
   return (
     <div className={`integral-code-block__result integral-code-block__result--${kind}`}>
-      <strong>{runState.summary ?? "block を実行しました。"}</strong>
+      <div className="integral-code-block__result-header">
+        <strong>{runState.summary ?? "block を実行しました。"}</strong>
+        {logText ? (
+          <button
+            className="integral-code-block__button integral-code-block__button--ghost integral-code-block__copy-button"
+            onClick={() => {
+              void copyLog();
+            }}
+            type="button"
+          >
+            {copyStatus === "copied" ? "Copied" : "Copy"}
+          </button>
+        ) : null}
+      </div>
 
-      {runState.logLines.length > 0 ? (
-        <ul className="integral-code-block__log">
-          {runState.logLines.map((line, index) => (
-            <li key={`${index}-${line}`}>{line}</li>
-          ))}
-        </ul>
+      {logText ? (
+        <pre className="integral-code-block__log-text">
+          <code>{logText}</code>
+        </pre>
       ) : null}
     </div>
   );
@@ -1894,8 +1932,14 @@ function toRunState(result: ExecuteIntegralBlockResult): RunState {
 
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
-    return error.message;
+    return normalizeIpcErrorMessage(error.message);
   }
 
-  return typeof error === "string" ? error : "Unknown error";
+  return typeof error === "string" ? normalizeIpcErrorMessage(error) : "Unknown error";
+}
+
+function normalizeIpcErrorMessage(message: string): string {
+  return message
+    .replace(/^Error invoking remote method '[^']+': Error:\s*/u, "")
+    .trim();
 }

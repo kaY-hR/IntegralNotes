@@ -88,7 +88,8 @@ out:
   - slot 名 -> managed data ID
   - authoring 時だけ workspace path も許容し、保存または実行前に ID へ解決する
 - `params`
-  - free-form object
+  - decorator `params` schema に沿って正規化された object
+  - schema が無い callable では `{}` とし、YAML 側の schema 外 param は保存・フォーム反映・実行前正規化で削除してよい
 - `out`
   - 実行前: slot 名 -> workspace output path
   - 実行後: slot 名 -> 生成された managed data ID

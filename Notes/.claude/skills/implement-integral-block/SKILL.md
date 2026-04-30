@@ -14,16 +14,12 @@ Read these references in order before editing:
 1. [references/integral-sdk-interface.md](references/integral-sdk-interface.md)
 2. [references/block-implementation-patterns.md](references/block-implementation-patterns.md)
 
-Then inspect the shipped SDK and only the local examples that match the task:
+Then inspect the shipped SDK files:
 
 - `../../../scripts/integral/__init__.py`
 - `../../../scripts/integral/README.md`
-- `../../../demo_hello_report.py`
-- `../../../demo_dataset_report.py`
-- `../../../src/lc_text_to_chromatogram_json.py`
-- `../../../src/chromatogram_pca.py`
 
-Do not rely on repository-level product docs, architecture docs, or development history unless the user explicitly asks to change the app/runtime itself. Keep the skill grounded in the distributable SDK and bundled examples.
+Do not rely on repository-level product docs, architecture docs, development history, or demo files unless the user explicitly asks to change the app/runtime itself. Keep the skill grounded in the distributable SDK shipped into the workspace.
 
 ## Working Rules
 
@@ -39,6 +35,12 @@ Do not rely on repository-level product docs, architecture docs, or development 
 - For single-file outputs, create `output_path.parent`.
 - For `.idts` outputs, create the assigned directory itself.
 - Validate required input paths clearly before doing the real work.
+- Define user-editable params in the decorator with `params={...}` as a Python literal JSON Schema subset.
+- The decorator `params` schema must be a mapping shaped as `{"type": "object", "properties": {...}}`.
+- Each params property must use one of these primitive types: `string`, `number`, `integer`, or `boolean`.
+- Supported params property metadata is `title`, `description`, `default`, `enum`, `minimum`, and `maximum`.
+- Use `title` for param UI labels. Do not use legacy per-param `display_name`.
+- Never use legacy `params=[{"name": ...}]` lists.
 - Use `options = params or {}` for optional params.
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
 - Use slot `datatype` as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as `{user-id}/peak-table` when the app prompt provides a user ID.
@@ -60,6 +62,7 @@ Do not rely on repository-level product docs, architecture docs, or development 
 Before finishing, verify:
 
 - the decorator uses only fields supported by the shipped `integral` module
+- decorator `params`, if present, uses the supported object schema shape
 - the callable keeps the expected signature
 - slot names in code match the decorator
 - invalid or missing paths fail clearly

@@ -82,6 +82,10 @@ interface WorkspaceFileSuggestion {
   relativePath: string;
 }
 
+const INTEGRAL_ERROR_BLOCK_LANGUAGE = "integral-error";
+const INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN =
+  /(```itg-notes\r?\n([\s\S]*?)\r?\n```)((?:\r?\n){2}(`{3,})integral-error\r?\n[\s\S]*?\r?\n\4)?/gu;
+
 interface LinkCompletionState {
   kind: "embed" | "link";
   maxHeight: number;
@@ -445,6 +449,24 @@ export function MilkdownEditor({
       installIntegralCodeBlockFeature(editor, {
         getAnalysisResultDirectory: () => analysisResultDirectoryRef.current,
         getWorkspaceEntries: () => workspaceEntriesRef.current,
+        onExecuteBlockError: ({ errorMessage, previousBlockSource }) => {
+          const nextMarkdown = applyIntegralExecutionErrorToMarkdown(
+            editor.getMarkdown(),
+            previousBlockSource,
+            errorMessage
+          );
+
+          if (nextMarkdown === null) {
+            onWorkspaceLinkErrorRef.current("実行エラーを現在のノートへ反映できませんでした。");
+            return;
+          }
+
+          editor?.editor.action((ctx) => {
+            replaceAll(nextMarkdown)(ctx);
+          });
+          lastSyncedMarkdownRef.current = nextMarkdown;
+          onChangeRef.current(nextMarkdown);
+        },
         onExecuteBlockResult: ({ previousBlockSource, result }) => {
           const nextMarkdown = applyIntegralExecutionResultToMarkdown(
             editor.getMarkdown(),
@@ -2308,14 +2330,16 @@ function prependInlineAiTranscript(markdown: string, transcript: string): string
   return `${toMarkdownCodeFence(trimmedMessage)}\n\n${markdown}`;
 }
 
-function toMarkdownCodeFence(content: string): string {
+function toMarkdownCodeFence(content: string, language = ""): string {
   const longestFence = Array.from(content.matchAll(/`{3,}/gu)).reduce(
     (maxLength, match) => Math.max(maxLength, match[0]?.length ?? 0),
     0
   );
   const fence = "`".repeat(Math.max(3, longestFence + 1));
+  const normalizedLanguage = language.trim();
+  const fenceHeader = normalizedLanguage.length > 0 ? `${fence}${normalizedLanguage}` : fence;
 
-  return `${fence}\n${content}\n${fence}`;
+  return `${fenceHeader}\n${content}\n${fence}`;
 }
 
 function truncateInlinePopupContext(value: string, side: "head" | "tail"): string {
@@ -2399,8 +2423,8 @@ function applyIntegralExecutionResultToMarkdown(
   let hasReplaced = false;
 
   const nextMarkdown = markdown.replace(
-    /```itg-notes\r?\n([\s\S]*?)\r?\n```/gu,
-    (fullMatch, blockSource) => {
+    INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN,
+    (fullMatch, _blockMarkdown, blockSource) => {
       if (hasReplaced) {
         return fullMatch;
       }
@@ -2419,6 +2443,47 @@ function applyIntegralExecutionResultToMarkdown(
 
       hasReplaced = true;
       return appendMarkdown.length > 0 ? `${nextBlockMarkdown}\n\n${appendMarkdown}` : nextBlockMarkdown;
+    }
+  );
+
+  return hasReplaced ? nextMarkdown : null;
+}
+
+function applyIntegralExecutionErrorToMarkdown(
+  markdown: string,
+  previousBlockSource: string,
+  errorMessage: string
+): string | null {
+  const normalizedPreviousBlockSource = normalizeMarkdownForComparison(previousBlockSource);
+  const previousBlockId =
+    parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, previousBlockSource)?.block.id?.trim() ?? "";
+  const errorMarkdown = toMarkdownCodeFence(
+    errorMessage.trim() || "Unknown Integral block execution error",
+    INTEGRAL_ERROR_BLOCK_LANGUAGE
+  );
+  let hasReplaced = false;
+
+  const nextMarkdown = markdown.replace(
+    INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN,
+    (fullMatch, blockMarkdown, blockSource) => {
+      if (hasReplaced) {
+        return fullMatch;
+      }
+
+      const rawBlockSource = typeof blockSource === "string" ? blockSource : "";
+      const parsed = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, rawBlockSource);
+      const parsedBlockId = parsed?.block.id?.trim() ?? "";
+      const matchesById =
+        previousBlockId.length > 0 && parsedBlockId.length > 0 && parsedBlockId === previousBlockId;
+      const matchesBySource =
+        normalizeMarkdownForComparison(rawBlockSource) === normalizedPreviousBlockSource;
+
+      if (!matchesById && !matchesBySource) {
+        return fullMatch;
+      }
+
+      hasReplaced = true;
+      return `${blockMarkdown}\n\n${errorMarkdown}`;
     }
   );
 

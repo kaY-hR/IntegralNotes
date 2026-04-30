@@ -56,6 +56,50 @@ Notes:
 - boolean fields must be real booleans, not `"true"` or `"false"` strings.
 - `project_to_inputs` is removed and raises an error.
 
+## Params Schema
+
+The `params` decorator argument is optional. If present, it must be a Python literal JSON Schema subset:
+
+```python
+params={
+    "type": "object",
+    "properties": {
+        "threshold": {
+            "type": "number",
+            "title": "Threshold",
+            "description": "Cutoff value used by the analysis.",
+            "default": 0.5,
+            "minimum": 0,
+            "maximum": 1,
+        },
+    },
+}
+```
+
+Supported root shape:
+
+- `type` must be `"object"`
+- `properties` must be a mapping
+
+Supported property types:
+
+- `string`
+- `number`
+- `integer`
+- `boolean`
+
+Supported property metadata:
+
+- `title`
+- `description`
+- `default`
+- `enum`
+- `minimum`
+- `maximum`
+
+Do not use legacy list-shaped params such as `params=[{"name": "threshold", ...}]`.
+Do not use `display_name` inside params properties; use `title` instead.
+
 ## Minimal Shape
 
 ```python
@@ -75,6 +119,16 @@ from integral import integral_block
     outputs=[
         {"name": "report", "extension": ".html", "datatype": "user-id/html-report"},
     ],
+    params={
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "title": "Report title",
+                "default": "Example Report",
+            },
+        },
+    },
 )
 def main(
     inputs: dict[str, str | None],
@@ -88,7 +142,6 @@ def main(
 
 The `integral` module does not define:
 
-- a params schema system
 - dataset ID handling
 - CLI argument parsing
 - runtime log handling
