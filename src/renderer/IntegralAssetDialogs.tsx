@@ -25,18 +25,15 @@ interface DatasetPickerDialogProps {
   onSelect: (datasetId: string) => void;
 }
 
-type DatasetPickerMode = "select" | "create";
-
 export function DatasetPickerDialog({
   defaultDatasetName,
   onClose,
   onError,
-  onImportedManagedFiles,
   preferredDatatype,
   onSelect
 }: DatasetPickerDialogProps): JSX.Element {
-  const [mode, setMode] = useState<DatasetPickerMode>("select");
   const [datasets, setDatasets] = useState<IntegralDatasetSummary[]>([]);
+  const [pending, setPending] = useState(false);
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
 
   useEffect(() => {
@@ -65,31 +62,26 @@ export function DatasetPickerDialog({
     });
   }, [datasets, preferredDatatype]);
 
-  if (mode === "create") {
-    return (
-      <ManagedFileSelectionDialog
-        confirmLabel="Dataset を作成して割り当て"
-        defaultDatasetName={defaultDatasetName}
-        description="managed file を選んで新しい dataset を作成します。"
-        onClose={() => {
-          setMode("select");
-        }}
-        onError={onError}
-        onImportedManagedFiles={onImportedManagedFiles}
-        onSelect={async ({ datasetName, relativePaths }) => {
-          const result = await window.integralNotes.createDatasetFromWorkspaceEntries({
-            name: datasetName,
-            relativePaths
-          });
+  const createDatasetFromFiles = async (): Promise<void> => {
+    setPending(true);
 
-          onSelect(result.dataset.datasetId);
-        }}
-        pendingLabel="作成中..."
-        requireDatasetName
-        title="新しい Dataset を作成"
-      />
-    );
-  }
+    try {
+      const result = await window.integralNotes.createDatasetFromFileDialog({
+        datatype: preferredDatatype ?? null,
+        defaultName: defaultDatasetName
+      });
+
+      if (!result) {
+        return;
+      }
+
+      onSelect(result.dataset.datasetId);
+    } catch (error) {
+      onError(toErrorMessage(error));
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
     <div className="dialog-backdrop">
@@ -100,6 +92,17 @@ export function DatasetPickerDialog({
         </div>
 
         <div className="dialog-card__body dialog-card__body--asset-picker">
+          <button
+            className="asset-picker__create-link asset-picker__create-link--primary"
+            disabled={pending}
+            onClick={() => {
+              void createDatasetFromFiles();
+            }}
+            type="button"
+          >
+            新しいデータセットを作る
+          </button>
+
           <div className="asset-picker__list">
             {sortedDatasets.length > 0 ? (
               sortedDatasets.map((dataset) => (
@@ -142,23 +145,13 @@ export function DatasetPickerDialog({
             )}
           </div>
 
-          <button
-            className="asset-picker__create-link"
-            onClick={() => {
-              setMode("create");
-            }}
-            type="button"
-          >
-            managed file から新しい dataset を作成
-          </button>
-
           <div className="dialog-actions">
-            <button className="button button--ghost" onClick={onClose} type="button">
+            <button className="button button--ghost" disabled={pending} onClick={onClose} type="button">
               キャンセル
             </button>
             <button
               className="button button--primary"
-              disabled={!selectedDatasetId}
+              disabled={pending || !selectedDatasetId}
               onClick={() => {
                 onSelect(selectedDatasetId);
               }}

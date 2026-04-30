@@ -60,6 +60,7 @@ import { AiSkillCompletionList } from "./AiSkillCompletionList";
 import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
+  analysisResultDirectory?: string | null;
   focusedBlockId?: string | null;
   initialValue: string;
   isActive: boolean;
@@ -156,6 +157,7 @@ const INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE = 2;
 const INLINE_AI_POPUP_WIDTH = 520;
 
 export function MilkdownEditor({
+  analysisResultDirectory,
   focusedBlockId,
   initialValue,
   isActive,
@@ -175,6 +177,7 @@ export function MilkdownEditor({
   const editorRef = useRef<Crepe | null>(null);
   const inlineAiPopupRef = useRef<HTMLFormElement | null>(null);
   const inlineAiDragStateRef = useRef<InlineAiPopupDragState | null>(null);
+  const analysisResultDirectoryRef = useRef<string | null>(analysisResultDirectory ?? null);
   const onChangeRef = useRef(onChange);
   const onFocusedBlockHandledRef = useRef(onFocusedBlockHandled);
   const onIntegralAssetCatalogChangedRef = useRef(onIntegralAssetCatalogChanged);
@@ -203,6 +206,10 @@ export function MilkdownEditor({
   const [inlineAiSkillCompletion, setInlineAiSkillCompletion] =
     useState<InlineAiSkillCompletionState | null>(null);
   const [availableAiSkills, setAvailableAiSkills] = useState<AiChatSkillSummary[]>([]);
+
+  useEffect(() => {
+    analysisResultDirectoryRef.current = analysisResultDirectory ?? null;
+  }, [analysisResultDirectory]);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -440,6 +447,7 @@ export function MilkdownEditor({
       });
 
       installIntegralCodeBlockFeature(editor, {
+        getAnalysisResultDirectory: () => analysisResultDirectoryRef.current,
         getWorkspaceEntries: () => workspaceEntriesRef.current,
         onExecuteBlockError: ({ errorMessage, previousBlockSource }) => {
           const nextMarkdown = applyIntegralExecutionErrorToMarkdown(
@@ -1405,8 +1413,16 @@ export function MilkdownEditor({
           candidate.pluginId === GENERAL_ANALYSIS_PLUGIN_ID && candidate.blockType === blockType
       ) ?? null;
     const blockMarkdown = definition
-      ? toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)))
-      : createPythonIntegralBlockMarkdown(blockType);
+      ? toIntegralCodeBlock(
+          serializeIntegralBlockContent(
+            createInitialIntegralBlock(definition, {
+              outputRoot: analysisResultDirectoryRef.current
+            })
+          )
+        )
+      : createPythonIntegralBlockMarkdown(blockType, {
+          outputRoot: analysisResultDirectoryRef.current
+        });
 
     insertMarkdownAtPosition(
       anchorPos,
@@ -1510,7 +1526,9 @@ export function MilkdownEditor({
       return;
     }
 
-    const block = createInitialIntegralBlock(definition);
+    const block = createInitialIntegralBlock(definition, {
+      outputRoot: analysisResultDirectoryRef.current
+    });
     const blockMarkdown = toIntegralCodeBlock(serializeIntegralBlockContent(block));
 
     editor.editor.action((ctx) => {

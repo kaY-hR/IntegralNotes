@@ -125,6 +125,7 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "Do not rely on hand-written YAML params that are not declared in the decorator. The app treats the decorator schema as the source of truth and removes schema-external params.",
     "Do not group files with different roles or user intent into one .idts output just for convenience.",
     "Use .idts outputs only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same datatype and role.",
+    "When writing to a .idts output, treat outputs[slotName] as a directory path and create the member files inside that directory. Do not create the .idts manifest yourself.",
     "Use slot datatype as the semantic I/O compatibility label between analysis blocks. Prefer namespaced datatype values such as {user-id}/peak-table when the app prompt provides a user ID.",
     "Make user-facing renderables their own output slots. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other files the user is meant to inspect directly.",
     "Set auto_insert_to_work_note=True for user-facing renderable output slots that should appear under the block.",

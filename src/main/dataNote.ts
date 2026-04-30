@@ -25,6 +25,7 @@ interface ManagedDataNoteMetadataBase {
 
 export interface DatasetDataNoteMetadata extends ManagedDataNoteMetadataBase {
   createdByBlockId: string | null;
+  dataPath?: string;
   datatype: string | null;
   datasetId: string;
   entityType: "dataset";
@@ -42,6 +43,11 @@ export interface ManagedFileDataNoteMetadata extends ManagedDataNoteMetadataBase
 export interface DataNoteTargetInfo {
   dataTargetType: DataNoteTargetType;
   targetId: string;
+}
+
+export interface DatasetDataNoteLink {
+  label: string;
+  target: string;
 }
 
 const DATA_NOTE_TYPE = "data-note";
@@ -63,6 +69,7 @@ const COMMON_MANAGED_FRONTMATTER_KEYS = [
 const DATASET_MANAGED_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
   "datasetId",
+  "dataPath",
   "datatype",
   "createdByBlockId",
   "memberIds"
@@ -85,6 +92,7 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
     typeof value.path === "string" &&
     typeof value.hash === "string" &&
     (value.datatype === null || value.datatype === undefined || typeof value.datatype === "string") &&
+    (value.dataPath === undefined || typeof value.dataPath === "string") &&
     (value.displayName === undefined || typeof value.displayName === "string") &&
     value.representation === "dataset-json" &&
     (value.visibility === "visible" || value.visibility === "hidden") &&
@@ -100,6 +108,10 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
+      dataPath:
+        typeof value.dataPath === "string" && value.dataPath.trim().length > 0
+          ? normalizeWorkspaceRelativePath(value.dataPath)
+          : undefined,
       datatype: value.datatype ?? null,
       datasetId,
       displayName: normalizeDatasetName(value.displayName, datasetId),
@@ -167,7 +179,8 @@ export function isManagedFileNoteMetadata(value: unknown): value is ManagedFileD
 
 export function buildDatasetDataNoteMarkdown(
   metadata: DatasetDataNoteMetadata,
-  existingContent?: string
+  existingContent?: string,
+  links: readonly DatasetDataNoteLink[] = []
 ): string {
   const frontmatterLines = [
     `integralNoteType: ${serializeYamlValue(DATA_NOTE_TYPE)}`,
@@ -187,12 +200,18 @@ export function buildDatasetDataNoteMarkdown(
     `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`
   ];
 
+  if (metadata.dataPath) {
+    frontmatterLines.push(`dataPath: ${serializeYamlValue(metadata.dataPath)}`);
+  }
+
   if (metadata.memberIds && metadata.memberIds.length > 0) {
     frontmatterLines.push(`memberIds: ${serializeYamlValue(metadata.memberIds)}`);
   }
 
+  const defaultBody = buildDatasetNoteBody(metadata.displayName, links);
+
   return buildManagedDataNoteMarkdown({
-    defaultBody: buildTitleOnlyNoteBody(metadata.displayName),
+    defaultBody,
     existingContent,
     frontmatterLines,
     generatedBodyCandidates: [
@@ -391,6 +410,23 @@ function buildTitleOnlyNoteBody(displayName: string): string {
   return `# ${resolveManagedDataNoteName(displayName)}\n`;
 }
 
+function buildDatasetNoteBody(
+  displayName: string,
+  links: readonly DatasetDataNoteLink[]
+): string {
+  const title = buildTitleOnlyNoteBody(displayName).trimEnd();
+
+  if (links.length === 0) {
+    return `${title}\n`;
+  }
+
+  const linkLines = links.map((link) => {
+    return `- [${escapeMarkdownLinkLabel(link.label)}](${encodeMarkdownLinkTarget(link.target)})`;
+  });
+
+  return `${title}\n\n${linkLines.join("\n")}\n`;
+}
+
 function buildLegacyDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
   return `# ${metadata.datasetId}\n`;
 }
@@ -416,6 +452,17 @@ function isGeneratedDataNoteBody(body: string, displayName: string): boolean {
 function resolveManagedDataNoteName(displayName: string): string {
   const normalized = displayName.trim();
   return normalized.length > 0 ? normalized : "managed-data";
+}
+
+function escapeMarkdownLinkLabel(value: string): string {
+  const normalized = value.trim();
+  return (normalized.length > 0 ? normalized : "file").replace(/([\\[\]])/gu, "\\$1");
+}
+
+function encodeMarkdownLinkTarget(value: string): string {
+  const normalized = value.trim().replace(/\\/gu, "/");
+  const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  return prefixed.replace(/\)/gu, "%29").replace(/\s/gu, "%20");
 }
 
 function normalizeDatasetName(displayName: unknown, datasetId: string): string {

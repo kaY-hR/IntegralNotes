@@ -6,6 +6,7 @@ import type {
   IntegralManagedFileSummary
 } from "../shared/integral";
 import {
+  type CreateDefaultIntegralOutputPathOptions,
   createDefaultIntegralOutputPathWithRandomSuffix,
   createDefaultIntegralParams,
   normalizeIntegralParams
@@ -62,8 +63,14 @@ export function parseIntegralBlockSource(
 }
 
 export function createInitialIntegralBlock(
-  definition: IntegralBlockDefinition
+  definition: IntegralBlockDefinition,
+  outputOptions: CreateDefaultIntegralOutputPathOptions = {}
 ): IntegralJsonBlock {
+  const defaultOutputOptions = {
+    ...outputOptions,
+    analysisDisplayName: outputOptions.analysisDisplayName ?? definition.title
+  };
+
   return {
     "block-type": definition.blockType,
     id: createBlockId(),
@@ -71,7 +78,7 @@ export function createInitialIntegralBlock(
     outputs: Object.fromEntries(
       definition.outputSlots.map((slot) => [
         slot.name,
-        createDefaultIntegralOutputPathWithRandomSuffix(slot)
+        createDefaultIntegralOutputPathWithRandomSuffix(slot, defaultOutputOptions)
       ])
     ),
     params: createDefaultIntegralParams(definition.paramsSchema),
@@ -79,12 +86,24 @@ export function createInitialIntegralBlock(
   };
 }
 
-export function createIntegralBlockMarkdown(definition: IntegralBlockDefinition): string {
-  return toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition)));
+export function createIntegralBlockMarkdown(
+  definition: IntegralBlockDefinition,
+  outputOptions: CreateDefaultIntegralOutputPathOptions = {}
+): string {
+  return toIntegralCodeBlock(
+    serializeIntegralBlockContent(createInitialIntegralBlock(definition, outputOptions))
+  );
 }
 
-export function createPythonIntegralBlockMarkdown(blockType: string): string {
+export function createPythonIntegralBlockMarkdown(
+  blockType: string,
+  outputOptions: CreateDefaultIntegralOutputPathOptions = {}
+): string {
   const definition = getIntegralBlockDefinition(GENERAL_ANALYSIS_PLUGIN_ID, blockType);
+
+  if (definition) {
+    return createIntegralBlockMarkdown(definition, outputOptions);
+  }
 
   return toIntegralCodeBlock(
     serializeIntegralBlockContent({

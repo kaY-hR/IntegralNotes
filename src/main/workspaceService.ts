@@ -47,6 +47,8 @@ import {
 import {
   buildDatasetDataNoteMarkdown,
   buildManagedFileNoteMarkdown,
+  type DatasetDataNoteMetadata,
+  type DatasetDataNoteLink,
   normalizeDatasetDataNoteMetadata,
   normalizeManagedFileNoteMetadata,
   resolveManagedDataNoteTabName
@@ -1120,6 +1122,52 @@ export class WorkspaceService {
     return parentPath.length === 0 ? name : `${parentPath}/${name}`;
   }
 
+  private async buildDatasetDataNoteLinks(
+    rootPath: string,
+    metadataRootPath: string,
+    metadata: DatasetDataNoteMetadata
+  ): Promise<DatasetDataNoteLink[]> {
+    const links: DatasetDataNoteLink[] = [];
+
+    for (const memberId of metadata.memberIds ?? []) {
+      const memberMetadata = normalizeManagedFileNoteMetadata(
+        await this.readJsonFile<unknown>(path.join(metadataRootPath, `${memberId}.json`))
+      );
+
+      if (!memberMetadata) {
+        continue;
+      }
+
+      links.push({
+        label: memberMetadata.displayName || path.posix.basename(memberMetadata.path),
+        target: toCanonicalWorkspaceTarget(memberMetadata.path)
+      });
+    }
+
+    if (links.length > 0 || !metadata.dataPath) {
+      return links;
+    }
+
+    const dataRootPath = path.join(rootPath, normalizeRelativePath(metadata.dataPath));
+    const stats = await fs.stat(dataRootPath).catch(() => null);
+
+    if (!stats?.isDirectory()) {
+      return links;
+    }
+
+    const filePaths = await collectRelativeFiles(dataRootPath);
+    const manifestPath = normalizeRelativePath(metadata.path);
+
+    return filePaths
+      .map((relativePath) => normalizeRelativePath(`${metadata.dataPath}/${relativePath}`))
+      .filter((relativePath) => relativePath !== manifestPath)
+      .sort((left, right) => left.localeCompare(right, "ja"))
+      .map((relativePath) => ({
+        label: path.posix.basename(relativePath),
+        target: toCanonicalWorkspaceTarget(relativePath)
+      }));
+  }
+
   private async syncManagedDataNotesInternal(rootPath: string): Promise<void> {
     const metadataRootPath = path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY);
     const dataNoteRootPath = path.join(metadataRootPath, DATA_NOTE_DIRECTORY);
@@ -1183,10 +1231,11 @@ export class WorkspaceService {
 
             const absolutePath = path.join(dataNoteRootPath, `${datasetMetadata.datasetId.trim()}.md`);
             const existingContent = await readTextFileIfExists(absolutePath);
+            const links = await this.buildDatasetDataNoteLinks(rootPath, metadataRootPath, datasetMetadata);
 
             return {
               absolutePath,
-              nextContent: buildDatasetDataNoteMarkdown(datasetMetadata, existingContent)
+              nextContent: buildDatasetDataNoteMarkdown(datasetMetadata, existingContent, links)
             } satisfies ManagedDataNoteWritePlan;
           })
       )
@@ -1935,6 +1984,26 @@ async function collectMarkdownRelativePaths(
 
     if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".md") {
       relativePaths.push(path.relative(rootPath, absolutePath).split(path.sep).join("/"));
+    }
+  }
+
+  return relativePaths;
+}
+
+async function collectRelativeFiles(rootPath: string, basePath: string = rootPath): Promise<string[]> {
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+  const relativePaths: string[] = [];
+
+  for (const entry of entries) {
+    const absolutePath = path.join(rootPath, entry.name);
+
+    if (entry.isDirectory()) {
+      relativePaths.push(...(await collectRelativeFiles(absolutePath, basePath)));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      relativePaths.push(path.relative(basePath, absolutePath).split(path.sep).join("/"));
     }
   }
 
