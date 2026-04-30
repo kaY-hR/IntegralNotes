@@ -114,6 +114,10 @@ interface InlineAiTriggerState {
   y: number;
 }
 
+const INLINE_AI_INSERTION_PREVIEW_FRAME_MS = 24;
+const INLINE_AI_INSERTION_PREVIEW_TARGET_FRAMES = 64;
+const INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE = 2;
+
 export function MilkdownEditor({
   focusedBlockId,
   initialValue,
@@ -720,6 +724,69 @@ export function MilkdownEditor({
     });
   };
 
+  const playInlineAiInsertionPreview = async (
+    streamId: string,
+    markdown: string
+  ): Promise<boolean> => {
+    const previewText = markdown.trim();
+
+    if (previewText.length === 0) {
+      return true;
+    }
+
+    const chunkSize = Math.max(
+      INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE,
+      Math.ceil(previewText.length / INLINE_AI_INSERTION_PREVIEW_TARGET_FRAMES)
+    );
+
+    for (
+      let visibleLength = chunkSize;
+      visibleLength < previewText.length;
+      visibleLength += chunkSize
+    ) {
+      const current = inlineAiPromptRef.current;
+
+      if (
+        !current ||
+        current.streamId !== streamId ||
+        activeInlineAiStreamIdRef.current !== streamId
+      ) {
+        return false;
+      }
+
+      const next = {
+        ...current,
+        streamingText: previewText.slice(0, visibleLength)
+      };
+
+      inlineAiPromptRef.current = next;
+      setInlineAiPrompt(next);
+
+      await waitInlineAiInsertionPreviewFrame();
+    }
+
+    const current = inlineAiPromptRef.current;
+
+    if (
+      !current ||
+      current.streamId !== streamId ||
+      activeInlineAiStreamIdRef.current !== streamId
+    ) {
+      return false;
+    }
+
+    const next = {
+      ...current,
+      streamingText: previewText
+    };
+
+    inlineAiPromptRef.current = next;
+    setInlineAiPrompt(next);
+    await waitInlineAiInsertionPreviewFrame();
+
+    return true;
+  };
+
   const submitInlineAiPrompt = async (): Promise<void> => {
     const current = inlineAiPromptRef.current;
     const editor = editorRef.current;
@@ -774,6 +841,12 @@ export function MilkdownEditor({
           activeInlineAiStreamIdRef.current = null;
           inlineAiPromptRef.current = nextState;
           setInlineAiPrompt(nextState);
+          return;
+        }
+
+        const shouldInsert = await playInlineAiInsertionPreview(streamId, result.insertion.text);
+
+        if (!shouldInsert) {
           return;
         }
 
@@ -1436,6 +1509,12 @@ function formatInlineAiMessageText(message: AiChatMessage): string {
 
 function createInlineAiStreamId(): string {
   return `inline-ai-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function waitInlineAiInsertionPreviewFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, INLINE_AI_INSERTION_PREVIEW_FRAME_MS);
+  });
 }
 
 function computeLinkCompletionState(
