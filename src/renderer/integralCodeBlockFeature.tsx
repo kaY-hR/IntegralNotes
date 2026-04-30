@@ -46,7 +46,9 @@ import {
 
 import {
   DatasetPickerDialog,
-  DatasetRenderableView
+  DatasetRenderableView,
+  IntegralAssetPreviewWindow,
+  type IntegralAssetPreviewTarget
 } from "./IntegralAssetDialogs";
 import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
@@ -116,6 +118,7 @@ interface PickerOption {
   action?: "create-dataset";
   description: string;
   label: string;
+  previewTarget?: IntegralAssetPreviewTarget;
   value: string;
 }
 
@@ -522,6 +525,8 @@ function IntegralBlockPanel({
   const [slotFieldPickerLayout, setSlotFieldPickerLayout] = useState<PickerPopupLayout | null>(
     null
   );
+  const [slotFieldPreviewTarget, setSlotFieldPreviewTarget] =
+    useState<IntegralAssetPreviewTarget | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [assetCatalog, setAssetCatalog] = useState<IntegralAssetCatalog>({
     blockTypes: [],
@@ -639,7 +644,14 @@ function IntegralBlockPanel({
   useEffect(() => {
     setSlotFieldPicker(null);
     setSlotFieldPickerLayout(null);
+    setSlotFieldPreviewTarget(null);
   }, [parsed.block?.id]);
+
+  useEffect(() => {
+    if (!slotFieldPicker) {
+      setSlotFieldPreviewTarget(null);
+    }
+  }, [slotFieldPicker]);
 
   const formatDatasetLabel = (datasetReference: string | null): string => {
     if (!datasetReference) {
@@ -749,6 +761,7 @@ function IntegralBlockPanel({
   };
 
   const updateSlotFieldPickerQuery = (fieldKey: string, query: string): void => {
+    setSlotFieldPreviewTarget(null);
     setSlotFieldPicker((current) => {
       if (!current || current.fieldKey !== fieldKey) {
         return current;
@@ -763,6 +776,7 @@ function IntegralBlockPanel({
   };
 
   const closeSlotFieldPicker = (fieldKey?: string): void => {
+    setSlotFieldPreviewTarget(null);
     setSlotFieldPicker((current) => {
       if (!current) {
         return current;
@@ -1292,6 +1306,12 @@ function IntegralBlockPanel({
                           : ""
                       }`}
                       key={`${slotFieldPicker.fieldKey}:${option.value}`}
+                      onFocus={() => {
+                        setSlotFieldPreviewTarget(option.previewTarget ?? null);
+                      }}
+                      onMouseEnter={() => {
+                        setSlotFieldPreviewTarget(option.previewTarget ?? null);
+                      }}
                       onMouseDown={(event) => {
                         event.preventDefault();
                         commitSlotFieldPickerOption(option);
@@ -1308,6 +1328,20 @@ function IntegralBlockPanel({
                   </div>
                 )}
               </div>,
+              document.body
+            )
+          : null}
+
+        {slotFieldPicker && slotFieldPickerLayout && slotFieldPreviewTarget
+          ? createPortal(
+              <IntegralAssetPreviewWindow
+                anchorLayout={slotFieldPickerLayout}
+                assetCatalog={assetCatalog}
+                onClose={() => {
+                  setSlotFieldPreviewTarget(null);
+                }}
+                target={slotFieldPreviewTarget}
+              />,
               document.body
             )
           : null}
@@ -1745,6 +1779,10 @@ function resolveSlotFieldPickerOptions({
         return {
           description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.datatype ? `  ${dataset.datatype}` : ""}`,
           label: dataset.name,
+          previewTarget: {
+            datasetId: dataset.datasetId,
+            kind: "dataset"
+          },
           priority:
             preferredDatatype.length === 0 && allowedExtensions.length === 0
               ? 0
@@ -1790,6 +1828,10 @@ function resolveSlotFieldPickerOptions({
         return {
           description: `${toCanonicalWorkspaceTarget(managedFile.path)}${managedFile.datatype ? `  ${managedFile.datatype}` : ""}`,
           label: managedFile.displayName,
+          previewTarget: {
+            kind: "managed-file",
+            managedFileId: managedFile.id
+          },
           priority:
             preferredDatatype.length === 0 && allowedExtensions.length === 0
               ? 0

@@ -1,12 +1,23 @@
 import * as FlexLayout from "flexlayout-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 import type {
+  IntegralAssetCatalog,
   IntegralDatasetInspection,
   IntegralDatasetSummary,
   IntegralManagedFileSummary
 } from "../shared/integral";
+import type { WorkspaceFileDocument } from "../shared/workspace";
+import { resolveWorkspaceMarkdownTarget } from "../shared/workspaceLinks";
 import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
+import { ReadonlyMarkdownPreview } from "./ReadonlyMarkdownPreview";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 
 function toErrorMessage(error: unknown): string {
@@ -583,4 +594,606 @@ export function DatasetRenderableView({ datasetId }: { datasetId: string | null 
       <FlexLayout.Layout factory={renderableFactory} model={model!} />
     </div>
   );
+}
+
+export type IntegralAssetPreviewTarget =
+  | {
+      datasetId: string;
+      kind: "dataset";
+    }
+  | {
+      kind: "managed-file";
+      managedFileId: string;
+    };
+
+interface IntegralAssetPreviewAnchorLayout {
+  width: number;
+  x: number;
+  y: number;
+}
+
+interface IntegralAssetPreviewWindowProps {
+  anchorLayout: IntegralAssetPreviewAnchorLayout | null;
+  assetCatalog: IntegralAssetCatalog;
+  onClose: () => void;
+  target: IntegralAssetPreviewTarget;
+}
+
+interface IntegralAssetPreviewLayout {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}
+
+type IntegralAssetPreviewResolution =
+  | {
+      status: "loading";
+      title: string;
+    }
+  | {
+      message: string;
+      status: "error";
+      title: string;
+    }
+  | {
+      file: WorkspaceFileDocument;
+      status: "renderable-file";
+      summary: IntegralManagedFileSummary;
+      title: string;
+    }
+  | {
+      markdown: string;
+      sourceLabel: string;
+      status: "markdown";
+      title: string;
+    }
+  | {
+      sourceLabel: string;
+      status: "text";
+      text: string;
+      title: string;
+    }
+  | {
+      dataset: IntegralDatasetSummary;
+      notes: IntegralAssetPreviewNote[];
+      status: "dataset";
+      title: string;
+    };
+
+interface IntegralAssetPreviewNote {
+  error?: string;
+  key: string;
+  markdown?: string;
+  subtitle?: string;
+  title: string;
+}
+
+const PREVIEW_MIN_WIDTH = 320;
+const PREVIEW_MIN_HEIGHT = 240;
+const PREVIEW_DEFAULT_WIDTH = 520;
+const PREVIEW_DEFAULT_HEIGHT = 420;
+const PREVIEW_MARGIN = 12;
+
+export function IntegralAssetPreviewWindow({
+  anchorLayout,
+  assetCatalog,
+  onClose,
+  target
+}: IntegralAssetPreviewWindowProps): JSX.Element {
+  const [layout, setLayout] = useState<IntegralAssetPreviewLayout>(() =>
+    computeInitialAssetPreviewLayout(anchorLayout)
+  );
+  const [resolution, setResolution] = useState<IntegralAssetPreviewResolution>({
+    status: "loading",
+    title: "Preview"
+  });
+  const removeDragListenersRef = useRef<() => void>(() => {});
+  const targetKey = toAssetPreviewTargetKey(target);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setResolution({
+      status: "loading",
+      title: "Preview"
+    });
+
+    void resolveIntegralAssetPreview(target, assetCatalog)
+      .then((nextResolution) => {
+        if (!cancelled) {
+          setResolution(nextResolution);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setResolution({
+            message: toErrorMessage(error),
+            status: "error",
+            title: "Preview"
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetCatalog, targetKey]);
+
+  useLayoutEffect(() => {
+    const handleResize = (): void => {
+      setLayout((current) => clampAssetPreviewLayout(current));
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      removeDragListenersRef.current();
+    };
+  }, []);
+
+  const startDrag = (
+    mode: "move" | "resize",
+    event: ReactPointerEvent<HTMLElement>
+  ): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLayout = layout;
+
+    removeDragListenersRef.current();
+
+    const handlePointerMove = (pointerEvent: PointerEvent): void => {
+      pointerEvent.preventDefault();
+
+      const deltaX = pointerEvent.clientX - startX;
+      const deltaY = pointerEvent.clientY - startY;
+
+      setLayout(
+        clampAssetPreviewLayout(
+          mode === "move"
+            ? {
+                ...startLayout,
+                x: startLayout.x + deltaX,
+                y: startLayout.y + deltaY
+              }
+            : {
+                ...startLayout,
+                height: startLayout.height + deltaY,
+                width: startLayout.width + deltaX
+              }
+        )
+      );
+    };
+
+    const handlePointerUp = (): void => {
+      removeDragListenersRef.current();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    removeDragListenersRef.current = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      removeDragListenersRef.current = () => {};
+    };
+  };
+
+  return (
+    <div
+      className="integral-asset-preview"
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
+      style={{
+        height: `${layout.height}px`,
+        left: `${layout.x}px`,
+        top: `${layout.y}px`,
+        width: `${layout.width}px`
+      }}
+    >
+      <div
+        className="integral-asset-preview__header"
+        onPointerDown={(event) => {
+          startDrag("move", event);
+        }}
+      >
+        <div className="integral-asset-preview__title">
+          <strong>{resolution.title}</strong>
+          <span>{getAssetPreviewSubtitle(resolution)}</span>
+        </div>
+        <button
+          aria-label="preview を閉じる"
+          className="integral-asset-preview__close"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+          }}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="integral-asset-preview__body">
+        <IntegralAssetPreviewContent resolution={resolution} />
+      </div>
+
+      <div
+        className="integral-asset-preview__resize"
+        onPointerDown={(event) => {
+          startDrag("resize", event);
+        }}
+        title="preview をリサイズ"
+      />
+    </div>
+  );
+}
+
+function IntegralAssetPreviewContent({
+  resolution
+}: {
+  resolution: IntegralAssetPreviewResolution;
+}): JSX.Element {
+  if (resolution.status === "loading") {
+    return <div className="integral-asset-preview__status">preview を読み込み中...</div>;
+  }
+
+  if (resolution.status === "error") {
+    return (
+      <div className="integral-asset-preview__status integral-asset-preview__status--error">
+        {resolution.message}
+      </div>
+    );
+  }
+
+  if (resolution.status === "renderable-file") {
+    const { file } = resolution;
+
+    if (file.kind === "html") {
+      return (
+        <iframe
+          className="integral-asset-preview__frame"
+          sandbox="allow-same-origin allow-scripts"
+          srcDoc={file.content ?? ""}
+          title={file.name}
+        />
+      );
+    }
+
+    if (file.kind === "image") {
+      return (
+        <img
+          alt={file.name}
+          className="integral-asset-preview__image"
+          src={file.content ?? ""}
+        />
+      );
+    }
+
+    if (file.kind === "plugin" && file.pluginViewer) {
+      return (
+        <ExternalPluginFileViewer
+          file={{
+            content: file.content ?? "",
+            name: file.name,
+            pluginViewer: file.pluginViewer,
+            relativePath: file.relativePath
+          }}
+          presentation="embed"
+          source={{
+            kind: "workspace-file"
+          }}
+        />
+      );
+    }
+
+    return (
+      <div className="integral-asset-preview__status">
+        この file は preview できません。
+      </div>
+    );
+  }
+
+  if (resolution.status === "markdown") {
+    return (
+      <ReadonlyMarkdownPreview
+        className="integral-asset-preview__markdown"
+        content={resolution.markdown}
+        proxyDomURL={proxyIntegralAssetPreviewImageUrl}
+      />
+    );
+  }
+
+  if (resolution.status === "text") {
+    return <pre className="integral-asset-preview__text">{resolution.text}</pre>;
+  }
+
+  return (
+    <div className="integral-asset-preview__dataset-notes">
+      {resolution.notes.map((note) => (
+        <section className="integral-asset-preview__note-card" key={note.key}>
+          <header className="integral-asset-preview__note-header">
+            <strong>{note.title}</strong>
+            {note.subtitle ? <span>{note.subtitle}</span> : null}
+          </header>
+          {note.error ? (
+            <div className="integral-asset-preview__status integral-asset-preview__status--error">
+              {note.error}
+            </div>
+          ) : (
+            <ReadonlyMarkdownPreview
+              className="integral-asset-preview__markdown"
+              content={note.markdown ?? ""}
+              proxyDomURL={proxyIntegralAssetPreviewImageUrl}
+            />
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+async function resolveIntegralAssetPreview(
+  target: IntegralAssetPreviewTarget,
+  assetCatalog: IntegralAssetCatalog
+): Promise<IntegralAssetPreviewResolution> {
+  if (target.kind === "dataset") {
+    const dataset = assetCatalog.datasets.find(
+      (candidate) => candidate.datasetId === target.datasetId
+    );
+
+    if (!dataset) {
+      throw new Error(`dataset が見つかりません: ${target.datasetId}`);
+    }
+
+    const datasetNote = await readIntegralAssetPreviewNote({
+      canOpenDataNote: dataset.canOpenDataNote,
+      key: `dataset:${dataset.datasetId}`,
+      subtitle: dataset.datatype ?? "datatype 未設定",
+      targetId: dataset.noteTargetId ?? dataset.datasetId,
+      title: dataset.name
+    });
+    const memberNotes = await Promise.all(
+      (dataset.memberIds ?? []).map(async (memberId) => {
+        const managedFile = assetCatalog.managedFiles.find(
+          (candidate) => candidate.id === memberId
+        );
+
+        if (!managedFile) {
+          return {
+            error: "構成 file の metadata が見つかりません。",
+            key: `member:${memberId}`,
+            subtitle: memberId,
+            title: memberId
+          } satisfies IntegralAssetPreviewNote;
+        }
+
+        return readIntegralAssetPreviewNote({
+          canOpenDataNote: managedFile.canOpenDataNote,
+          key: `member:${managedFile.id}`,
+          subtitle: managedFile.path,
+          targetId: managedFile.noteTargetId ?? managedFile.id,
+          title: managedFile.displayName
+        });
+      })
+    );
+
+    return {
+      dataset,
+      notes: [datasetNote, ...memberNotes],
+      status: "dataset",
+      title: dataset.name
+    };
+  }
+
+  const managedFile = assetCatalog.managedFiles.find(
+    (candidate) => candidate.id === target.managedFileId
+  );
+
+  if (!managedFile) {
+    throw new Error(`managed file が見つかりません: ${target.managedFileId}`);
+  }
+
+  const file = await window.integralNotes.readWorkspaceFile(managedFile.path);
+
+  if (file.kind === "html" || file.kind === "image" || (file.kind === "plugin" && file.pluginViewer)) {
+    return {
+      file,
+      status: "renderable-file",
+      summary: managedFile,
+      title: managedFile.displayName
+    };
+  }
+
+  if (managedFile.canOpenDataNote) {
+    const note = await readIntegralAssetPreviewNote({
+      canOpenDataNote: managedFile.canOpenDataNote,
+      key: `managed-file:${managedFile.id}`,
+      subtitle: managedFile.path,
+      targetId: managedFile.noteTargetId ?? managedFile.id,
+      title: managedFile.displayName
+    });
+
+    return note.error
+      ? {
+          message: note.error,
+          status: "error",
+          title: managedFile.displayName
+        }
+      : {
+          markdown: note.markdown ?? "",
+          sourceLabel: "DATA-NOTE",
+          status: "markdown",
+          title: managedFile.displayName
+        };
+  }
+
+  if (file.kind === "markdown") {
+    return {
+      markdown: file.content ?? "",
+      sourceLabel: "Markdown",
+      status: "markdown",
+      title: file.name
+    };
+  }
+
+  if (file.kind === "text") {
+    return {
+      sourceLabel: "Text",
+      status: "text",
+      text: file.content ?? "",
+      title: file.name
+    };
+  }
+
+  return {
+    message: "この file は preview できず、対応する data-note もありません。",
+    status: "error",
+    title: managedFile.displayName
+  };
+}
+
+async function readIntegralAssetPreviewNote({
+  canOpenDataNote,
+  key,
+  subtitle,
+  targetId,
+  title
+}: {
+  canOpenDataNote: boolean;
+  key: string;
+  subtitle?: string;
+  targetId: string;
+  title: string;
+}): Promise<IntegralAssetPreviewNote> {
+  if (!canOpenDataNote) {
+    return {
+      error: "data-note はありません。",
+      key,
+      subtitle,
+      title
+    };
+  }
+
+  try {
+    const note = await window.integralNotes.readWorkspaceFile(
+      createManagedDataNoteRelativePath(targetId)
+    );
+
+    return {
+      key,
+      markdown: note.content ?? "",
+      subtitle,
+      title
+    };
+  } catch (error) {
+    return {
+      error: toErrorMessage(error),
+      key,
+      subtitle,
+      title
+    };
+  }
+}
+
+function getAssetPreviewSubtitle(resolution: IntegralAssetPreviewResolution): string {
+  if (resolution.status === "renderable-file") {
+    return resolution.summary.path;
+  }
+
+  if (resolution.status === "markdown" || resolution.status === "text") {
+    return resolution.sourceLabel;
+  }
+
+  if (resolution.status === "dataset") {
+    const memberCount = resolution.dataset.memberIds?.length ?? 0;
+    return `${memberCount} members`;
+  }
+
+  return "";
+}
+
+function computeInitialAssetPreviewLayout(
+  anchorLayout: IntegralAssetPreviewAnchorLayout | null
+): IntegralAssetPreviewLayout {
+  const width = Math.min(PREVIEW_DEFAULT_WIDTH, Math.max(PREVIEW_MIN_WIDTH, window.innerWidth - 24));
+  const height = Math.min(
+    PREVIEW_DEFAULT_HEIGHT,
+    Math.max(PREVIEW_MIN_HEIGHT, window.innerHeight - 24)
+  );
+
+  if (!anchorLayout) {
+    return clampAssetPreviewLayout({
+      height,
+      width,
+      x: window.innerWidth - width - PREVIEW_MARGIN,
+      y: PREVIEW_MARGIN
+    });
+  }
+
+  const rightX = anchorLayout.x + anchorLayout.width + PREVIEW_MARGIN;
+  const leftX = anchorLayout.x - width - PREVIEW_MARGIN;
+  const x = rightX + width <= window.innerWidth - PREVIEW_MARGIN ? rightX : leftX;
+
+  return clampAssetPreviewLayout({
+    height,
+    width,
+    x,
+    y: anchorLayout.y
+  });
+}
+
+function clampAssetPreviewLayout(
+  layout: IntegralAssetPreviewLayout
+): IntegralAssetPreviewLayout {
+  const maxWidth = Math.max(PREVIEW_MIN_WIDTH, window.innerWidth - PREVIEW_MARGIN * 2);
+  const maxHeight = Math.max(PREVIEW_MIN_HEIGHT, window.innerHeight - PREVIEW_MARGIN * 2);
+  const width = Math.min(Math.max(layout.width, PREVIEW_MIN_WIDTH), maxWidth);
+  const height = Math.min(Math.max(layout.height, PREVIEW_MIN_HEIGHT), maxHeight);
+  const maxX = Math.max(PREVIEW_MARGIN, window.innerWidth - width - PREVIEW_MARGIN);
+  const maxY = Math.max(PREVIEW_MARGIN, window.innerHeight - height - PREVIEW_MARGIN);
+
+  return {
+    height,
+    width,
+    x: Math.min(Math.max(layout.x, PREVIEW_MARGIN), maxX),
+    y: Math.min(Math.max(layout.y, PREVIEW_MARGIN), maxY)
+  };
+}
+
+function toAssetPreviewTargetKey(target: IntegralAssetPreviewTarget): string {
+  return target.kind === "dataset"
+    ? `dataset:${target.datasetId}`
+    : `managed-file:${target.managedFileId}`;
+}
+
+function createManagedDataNoteRelativePath(targetId: string): string {
+  return `.store/.integral/data-notes/${targetId.trim()}.md`;
+}
+
+async function proxyIntegralAssetPreviewImageUrl(url: string): Promise<string> {
+  const relativePath = resolveWorkspaceMarkdownTarget(url);
+
+  if (!relativePath) {
+    return url;
+  }
+
+  try {
+    return await window.integralNotes.resolveWorkspaceFileUrl(relativePath);
+  } catch {
+    return url;
+  }
 }
