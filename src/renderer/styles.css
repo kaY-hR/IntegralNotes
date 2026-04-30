@@ -1925,6 +1925,11 @@ textarea:focus-visible {
   max-height: min(760px, calc(100vh - 40px));
 }
 
+.dialog-card--app-settings {
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+}
+
 .dialog-card--ai-chat-settings {
   width: min(860px, 100%);
   max-height: min(760px, calc(100vh - 40px));
@@ -2005,6 +2010,13 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
 .dialog-card__body--data-registration {
   display: grid;
   gap: 10px;
+  max-height: min(620px, calc(100vh - 180px));
+  overflow: auto;
+}
+
+.dialog-card__body--app-settings {
+  display: grid;
+  gap: 12px;
   max-height: min(620px, calc(100vh - 180px));
   overflow: auto;
 }
@@ -2349,6 +2361,34 @@ body.integral-dialog-open .milkdown .crepe-placeholder::before {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.app-settings-dialog__section {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #c8d3de;
+  border-radius: 3px;
+  background: #f4f7fa;
+}
+
+.app-settings-dialog__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.app-settings-dialog__section-header strong {
+  font-size: 0.82rem;
+  color: #0e2a42;
+}
+
+.app-settings-dialog__note {
+  margin: 0;
+  color: #5a6d7e;
+  font-size: 0.76rem;
+  line-height: 1.4;
 }
 
 .plugin-manager__toolbar,
@@ -4680,6 +4720,7 @@ pre.ai-chat-panel__message-body--plain {
   .dialog-card--tracking,
   .dialog-card--asset-picker,
   .dialog-card--data-registration,
+  .dialog-card--app-settings,
   .dialog-card--ai-chat-settings {
     width: min(100%, 100%);
     max-height: calc(100vh - 24px);

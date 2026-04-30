@@ -20,6 +20,10 @@ import type {
   AiHostCommandExecutionUpdate
 } from "../shared/aiChat";
 import type {
+  AppSettings,
+  SaveAppSettingsRequest
+} from "../shared/appSettings";
+import type {
   CopyEntriesResult,
   CreateEntryResult,
   DeleteEntriesResult,
@@ -64,6 +68,8 @@ import {
   OPEN_MANAGED_DATA_NOTE_EVENT,
   OPEN_WORKSPACE_FILE_EVENT
 } from "./workspaceOpenEvents";
+import { AIChatSettingsDialog } from "./AIChatSettingsDialog";
+import { AppSettingsDialog } from "./AppSettingsDialog";
 
 type ReadonlyWorkspaceFileKind = Exclude<WorkspaceFileViewKind, "markdown">;
 type MarkdownEditorMode = "wysiwyg" | "text";
@@ -1049,6 +1055,10 @@ export function App(): JSX.Element {
   const [workspaceSearchError, setWorkspaceSearchError] = useState<string | null>(null);
   const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
+  const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
+  const [aiSettingsDialogOpen, setAiSettingsDialogOpen] = useState(false);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [appSettingsPending, setAppSettingsPending] = useState(false);
   const [hostCommandDialog, setHostCommandDialog] = useState<HostCommandDialogState | null>(null);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
   const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
@@ -1074,6 +1084,8 @@ export function App(): JSX.Element {
     deleteDialog !== null ||
     datasetCreationDialog !== null ||
     dataRegistrationDialogOpen ||
+    appSettingsDialogOpen ||
+    aiSettingsDialogOpen ||
     hostCommandDialog !== null;
 
   useEffect(() => {
@@ -1725,6 +1737,36 @@ export function App(): JSX.Element {
 
   const openDataRegistrationDialog = (): void => {
     setDataRegistrationDialogOpen(true);
+  };
+
+  const loadAppSettings = async (): Promise<void> => {
+    setAppSettingsPending(true);
+
+    try {
+      setAppSettings(await window.integralNotes.getAppSettings());
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setAppSettingsPending(false);
+    }
+  };
+
+  const openAppSettingsDialog = (): void => {
+    setAppSettingsDialogOpen(true);
+    void loadAppSettings();
+  };
+
+  const saveAppSettings = async (request: SaveAppSettingsRequest): Promise<void> => {
+    setAppSettingsPending(true);
+
+    try {
+      const nextSettings = await window.integralNotes.saveAppSettings(request);
+      setAppSettings(nextSettings);
+      setAppSettingsDialogOpen(false);
+      setStatusMessage("設定を保存しました。");
+    } finally {
+      setAppSettingsPending(false);
+    }
   };
 
   const toggleHiddenEntriesVisibility = (): void => {
@@ -3811,6 +3853,13 @@ export function App(): JSX.Element {
         </button>
         <button
           className="button button--ghost button--menu"
+          onClick={openAppSettingsDialog}
+          type="button"
+        >
+          設定
+        </button>
+        <button
+          className="button button--ghost button--menu"
           onClick={openPluginManager}
           type="button"
         >
@@ -4249,6 +4298,29 @@ export function App(): JSX.Element {
             setDataRegistrationDialogOpen(false);
             setStatusMessage(`${dataset.name} を作成しました。`);
           }}
+        />
+      ) : null}
+
+      {appSettingsDialogOpen ? (
+        <AppSettingsDialog
+          onClose={() => {
+            setAppSettingsDialogOpen(false);
+          }}
+          onOpenAiSettings={() => {
+            setAiSettingsDialogOpen(true);
+          }}
+          onSave={saveAppSettings}
+          pending={appSettingsPending}
+          settings={appSettings}
+        />
+      ) : null}
+
+      {aiSettingsDialogOpen ? (
+        <AIChatSettingsDialog
+          onClose={() => {
+            setAiSettingsDialogOpen(false);
+          }}
+          onError={setStatusMessage}
         />
       ) : null}
 

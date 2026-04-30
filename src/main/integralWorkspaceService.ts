@@ -39,16 +39,17 @@ import {
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
 } from "../shared/workspaceLinks";
+import { toDataRegistrationDirectoryRelativePath } from "../shared/appSettings";
 import type {
   WorkspaceDatasetManifestMember,
   WorkspaceFileDocument
 } from "../shared/workspace";
+import type { AppSettingsService } from "./appSettingsService";
 import { PluginRegistry } from "./pluginRegistry";
 import { WorkspaceService, type WorkspaceMutation } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
 
-const DATA_DIRECTORY = "Data";
 const DATASET_JSON_EXTENSION = ".idts";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
@@ -246,7 +247,8 @@ export class IntegralWorkspaceService {
 
   constructor(
     private readonly workspaceService: WorkspaceService,
-    private readonly pluginRegistry: PluginRegistry
+    private readonly pluginRegistry: PluginRegistry,
+    private readonly appSettingsService: AppSettingsService
   ) {}
 
   async listAssetCatalog(): Promise<IntegralAssetCatalog> {
@@ -419,8 +421,9 @@ export class IntegralWorkspaceService {
     const uniqueManagedFileIds = Array.from(new Set(managedFileIds));
     const datasetId = createOpaqueId("DTS");
     const datasetName = normalizeDatasetName(request.name, datasetId);
+    const dataRegistrationDirectory = await this.resolveDataRegistrationDirectory();
     const manifestRelativePath = await this.createVisibleDatasetManifestRelativePath(
-      DATA_DIRECTORY,
+      dataRegistrationDirectory,
       datasetName,
       datasetId
     );
@@ -1811,21 +1814,31 @@ export class IntegralWorkspaceService {
       return path.relative(rootPath, sourceAbsolutePath).split(path.sep).join("/");
     }
 
-    const dataRootPath = this.resolveWorkspacePath(DATA_DIRECTORY);
+    const dataRegistrationDirectory = await this.resolveDataRegistrationDirectory();
+    const dataRootPath = this.resolveWorkspacePath(dataRegistrationDirectory);
     await fs.mkdir(dataRootPath, { recursive: true });
 
-    const preferredRelativePath = `${DATA_DIRECTORY}/${path.basename(sourceAbsolutePath)}`;
+    const preferredRelativePath = normalizeRelativePath(
+      `${dataRegistrationDirectory}/${path.basename(sourceAbsolutePath)}`
+    );
     const preferredAbsolutePath = this.resolveWorkspacePath(preferredRelativePath);
 
     if (!(await pathExists(preferredAbsolutePath))) {
       return preferredRelativePath;
     }
 
-    return `${DATA_DIRECTORY}/${createVisibleAliasEntryName(
-      path.basename(sourceAbsolutePath),
-      managedFileId,
-      representation
-    )}`;
+    return normalizeRelativePath(
+      `${dataRegistrationDirectory}/${createVisibleAliasEntryName(
+        path.basename(sourceAbsolutePath),
+        managedFileId,
+        representation
+      )}`
+    );
+  }
+
+  private async resolveDataRegistrationDirectory(): Promise<string> {
+    const settings = await this.appSettingsService.getSettings();
+    return toDataRegistrationDirectoryRelativePath(settings.dataRegistrationDirectory);
   }
 
   private async copyManagedFileIntoWorkspace(
