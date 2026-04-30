@@ -21,6 +21,8 @@ import type {
   SubmitAiChatResult,
   SubmitInlineAiInsertionRequest,
   SubmitInlineAiInsertionResult,
+  SubmitPromptlessContinuationRequest,
+  SubmitPromptlessContinuationResult,
   SubmitInlinePythonBlockRequest,
   SubmitInlinePythonBlockResult
 } from "./aiChat";
@@ -342,6 +344,9 @@ export interface IntegralNotesApi {
   submitInlinePythonBlock: (
     request: SubmitInlinePythonBlockRequest
   ) => Promise<SubmitInlinePythonBlockResult>;
+  submitPromptlessContinuation: (
+    request: SubmitPromptlessContinuationRequest
+  ) => Promise<SubmitPromptlessContinuationResult>;
   onAiHostCommandApprovalRequest: (
     handler: (request: AiHostCommandApprovalRequest) => void
   ) => () => void;

@@ -96,6 +96,8 @@ const api: IntegralNotesApi = {
   submitAiChat: (request) => ipcRenderer.invoke("ai-chat:submit", request),
   submitInlineAiInsertion: (request) => ipcRenderer.invoke("ai-chat:submitInlineInsertion", request),
   submitInlinePythonBlock: (request) => ipcRenderer.invoke("ai-chat:submitInlinePythonBlock", request),
+  submitPromptlessContinuation: (request) =>
+    ipcRenderer.invoke("ai-chat:submitPromptlessContinuation", request),
   onAiHostCommandApprovalRequest: (handler) => {
     const listener = (_event: IpcRendererEvent, request: Parameters<typeof handler>[0]) => {
       handler(request);

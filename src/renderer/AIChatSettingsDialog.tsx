@@ -94,7 +94,8 @@ export function AIChatSettingsDialog({
     () =>
       systemPromptInputs.chatPanel.trim().length > 0 &&
       systemPromptInputs.inlineInsertion.trim().length > 0 &&
-      systemPromptInputs.inlinePythonBlock.trim().length > 0,
+      systemPromptInputs.inlinePythonBlock.trim().length > 0 &&
+      systemPromptInputs.promptlessContinuation.trim().length > 0,
     [systemPromptInputs]
   );
 
@@ -172,7 +173,7 @@ export function AIChatSettingsDialog({
         <div className="dialog-card__header">
           <p className="dialog-card__eyebrow">AI Chat</p>
           <h2>AI Chat Settings</h2>
-          <p>model、認証、chat / ?? / &gt;&gt; のsystem promptを設定します。</p>
+          <p>model、認証、chat / ?? / &gt;&gt; / @@ のsystem promptを設定します。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--ai-chat-settings">
@@ -266,7 +267,7 @@ export function AIChatSettingsDialog({
                 <span className="ai-chat-panel__context-label">Prompts</span>
                 <h3 className="ai-chat-panel__section-title">System Prompts</h3>
                 <p className="ai-chat-panel__description">
-                  保存すると、通常chat、??のAI挿入、&gt;&gt;のPython block生成に反映されます。
+                  保存すると、通常chat、??のAI挿入、&gt;&gt;のPython block生成、@@の続きを生成に反映されます。
                 </p>
               </div>
 
@@ -319,9 +320,21 @@ export function AIChatSettingsDialog({
                 />
               </label>
 
+              <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
+                <span className="ai-chat-panel__context-label">@@ Promptless continuation</span>
+                <textarea
+                  className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
+                  onChange={(event) => {
+                    updateSystemPromptInput("promptlessContinuation", event.target.value);
+                  }}
+                  rows={9}
+                  value={systemPromptInputs.promptlessContinuation}
+                />
+              </label>
+
               {!systemPromptInputsAreValid ? (
                 <p className="ai-chat-panel__note">
-                  system prompt は3種類とも空にできません。既定値に戻す場合は Reset Prompts を使ってください。
+                  system prompt は4種類とも空にできません。既定値に戻す場合は Reset Prompts を使ってください。
                 </p>
               ) : null}
             </div>

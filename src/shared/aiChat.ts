@@ -68,6 +68,7 @@ export interface AiChatSystemPrompts {
   chatPanel: string;
   inlineInsertion: string;
   inlinePythonBlock: string;
+  promptlessContinuation: string;
 }
 
 export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
@@ -131,6 +132,23 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "After saving the script and only when ready to insert, call the insertPythonBlock tool with scriptPath, functionName, and a short summary.",
     "Do not call insertPythonBlock before writeWorkspaceFile has saved the Python file.",
     "Do not return JSON as a substitute for insertPythonBlock."
+  ].join("\n"),
+  promptlessContinuation: [
+    "You are running inside the IntegralNotes @@ promptless continuation trigger.",
+    "The user did not provide a prompt. Infer the next useful content from the open Markdown document, the cursor context, selected workspace paths, and workspace evidence when needed.",
+    "The open Markdown document in the prompt is the current editor state and may include unsaved changes; treat it as authoritative for the active note.",
+    "Use workspace tools when you need file evidence instead of guessing.",
+    "If you discover or receive an image path and need to inspect the image itself, use readWorkspaceImage.",
+    "If Markdown or HTML layout, rendered charts, screenshots, or embedded visual content matter, use renderWorkspaceDocument.",
+    "If a real CLI command is needed, use runShellCommand with command and purpose. The app will ask the user for approval.",
+    "Continue the note in its existing language, tone, heading level, indentation, list structure, table style, and surrounding whitespace.",
+    "The continuation may be prose, bullet points, a Markdown table, an itg-notes block, or a Python analysis block implementation when that is the natural next step.",
+    "Choose exactly one commit path.",
+    "For normal Markdown continuation, call insertMarkdownAtCursor with exactly the Markdown that belongs at the cursor.",
+    "For a Python analysis block, first save a real workspace Python file with writeWorkspaceFile, then call insertPythonBlock with the saved scriptPath and functionName.",
+    "Do not ask follow-up questions in @@ mode. If uncertain, make a conservative continuation that fits the surrounding note.",
+    "Do not answer with the inserted text as plain assistant prose. The insertion must be delivered through insertMarkdownAtCursor or insertPythonBlock.",
+    "Do not include greetings, explanations, labels, surrounding quotes, or code fences unless they are literally part of the inserted Markdown or Python block content."
   ].join("\n")
 };
 
@@ -257,6 +275,36 @@ export interface SubmitInlinePythonBlockResult {
   insertion: InlinePythonBlockInsertion | null;
   messages: AiChatMessage[];
   scriptPath?: string;
+  sessionId: string;
+  userMessage: AiChatMessage;
+}
+
+export interface SubmitPromptlessContinuationRequest {
+  afterText: string;
+  beforeText: string;
+  context: AiChatContextSummary;
+  documentMarkdown: string;
+  history: AiChatMessage[];
+  insertionPosition: number;
+  sessionId?: string | null;
+  sourceNotePath: string;
+  streamId?: string | null;
+}
+
+export type PromptlessContinuationInsertion =
+  | {
+      kind: "markdown";
+      markdown: InlineAiTextInsertion;
+    }
+  | {
+      kind: "python-block";
+      pythonBlock: InlinePythonBlockInsertion;
+    };
+
+export interface SubmitPromptlessContinuationResult {
+  assistantText?: string;
+  insertion: PromptlessContinuationInsertion | null;
+  messages: AiChatMessage[];
   sessionId: string;
   userMessage: AiChatMessage;
 }

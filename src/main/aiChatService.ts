@@ -23,6 +23,7 @@ import {
   type AiChatSystemPrompts,
   type AiChatToolTraceEntry,
   type InlinePythonBlockInsertion,
+  type PromptlessContinuationInsertion,
   type CreateAiChatSessionRequest,
   type SaveAiChatSettingsRequest,
   type SaveAiChatSessionRequest,
@@ -30,6 +31,8 @@ import {
   type SubmitAiChatResult,
   type SubmitInlineAiInsertionRequest,
   type SubmitInlineAiInsertionResult,
+  type SubmitPromptlessContinuationRequest,
+  type SubmitPromptlessContinuationResult,
   type SubmitInlinePythonBlockRequest,
   type SubmitInlinePythonBlockResult
 } from "../shared/aiChat";
@@ -125,6 +128,7 @@ const MAX_INLINE_AI_CONTEXT_CHARS = 6_000;
 const MAX_INLINE_AI_DOCUMENT_CHARS = 30_000;
 const TOOL_LOOP_INLINE_INSERTION_MAX_STEPS = 8;
 const TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS = 8;
+const TOOL_LOOP_PROMPTLESS_CONTINUATION_MAX_STEPS = 10;
 const WORKSPACE_ENV_FILENAMES = [".env.local", ".env"] as const;
 const FALLBACK_MODELS: AiChatModelOption[] = [
   {
@@ -590,20 +594,7 @@ export class AiChatService {
     const insertion = parseInlinePythonBlockInsertion(result.diagnostics.toolTrace);
 
     if (insertion) {
-      const absoluteScriptPath = this.workspaceService.getAbsolutePath(insertion.scriptPath);
-      const stats = await fs.stat(absoluteScriptPath).catch(() => null);
-
-      if (!stats?.isFile()) {
-        throw new Error(`AI が Python script を保存しませんでした: ${insertion.scriptPath}`);
-      }
-
-      const scriptSource = await fs.readFile(absoluteScriptPath, "utf8");
-
-      if (!containsDiscoverableIntegralCallable(scriptSource, insertion.functionName)) {
-        throw new Error(
-          `${insertion.scriptPath} に @integral_block 直下の def ${insertion.functionName}(...) が見つかりません。`
-        );
-      }
+      await this.validateInlinePythonBlockInsertion(insertion);
     }
 
     const assistantMessage: AiChatMessage = {
@@ -641,6 +632,112 @@ export class AiChatService {
     });
 
     return response;
+  }
+
+  async submitPromptlessContinuation(
+    request: SubmitPromptlessContinuationRequest,
+    options: AiChatExecutionOptions = {}
+  ): Promise<SubmitPromptlessContinuationResult> {
+    const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
+
+    if (!workspaceRootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const [{ runtimeSelection, status }, settings, appSettings] = await Promise.all([
+      this.resolveCurrentRuntimeSelection(),
+      this.readPersistedSettings(),
+      this.appSettingsService.getSettings()
+    ]);
+    const systemPrompts = resolveAiChatSystemPrompts(settings);
+
+    if (runtimeSelection.mode === "stub") {
+      throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
+    }
+
+    const normalizedPriorMessages = request.history
+      .map(normalizeAiChatMessageForPersistence)
+      .filter(isDefined);
+    const userMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      id: createChatMessageId("user"),
+      role: "user",
+      text: "@@ promptless continuation"
+    };
+    const conversationalMessages = [...normalizedPriorMessages, userMessage];
+    const skillPrompt = await readImplementIntegralBlockSkillPrompt(workspaceRootPath);
+    const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
+    const result = await this.generateTaskWithAgentRuntime({
+      context: request.context,
+      extraTools: createPromptlessContinuationTools(),
+      hostCommand: {
+        shellExecutablePath: settings.shellExecutablePath ?? null
+      },
+      instructions: buildPromptlessContinuationInstructions(
+        systemPrompts.promptlessContinuation,
+        skillPrompt,
+        appSettings.userId
+      ),
+      maxSteps: TOOL_LOOP_PROMPTLESS_CONTINUATION_MAX_STEPS,
+      prompt: buildPromptlessContinuationPrompt(request, conversationalMessages),
+      runtimeSelection,
+      stream,
+      useWorkspaceTools: true
+    });
+    const insertion = parsePromptlessContinuationInsertion(result.diagnostics.toolTrace);
+
+    if (insertion?.kind === "python-block") {
+      await this.validateInlinePythonBlockInsertion(insertion.pythonBlock);
+    }
+
+    const assistantMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      diagnostics: result.diagnostics,
+      id: createChatMessageId("assistant"),
+      role: "assistant",
+      text: result.text
+    };
+    const toolMessages = buildToolMessages(assistantMessage);
+    const responseMessages = [...toolMessages, assistantMessage];
+    const sessionId = await this.persistInlineAiSession({
+      context: request.context,
+      messages: [...conversationalMessages, ...responseMessages],
+      sessionId: request.sessionId ?? null,
+      workspaceRootPath
+    });
+
+    const response: SubmitPromptlessContinuationResult = {
+      assistantText: result.text,
+      insertion,
+      messages: responseMessages,
+      sessionId,
+      userMessage
+    };
+
+    emitAiChatStreamEvent(request.streamId ?? null, options, {
+      type: "finished"
+    });
+
+    return response;
+  }
+
+  private async validateInlinePythonBlockInsertion(
+    insertion: InlinePythonBlockInsertion
+  ): Promise<void> {
+    const absoluteScriptPath = this.workspaceService.getAbsolutePath(insertion.scriptPath);
+    const stats = await fs.stat(absoluteScriptPath).catch(() => null);
+
+    if (!stats?.isFile()) {
+      throw new Error(`AI が Python script を保存しませんでした: ${insertion.scriptPath}`);
+    }
+
+    const scriptSource = await fs.readFile(absoluteScriptPath, "utf8");
+
+    if (!containsDiscoverableIntegralCallable(scriptSource, insertion.functionName)) {
+      throw new Error(
+        `${insertion.scriptPath} に @integral_block 直下の def ${insertion.functionName}(...) が見つかりません。`
+      );
+    }
   }
 
   private async getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
@@ -1182,6 +1279,13 @@ function createInlinePythonBlockTools(): ToolSet {
   };
 }
 
+function createPromptlessContinuationTools(): ToolSet {
+  return {
+    ...createInlineMarkdownInsertionTools(),
+    ...createInlinePythonBlockTools()
+  };
+}
+
 function parseInlineMarkdownInsertion(
   toolTrace: readonly AiChatToolTraceEntry[]
 ): InlineAiTextInsertion | null {
@@ -1209,6 +1313,105 @@ function parseInlineMarkdownInsertion(
   } catch {
     throw new Error("insertMarkdownAtCursor tool の結果から挿入 Markdown を取得できませんでした。");
   }
+}
+
+function buildPromptlessContinuationInstructions(
+  systemPrompt: string,
+  skillPrompt: string,
+  userId: string
+): string {
+  const lines = [
+    normalizeAiChatSystemPromptValue(
+      systemPrompt,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.promptlessContinuation
+    ),
+    ""
+  ];
+  const normalizedUserId = userId.trim();
+
+  lines.push(
+    normalizedUserId.length > 0
+      ? `Configured IntegralNotes user ID: ${normalizedUserId}. For new datatype names, prefer the ${normalizedUserId}/... namespace.`
+      : "No IntegralNotes user ID is configured. For new datatype names, use concise descriptive names and prefer a namespace if the user provides one.",
+    ""
+  );
+
+  if (skillPrompt.trim().length > 0) {
+    lines.push("# Python analysis block implementation contract");
+    lines.push(skillPrompt.trim());
+  }
+
+  return lines.join("\n");
+}
+
+function buildPromptlessContinuationPrompt(
+  request: SubmitPromptlessContinuationRequest,
+  messages: readonly AiChatMessage[]
+): string {
+  return [
+    "Promptless continuation transcript:",
+    formatInlinePythonBlockTranscript(messages),
+    "",
+    "The user typed @@ at [CURSOR]. There is no explicit user prompt.",
+    "",
+    `Source note path: ${request.sourceNotePath}`,
+    `Active path: ${request.context.activeRelativePath ?? "(none)"}`,
+    `Insertion position: ${formatInlineInsertionPosition(request.insertionPosition)}`,
+    `Open Markdown length: ${request.documentMarkdown.length} chars`,
+    "",
+    "Open Markdown document (current editor state):",
+    truncateInlineDocument(request.documentMarkdown),
+    "",
+    "Markdown before cursor:",
+    truncateInlineContext(request.beforeText, "tail"),
+    "",
+    "[CURSOR]",
+    "",
+    "Markdown after cursor:",
+    truncateInlineContext(request.afterText, "head"),
+    "",
+    "Infer and commit exactly one continuation. Use insertMarkdownAtCursor for Markdown continuation, or save a Python script with writeWorkspaceFile and then call insertPythonBlock for a Python analysis block."
+  ].join("\n");
+}
+
+function parsePromptlessContinuationInsertion(
+  toolTrace: readonly AiChatToolTraceEntry[]
+): PromptlessContinuationInsertion | null {
+  const insertionTrace = [...toolTrace]
+    .reverse()
+    .find(
+      (entry) =>
+        (entry.toolName === "insertMarkdownAtCursor" || entry.toolName === "insertPythonBlock") &&
+        entry.status === "success"
+    );
+
+  if (!insertionTrace) {
+    return null;
+  }
+
+  if (insertionTrace.toolName === "insertMarkdownAtCursor") {
+    const markdown = parseInlineMarkdownInsertion([insertionTrace]);
+
+    if (!markdown) {
+      throw new Error("insertMarkdownAtCursor tool の結果から挿入 Markdown を取得できませんでした。");
+    }
+
+    return {
+      kind: "markdown",
+      markdown
+    };
+  }
+
+  const pythonBlock = parseInlinePythonBlockInsertion([insertionTrace]);
+
+  if (!pythonBlock) {
+    throw new Error("insertPythonBlock tool の結果から script path / function name を取得できませんでした。");
+  }
+
+  return {
+    kind: "python-block",
+    pythonBlock
+  };
 }
 
 function buildInlinePythonBlockInstructions(
@@ -1944,6 +2147,10 @@ function normalizeAiChatSystemPrompts(value: unknown): AiChatSystemPrompts {
     inlinePythonBlock: normalizeAiChatSystemPromptValue(
       prompts.inlinePythonBlock,
       DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlinePythonBlock
+    ),
+    promptlessContinuation: normalizeAiChatSystemPromptValue(
+      prompts.promptlessContinuation,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.promptlessContinuation
     )
   };
 }
