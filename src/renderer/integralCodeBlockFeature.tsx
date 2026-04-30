@@ -53,6 +53,7 @@ import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
   getIntegralBlockDefinition,
+  normalizeIntegralBlockInputReferencesWithCatalog,
   parseIntegralBlockSource,
   renderIntegralBlockBody,
   serializeIntegralBlockContent,
@@ -312,6 +313,20 @@ class IntegralNotesBlockView implements NodeView {
 
           this.applyTextChange(result.nextText);
         }}
+        onReplaceInputReferences={(inputReferences) => {
+          const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
+            ...currentBlock,
+            inputs: inputReferences
+          }));
+
+          if (result.error) {
+            this.runState = createErrorRunState(result.error);
+            this.render();
+            return;
+          }
+
+          this.applyTextChange(result.nextText);
+        }}
         onAssignOutputReference={(slotName, outputReference) => {
           const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
             ...currentBlock,
@@ -471,6 +486,7 @@ function IntegralBlockPanel({
   onAssignInputReference,
   onAssignOutputReference,
   onDeleteBlock,
+  onReplaceInputReferences,
   onUpdateParams,
   onRun,
   parsed,
@@ -480,6 +496,7 @@ function IntegralBlockPanel({
   onAssignInputReference: (slotName: string, inputReference: string | null) => void;
   onAssignOutputReference: (slotName: string, outputReference: string | null) => void;
   onDeleteBlock: () => void;
+  onReplaceInputReferences: (inputReferences: Record<string, string | null>) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
   onRun: () => void;
   parsed: ParsedIntegralDraft;
@@ -511,6 +528,23 @@ function IntegralBlockPanel({
       })
       .catch(() => {});
   }, [parsed.block?.id, runState.finishedAt]);
+
+  useEffect(() => {
+    if (!parsed.block) {
+      return;
+    }
+
+    const normalizedBlock = normalizeIntegralBlockInputReferencesWithCatalog(
+      parsed.block,
+      assetCatalog
+    );
+
+    if (normalizedBlock === parsed.block) {
+      return;
+    }
+
+    onReplaceInputReferences(normalizedBlock.inputs);
+  }, [assetCatalog, onReplaceInputReferences, parsed.block]);
 
   const datasetMap = new Map<string, IntegralDatasetSummary>();
   const datasetPathMap = new Map<string, IntegralDatasetSummary>();

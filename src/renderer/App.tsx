@@ -56,6 +56,7 @@ import {
   resetIntegralPluginRuntime,
   setIntegralPluginRuntimeCatalog
 } from "./integralPluginRuntime";
+import { normalizeIntegralBlockInputReferencesInMarkdown } from "./integralBlockRegistry";
 import { ManagedDataTrackingDialog } from "./ManagedDataTrackingDialog";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { findWorkspaceToolPlugin, workspaceToolPlugins } from "./workspaceToolPlugins";
@@ -2402,7 +2403,11 @@ export function App(): JSX.Element {
     });
 
     try {
-      const savedNote = await window.integralNotes.saveNote(relativePath, tab.content);
+      const normalizedContent = normalizeIntegralBlockInputReferencesInMarkdown(
+        tab.content,
+        assetCatalog
+      );
+      const savedNote = await window.integralNotes.saveNote(relativePath, normalizedContent);
 
       setOpenTabs((currentTabs) => {
         const currentTab = currentTabs[relativePath];

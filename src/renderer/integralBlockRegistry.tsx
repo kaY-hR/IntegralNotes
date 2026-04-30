@@ -1,6 +1,9 @@
 import type {
+  IntegralAssetCatalog,
   IntegralBlockDocument,
-  IntegralBlockTypeDefinition
+  IntegralBlockTypeDefinition,
+  IntegralDatasetSummary,
+  IntegralManagedFileSummary
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPathWithRandomSuffix,
@@ -9,6 +12,10 @@ import {
 } from "../shared/integral";
 
 import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
+import {
+  resolveWorkspaceMarkdownTarget,
+  toCanonicalWorkspaceTarget
+} from "../shared/workspaceLinks";
 import {
   parseSimpleYamlDocument,
   serializeSimpleYamlDocument,
@@ -93,6 +100,62 @@ export function createPythonIntegralBlockMarkdown(blockType: string): string {
 
 export function serializeIntegralBlockContent(block: IntegralBlockDocument): string {
   return serializeSimpleYamlDocument(buildIntegralYamlDocument(block));
+}
+
+export function normalizeIntegralBlockInputReferencesWithCatalog(
+  block: IntegralBlockDocument,
+  assetCatalog: IntegralAssetCatalog
+): IntegralBlockDocument {
+  const resolveReference = createManagedDataReferenceResolver(assetCatalog);
+  let changed = false;
+  const normalizedInputs: Record<string, string | null> = {};
+
+  for (const [slotName, reference] of Object.entries(block.inputs)) {
+    if (typeof reference !== "string") {
+      normalizedInputs[slotName] = reference;
+      continue;
+    }
+
+    const normalizedReference = resolveReference(reference) ?? reference;
+    normalizedInputs[slotName] = normalizedReference;
+    changed ||= normalizedReference !== reference;
+  }
+
+  return changed
+    ? {
+        ...block,
+        inputs: normalizedInputs
+      }
+    : block;
+}
+
+export function normalizeIntegralBlockInputReferencesInMarkdown(
+  markdown: string,
+  assetCatalog: IntegralAssetCatalog
+): string {
+  if (markdown.length === 0) {
+    return markdown;
+  }
+
+  return markdown.replace(/```itg-notes\r?\n([\s\S]*?)\r?\n```/gu, (fullMatch, blockSource) => {
+    const rawBlockSource = typeof blockSource === "string" ? blockSource : "";
+    const parsed = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, rawBlockSource);
+
+    if (!parsed) {
+      return fullMatch;
+    }
+
+    const normalizedBlock = normalizeIntegralBlockInputReferencesWithCatalog(
+      parsed.block,
+      assetCatalog
+    );
+
+    if (normalizedBlock === parsed.block) {
+      return fullMatch;
+    }
+
+    return toIntegralCodeBlock(serializeIntegralBlockContent(normalizedBlock));
+  });
 }
 
 export function toIntegralCodeBlock(content: string): string {
@@ -258,6 +321,93 @@ function StatCard({ label, value }: { label: string; value: string }): JSX.Eleme
 
 function normalizeInputMap(value: unknown): Record<string, string | null> {
   return normalizeSlotReferenceMap(value);
+}
+
+function createManagedDataReferenceResolver(
+  assetCatalog: IntegralAssetCatalog
+): (reference: string) => string | null {
+  const idMap = new Map<string, string>();
+  const pathMap = new Map<string, string>();
+
+  for (const dataset of assetCatalog.datasets) {
+    addDatasetReferenceMaps(idMap, pathMap, dataset);
+  }
+
+  for (const managedFile of assetCatalog.managedFiles) {
+    addManagedFileReferenceMaps(idMap, pathMap, managedFile);
+  }
+
+  return (reference) => {
+    const normalizedReference = reference.trim();
+
+    if (normalizedReference.length === 0) {
+      return null;
+    }
+
+    return (
+      idMap.get(normalizedReference) ??
+      pathMap.get(normalizeManagedDataReferencePath(normalizedReference)) ??
+      null
+    );
+  };
+}
+
+function addDatasetReferenceMaps(
+  idMap: Map<string, string>,
+  pathMap: Map<string, string>,
+  dataset: IntegralDatasetSummary
+): void {
+  const datasetId = dataset.datasetId.trim();
+
+  if (datasetId.length === 0) {
+    return;
+  }
+
+  idMap.set(datasetId, datasetId);
+  addManagedDataPathReference(pathMap, dataset.path, datasetId);
+}
+
+function addManagedFileReferenceMaps(
+  idMap: Map<string, string>,
+  pathMap: Map<string, string>,
+  managedFile: IntegralManagedFileSummary
+): void {
+  const managedFileId = managedFile.id.trim();
+
+  if (managedFileId.length === 0) {
+    return;
+  }
+
+  idMap.set(managedFileId, managedFileId);
+  addManagedDataPathReference(pathMap, managedFile.path, managedFileId);
+}
+
+function addManagedDataPathReference(
+  pathMap: Map<string, string>,
+  referencePath: string,
+  id: string
+): void {
+  const normalizedPath = normalizeManagedDataReferencePath(referencePath);
+
+  if (normalizedPath.length === 0) {
+    return;
+  }
+
+  pathMap.set(normalizedPath, id);
+  pathMap.set(normalizeManagedDataReferencePath(toCanonicalWorkspaceTarget(normalizedPath)), id);
+}
+
+function normalizeManagedDataReferencePath(reference: string): string {
+  return (
+    resolveWorkspaceMarkdownTarget(reference) ??
+    reference
+      .trim()
+      .replace(/\\/gu, "/")
+      .replace(/^\/+/u, "")
+      .split("/")
+      .filter(Boolean)
+      .join("/")
+  );
 }
 
 function normalizeSlotReferenceMap(value: unknown): Record<string, string | null> {
