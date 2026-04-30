@@ -2,12 +2,7 @@
 
 Use this reference when writing or revising the Python file behind an `@integral_block`.
 
-Examples in this package:
-
-- `../../../demo_hello_report.py`
-- `../../../demo_dataset_report.py`
-- `../../../src/lc_text_to_chromatogram_json.py`
-- `../../../src/chromatogram_pca.py`
+Use `../../../scripts/integral/__init__.py` as the SDK source of truth. Do not assume demo scripts are present in every workspace template.
 
 ## Runtime Contract
 
@@ -28,9 +23,45 @@ Interpret the arguments like this:
 - `.idts` `inputs[slot]`: a readable directory path or `None`
 - non-`.idts` `outputs[slot]`: a file path reserved for the output file or `None`
 - `.idts` `outputs[slot]`: a writable directory path reserved for bundle contents or `None`
-- `params`: a free-form object or `None`
+- `params`: a value object normalized from the decorator `params` schema, or `None`
 
 Write files to the assigned paths. Do not return in-memory objects to the app.
+
+## Decorator Params Pattern
+
+Declare user-editable params in the decorator, not only in the YAML block:
+
+```python
+@integral_block(
+    display_name="Threshold Report",
+    outputs=[
+        {"name": "report", "extension": ".html", "datatype": "user-id/html-report"},
+    ],
+    params={
+        "type": "object",
+        "properties": {
+            "threshold": {
+                "type": "number",
+                "title": "Threshold",
+                "description": "Cutoff value used by the analysis.",
+                "default": 0.5,
+                "minimum": 0,
+            },
+        },
+    },
+)
+def main(inputs, outputs, params) -> None:
+    options = params or {}
+    threshold = float(options.get("threshold") or 0.5)
+```
+
+Do not use legacy list-shaped params:
+
+```python
+params=[
+    {"name": "threshold", "display_name": "Threshold", "type": "number"}
+]
+```
 
 ## Minimal Patterns
 
@@ -99,6 +130,8 @@ Do not bundle files with different roles or user intent into one `.idts` output.
 ## Common Mistakes
 
 - expecting dataset IDs instead of resolved paths
+- using legacy `params=[{"name": ...}]` instead of the object schema
+- using `display_name` inside params properties instead of `title`
 - reading `analysis-args.json` inside the user script
 - assuming every slot is a directory
 - writing outside the assigned output path or bundle directory
