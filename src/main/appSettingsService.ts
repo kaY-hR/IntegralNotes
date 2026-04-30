@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   DEFAULT_APP_SETTINGS,
   normalizeDataRegistrationDirectory,
+  normalizeUserId,
   type AppSettings,
   type SaveAppSettingsRequest
 } from "../shared/appSettings";
@@ -22,7 +23,11 @@ export class AppSettingsService {
       dataRegistrationDirectory:
         request.dataRegistrationDirectory === undefined
           ? currentSettings.dataRegistrationDirectory
-          : normalizeDataRegistrationDirectory(request.dataRegistrationDirectory)
+          : normalizeDataRegistrationDirectory(request.dataRegistrationDirectory),
+      userId:
+        request.userId === undefined
+          ? currentSettings.userId
+          : normalizeUserId(request.userId)
     };
 
     await this.writePersistedSettings(nextSettings);
@@ -41,7 +46,8 @@ export class AppSettingsService {
       return {
         dataRegistrationDirectory: normalizeDataRegistrationDirectory(
           parsed.dataRegistrationDirectory
-        )
+        ),
+        userId: normalizeUserId(parsed.userId)
       };
     } catch (error) {
       if (isNodeError(error) && error.code !== "ENOENT") {

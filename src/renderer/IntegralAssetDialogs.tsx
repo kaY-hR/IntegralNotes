@@ -14,7 +14,6 @@ function toErrorMessage(error: unknown): string {
 }
 
 interface DatasetPickerDialogProps {
-  acceptedKinds?: string[];
   defaultDatasetName?: string;
   onClose: () => void;
   onError: (message: string) => void;
@@ -22,17 +21,18 @@ interface DatasetPickerDialogProps {
     managedFiles: readonly IntegralManagedFileSummary[],
     kind: "directories" | "files"
   ) => Promise<void> | void;
+  preferredDatatype?: string;
   onSelect: (datasetId: string) => void;
 }
 
 type DatasetPickerMode = "select" | "create";
 
 export function DatasetPickerDialog({
-  acceptedKinds,
   defaultDatasetName,
   onClose,
   onError,
   onImportedManagedFiles,
+  preferredDatatype,
   onSelect
 }: DatasetPickerDialogProps): JSX.Element {
   const [mode, setMode] = useState<DatasetPickerMode>("select");
@@ -52,8 +52,10 @@ export function DatasetPickerDialog({
 
   const sortedDatasets = useMemo(() => {
     return [...datasets].sort((left, right) => {
-      const leftPreferred = acceptedKinds?.includes(left.kind) ?? false;
-      const rightPreferred = acceptedKinds?.includes(right.kind) ?? false;
+      const leftPreferred =
+        Boolean(preferredDatatype) && left.datatype === preferredDatatype;
+      const rightPreferred =
+        Boolean(preferredDatatype) && right.datatype === preferredDatatype;
 
       if (leftPreferred !== rightPreferred) {
         return leftPreferred ? -1 : 1;
@@ -61,7 +63,7 @@ export function DatasetPickerDialog({
 
       return right.createdAt.localeCompare(left.createdAt);
     });
-  }, [acceptedKinds, datasets]);
+  }, [datasets, preferredDatatype]);
 
   if (mode === "create") {
     return (
@@ -114,7 +116,7 @@ export function DatasetPickerDialog({
                     <div>
                       <strong>{dataset.name}</strong>
                       <div className="asset-picker__meta">
-                        <span>{dataset.kind}</span>
+                        <span>{dataset.datatype ?? "datatype 未設定"}</span>
                         <span>{dataset.representation}</span>
                         <span>{dataset.renderableCount} renderable</span>
                       </div>
@@ -385,7 +387,7 @@ export function ManagedFileSelectionDialog({
                           <strong>{entry.displayName}</strong>
                           <div className="asset-picker__meta">
                             <span>{entry.representation}</span>
-                            <span>{entry.format ?? "format 未設定"}</span>
+                            <span>{entry.datatype ?? "datatype 未設定"}</span>
                             <span>{entry.path}</span>
                           </div>
                         </div>

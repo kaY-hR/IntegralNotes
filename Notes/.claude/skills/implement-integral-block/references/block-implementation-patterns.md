@@ -85,7 +85,7 @@ Do not bundle files with different roles or user intent into one `.idts` output.
 
 - user-facing renderables such as HTML reports, plots, images, SVG/PNG/JPEG/WebP files, and readable Markdown/text reports should be independent output slots
 - machine-readable or intermediate files such as CSV/TSV/JSON should be independent output slots and should normally not auto-insert into the work note
-- `.idts` outputs are for multiple files of the same nature generated as one set, such as one artifact per input file or repeated files sharing the same format and role
+- `.idts` outputs are for multiple files of the same nature generated as one set, such as one artifact per input file or repeated files sharing the same datatype and role
 
 ## Heuristics
 

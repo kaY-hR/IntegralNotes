@@ -11,6 +11,7 @@ IntegralNotes の Python 解析 block は、workspace 内の `.py` file に `@in
 - `@integral_block(...)` は `def main(inputs, outputs, params) -> None:` の直上に置く。
 - `inputs` と `outputs` は slot 名から path への dict として扱う。
 - 出力は必ず `outputs` で渡された path に書く。
+- 解析間で再利用する I/O 互換性ラベルは slot の `datatype` に書く。設定済みのユーザーIDが分かる場合は `{user-id}/名前` の形を推奨する。
 - user-facing renderable は HTML、画像、Markdown/text などの専用 output slot に分ける。
 - user-facing renderable を block 直下に表示したい場合は `auto_insert_to_work_note=True` を付ける。
 - CSV/TSV/JSON などの機械可読・中間成果物は、表示用 output と分ける。
@@ -39,13 +40,13 @@ from integral import integral_block
     display_name="PCA",
     description="CSV から PCA を計算する",
     inputs=[
-        {"name": "samples", "extensions": [".csv"], "format": "table/csv"},
+        {"name": "samples", "extensions": [".csv"], "datatype": "user-id/sample-table"},
     ],
     outputs=[
         {
             "name": "report",
             "extension": ".html",
-            "format": "report/html",
+            "datatype": "user-id/pca-report",
             "auto_insert_to_work_note": True,
         },
     ],

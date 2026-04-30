@@ -1253,7 +1253,7 @@ function buildDocumentExcerpt(document: WorkspaceFileDocument): string | null {
     return clampExcerpt(
       [
         `dataset: ${document.datasetManifest.datasetName}`,
-        `kind: ${document.datasetManifest.datasetKind}`,
+        `datatype: ${document.datasetManifest.datatype ?? "(unset)"}`,
         `members: ${members.length > 0 ? members.join(", ") : "(none)"}`,
         `note target: ${document.datasetManifest.noteTargetId}`
       ].join("\n")

@@ -11,7 +11,7 @@ from integral import integral_block
     display_name="Hello Report Demo",
     description="Generate a tiny HTML report as one output file.",
     outputs=[
-        {"name": "report", "extension": ".html", "format": "report/html"},
+        {"name": "report", "extension": ".html", "datatype": "demo/html-report"},
     ],
 )
 def main(

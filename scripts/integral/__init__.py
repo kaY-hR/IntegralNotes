@@ -20,7 +20,7 @@ TFunc = TypeVar("TFunc", bound=Callable[..., Any])
 class IntegralSlotSpec:
     name: str
     extensions: tuple[str, ...] = ()
-    format: str | None = None
+    datatype: str | None = None
     auto_insert_to_work_note: bool = False
     share_note_with_input: str | None = None
     embed_to_shared_note: bool = False
@@ -122,7 +122,7 @@ def _normalize_slot(
     return IntegralSlotSpec(
         name=name,
         extensions=extensions,
-        format=_normalize_optional_string(value.get("format")),
+        datatype=_normalize_optional_string(value.get("datatype")),
         auto_insert_to_work_note=_normalize_bool(
             value.get("auto_insert_to_work_note"),
             field_name="auto_insert_to_work_note",

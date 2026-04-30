@@ -25,17 +25,17 @@ interface ManagedDataNoteMetadataBase {
 
 export interface DatasetDataNoteMetadata extends ManagedDataNoteMetadataBase {
   createdByBlockId: string | null;
+  datatype: string | null;
   datasetId: string;
   entityType: "dataset";
-  kind: string;
   memberIds?: string[];
   representation: DatasetRepresentation;
 }
 
 export interface ManagedFileDataNoteMetadata extends ManagedDataNoteMetadataBase {
   createdByBlockId: string | null;
+  datatype: string | null;
   entityType: "managed-file";
-  format: string | null;
   representation: ManagedFileRepresentation;
 }
 
@@ -63,14 +63,14 @@ const COMMON_MANAGED_FRONTMATTER_KEYS = [
 const DATASET_MANAGED_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
   "datasetId",
-  "kind",
+  "datatype",
   "createdByBlockId",
   "memberIds"
 ] as const;
 const MANAGED_FILE_FRONTMATTER_KEYS = [
   ...COMMON_MANAGED_FRONTMATTER_KEYS,
   "createdByBlockId",
-  "format"
+  "datatype"
 ] as const;
 
 export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNoteMetadata | null {
@@ -84,7 +84,7 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
     typeof value.createdAt === "string" &&
     typeof value.path === "string" &&
     typeof value.hash === "string" &&
-    typeof value.kind === "string" &&
+    (value.datatype === null || value.datatype === undefined || typeof value.datatype === "string") &&
     (value.displayName === undefined || typeof value.displayName === "string") &&
     value.representation === "dataset-json" &&
     (value.visibility === "visible" || value.visibility === "hidden") &&
@@ -100,12 +100,12 @@ export function normalizeDatasetDataNoteMetadata(value: unknown): DatasetDataNot
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
+      datatype: value.datatype ?? null,
       datasetId,
       displayName: normalizeDatasetName(value.displayName, datasetId),
       entityType: "dataset",
       hash: value.hash,
       id: datasetId,
-      kind: value.kind,
       memberIds: value.memberIds,
       noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, datasetId),
       path: normalizeWorkspaceRelativePath(value.path),
@@ -136,15 +136,15 @@ export function normalizeManagedFileNoteMetadata(value: unknown): ManagedFileDat
       value.createdByBlockId === undefined ||
       typeof value.createdByBlockId === "string") &&
     (value.noteTargetId === undefined || typeof value.noteTargetId === "string") &&
-    (value.format === null || value.format === undefined || typeof value.format === "string")
+    (value.datatype === null || value.datatype === undefined || typeof value.datatype === "string")
   ) {
     const managedDataId = value.id.trim();
     return {
       createdAt: value.createdAt,
       createdByBlockId: value.createdByBlockId ?? null,
+      datatype: value.datatype ?? null,
       displayName: value.displayName,
       entityType: "managed-file",
-      format: value.format ?? null,
       hash: value.hash,
       id: managedDataId,
       noteTargetId: normalizeManagedDataNoteTargetId(value.noteTargetId, managedDataId),
@@ -183,7 +183,7 @@ export function buildDatasetDataNoteMarkdown(
     `visibility: ${serializeYamlValue(metadata.visibility)}`,
     `provenance: ${serializeYamlValue(metadata.provenance)}`,
     `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
-    `kind: ${serializeYamlValue(metadata.kind)}`,
+    `datatype: ${serializeYamlValue(metadata.datatype)}`,
     `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`
   ];
 
@@ -221,7 +221,7 @@ export function buildManagedFileNoteMarkdown(
     `visibility: ${serializeYamlValue(metadata.visibility)}`,
     `createdAt: ${serializeYamlValue(metadata.createdAt)}`,
     `createdByBlockId: ${serializeYamlValue(metadata.createdByBlockId)}`,
-    `format: ${serializeYamlValue(metadata.format)}`
+    `datatype: ${serializeYamlValue(metadata.datatype)}`
   ];
 
   return buildManagedDataNoteMarkdown({
@@ -392,7 +392,7 @@ function buildTitleOnlyNoteBody(displayName: string): string {
 }
 
 function buildLegacyDatasetNoteBody(metadata: DatasetDataNoteMetadata): string {
-  return `# ${metadata.kind}_${metadata.datasetId}\n`;
+  return `# ${metadata.datasetId}\n`;
 }
 
 function isGeneratedDataNoteBody(body: string, displayName: string): boolean {

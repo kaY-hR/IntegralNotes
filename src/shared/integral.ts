@@ -5,15 +5,13 @@ import type {
 } from "./plugins";
 
 export interface IntegralSlotDefinition {
-  acceptedKinds?: string[];
   autoInsertToWorkNote?: boolean;
+  datatype?: string;
   embedToSharedNote?: boolean;
   extension?: string;
   extensions?: string[];
-  format?: string;
   name: string;
   shareNoteWithInput?: string;
-  producedKind?: string;
 }
 
 export type IntegralParamPrimitiveType = "boolean" | "integer" | "number" | "string";
@@ -84,7 +82,7 @@ export interface IntegralManagedFileSummary {
   createdByBlockId: string | null;
   displayName: string;
   entityType: IntegralManagedDataEntityType;
-  format: string | null;
+  datatype: string | null;
   hash: string;
   id: string;
   noteTargetId?: string;
@@ -97,10 +95,10 @@ export interface IntegralDatasetSummary {
   canOpenDataNote: boolean;
   createdAt: string;
   createdByBlockId: string | null;
+  datatype: string | null;
   datasetId: string;
   hash: string;
   hasRenderableFiles: boolean;
-  kind: string;
   memberIds?: string[];
   name: string;
   noteTargetId?: string;

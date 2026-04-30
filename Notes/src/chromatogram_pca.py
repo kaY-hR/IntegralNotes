@@ -82,13 +82,13 @@ class PcaResult:
     display_name="Chromatogram PCA",
     description="Read one chromatogram JSON file, run PCA, and emit a report bundle.",
     inputs=[
-        {"name": "LC-bundle-dataset", "extensions": [".json"], "format": "chromatogram/json"},
+        {"name": "LC-bundle-dataset", "extensions": [".json"], "datatype": "shimadzu-lc/chromatogram-json"},
     ],
     outputs=[
         {
             "name": "PCA-Result",
             "extension": ".idts",
-            "format": "bundle/pca-result",
+            "datatype": "shimadzu-lc/pca-result-bundle",
             "auto_insert_to_work_note": True,
             "share_note_with_input": "LC-bundle-dataset",
             "embed_to_shared_note": True,

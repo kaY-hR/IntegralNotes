@@ -88,7 +88,7 @@ type SlotDialogState = {
 
 type SlotFieldPickerState =
   | {
-      acceptedKinds?: string[];
+      datatype?: string;
       extensions?: string[];
       fieldKey: string;
       kind: "input-dataset";
@@ -97,6 +97,7 @@ type SlotFieldPickerState =
       slotName: string;
     }
   | {
+      datatype?: string;
       extensions?: string[];
       fieldKey: string;
       kind: "input-file";
@@ -952,12 +953,12 @@ function IntegralBlockPanel({
 
         {slotDialogState ? (
           <DatasetPickerDialog
-            acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
+            preferredDatatype={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.datatype}
             onSelect={(datasetId) => {
               onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
@@ -1015,7 +1016,7 @@ function IntegralBlockPanel({
                             openSlotFieldPicker(
                               isBundleInput
                                 ? {
-                                    acceptedKinds: slot.acceptedKinds,
+                                    datatype: slot.datatype,
                                     extensions: normalizeIntegralSlotExtensions([
                                       slot.extension ?? "",
                                       ...(slot.extensions ?? [])
@@ -1026,6 +1027,7 @@ function IntegralBlockPanel({
                                     slotName: slot.name
                                   }
                                 : {
+                                    datatype: slot.datatype,
                                     extensions: normalizeIntegralSlotExtensions([
                                       slot.extension ?? "",
                                       ...(slot.extensions ?? [])
@@ -1237,12 +1239,12 @@ function IntegralBlockPanel({
 
         {slotDialogState ? (
           <DatasetPickerDialog
-            acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
               setSlotDialogState(null);
             }}
             onError={setInlineError}
+            preferredDatatype={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.datatype}
             onSelect={(datasetId) => {
               onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
               setSlotDialogState(null);
@@ -1306,12 +1308,12 @@ function IntegralBlockPanel({
 
       {slotDialogState ? (
         <DatasetPickerDialog
-          acceptedKinds={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.acceptedKinds}
           defaultDatasetName={slotDialogState.slotName}
           onClose={() => {
             setSlotDialogState(null);
           }}
           onError={setInlineError}
+          preferredDatatype={blockDefinition.inputSlots.find((slot) => slot.name === slotDialogState.slotName)?.datatype}
           onSelect={(datasetId) => {
             onAssignInputReference(slotDialogState.slotName, toStoredDatasetReference(datasetId));
             setSlotDialogState(null);
@@ -1586,54 +1588,75 @@ function resolveSlotFieldPickerOptions({
   const normalizedQuery = slotFieldPicker.query.trim().toLocaleLowerCase("ja");
 
   if (slotFieldPicker.kind === "input-dataset") {
-    const allowedKinds =
-      slotFieldPicker.acceptedKinds?.filter((value) => value.trim().length > 0) ?? [];
+    const preferredDatatype = slotFieldPicker.datatype?.trim() ?? "";
     const allowedExtensions =
       slotFieldPicker.extensions?.filter((value) => value.trim().length > 0) ?? [];
 
     return assetCatalog.datasets
-      .filter((dataset) => {
-        if (allowedKinds.length === 0 && allowedExtensions.length === 0) {
-          return true;
-        }
-
+      .map((dataset) => {
         const lowerPath = dataset.path.toLocaleLowerCase("ja");
-        const matchesKind = allowedKinds.includes(dataset.kind);
+        const matchesDatatype =
+          preferredDatatype.length > 0 && dataset.datatype === preferredDatatype;
         const matchesExtension = allowedExtensions.some((extension) => lowerPath.endsWith(extension));
-
-        return matchesKind || matchesExtension;
+        return {
+          description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.datatype ? `  ${dataset.datatype}` : ""}`,
+          label: dataset.name,
+          priority:
+            preferredDatatype.length === 0 && allowedExtensions.length === 0
+              ? 0
+              : matchesDatatype
+                ? 0
+                : matchesExtension
+                  ? 1
+                  : Number.POSITIVE_INFINITY,
+          value: toStoredDatasetReference(dataset.datasetId)
+        };
       })
-      .map((dataset) => ({
-        description: `${toCanonicalWorkspaceTarget(dataset.path)}${dataset.kind ? `  ${dataset.kind}` : ""}`,
-        label: dataset.name,
-        value: toStoredDatasetReference(dataset.datasetId)
-      }))
+      .filter((option) => option.priority < Number.POSITIVE_INFINITY)
       .sort((left, right) => {
-        return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+        return (
+          left.priority - right.priority ||
+          scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery)
+        );
       })
-      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
+      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY)
+      .map(({ priority: _priority, ...option }) => option);
   }
 
   if (slotFieldPicker.kind === "input-file") {
+    const preferredDatatype = slotFieldPicker.datatype?.trim() ?? "";
+    const allowedExtensions = slotFieldPicker.extensions ?? [];
+
     return assetCatalog.managedFiles
       .filter((managedFile) => managedFile.entityType === "managed-file")
-      .filter((managedFile) => {
-        if (!slotFieldPicker.extensions || slotFieldPicker.extensions.length === 0) {
-          return true;
-        }
-
+      .map((managedFile) => {
         const lowerPath = managedFile.path.toLocaleLowerCase("ja");
-        return slotFieldPicker.extensions.some((extension) => lowerPath.endsWith(extension));
+        const matchesDatatype =
+          preferredDatatype.length > 0 && managedFile.datatype === preferredDatatype;
+        const matchesExtension = allowedExtensions.some((extension) => lowerPath.endsWith(extension));
+        return {
+          description: `${toCanonicalWorkspaceTarget(managedFile.path)}${managedFile.datatype ? `  ${managedFile.datatype}` : ""}`,
+          label: managedFile.displayName,
+          priority:
+            preferredDatatype.length === 0 && allowedExtensions.length === 0
+              ? 0
+              : matchesDatatype
+                ? 0
+                : matchesExtension
+                  ? 1
+                  : Number.POSITIVE_INFINITY,
+          value: managedFile.id
+        };
       })
-      .map((managedFile) => ({
-        description: toCanonicalWorkspaceTarget(managedFile.path),
-        label: managedFile.displayName,
-        value: managedFile.id
-      }))
+      .filter((option) => option.priority < Number.POSITIVE_INFINITY)
       .sort((left, right) => {
-        return scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery);
+        return (
+          left.priority - right.priority ||
+          scorePickerOption(left, normalizedQuery) - scorePickerOption(right, normalizedQuery)
+        );
       })
-      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY);
+      .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY)
+      .map(({ priority: _priority, ...option }) => option);
   }
 }
 

@@ -35,11 +35,11 @@ from integral import integral_block
     display_name="PCA",
     description="CSV から PCA を計算する",
     inputs=[
-        {"name": "samples", "extensions": [".csv"], "format": "table/csv"}
+        {"name": "samples", "extensions": [".csv"], "datatype": "demo/table-csv"}
     ],
     outputs=[
-        {"name": "score", "extension": ".csv", "format": "table/pca-score"},
-        {"name": "report", "extension": ".html", "format": "report/html"},
+        {"name": "score", "extension": ".csv", "datatype": "demo/pca-score-table"},
+        {"name": "report", "extension": ".html", "datatype": "demo/html-report"},
     ],
 )
 def main(inputs, outputs, params):

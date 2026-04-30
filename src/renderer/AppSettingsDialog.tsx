@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   DEFAULT_DATA_REGISTRATION_DIRECTORY,
+  DEFAULT_USER_ID,
   type AppSettings,
   type SaveAppSettingsRequest
 } from "../shared/appSettings";
@@ -24,12 +25,14 @@ export function AppSettingsDialog({
   const [dataRegistrationDirectoryInput, setDataRegistrationDirectoryInput] = useState(
     settings?.dataRegistrationDirectory ?? DEFAULT_DATA_REGISTRATION_DIRECTORY
   );
+  const [userIdInput, setUserIdInput] = useState(settings?.userId ?? DEFAULT_USER_ID);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDataRegistrationDirectoryInput(
       settings?.dataRegistrationDirectory ?? DEFAULT_DATA_REGISTRATION_DIRECTORY
     );
+    setUserIdInput(settings?.userId ?? DEFAULT_USER_ID);
   }, [settings]);
 
   const handleSave = async (): Promise<void> => {
@@ -37,7 +40,8 @@ export function AppSettingsDialog({
 
     try {
       await onSave({
-        dataRegistrationDirectory: dataRegistrationDirectoryInput
+        dataRegistrationDirectory: dataRegistrationDirectoryInput,
+        userId: userIdInput
       });
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -74,6 +78,25 @@ export function AppSettingsDialog({
             </label>
             <p className="app-settings-dialog__note">
               外部ファイルやフォルダを managed file として取り込むときの workspace 内配置先です。
+            </p>
+          </section>
+
+          <section className="app-settings-dialog__section">
+            <label className="dialog-field">
+              <span>ユーザーID</span>
+              <input
+                disabled={pending}
+                onChange={(event) => {
+                  setUserIdInput(event.target.value);
+                }}
+                placeholder="例: shimadzu"
+                spellCheck={false}
+                type="text"
+                value={userIdInput}
+              />
+            </label>
+            <p className="app-settings-dialog__note">
+              LLM が datatype 名に名前空間を付けるときの既定 prefix として使います。
             </p>
           </section>
 

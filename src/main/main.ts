@@ -182,6 +182,7 @@ const aiAgentService = new AiAgentService(
 const aiChatService = new AiChatService(
   aiAgentService,
   workspaceService,
+  appSettingsService,
   path.join(app.getPath("userData"), "ai-chat-settings.json"),
   path.join(app.getPath("userData"), "ai-chat-history.json")
 );

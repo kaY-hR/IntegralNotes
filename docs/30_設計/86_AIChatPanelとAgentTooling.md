@@ -302,9 +302,9 @@ tool trace は step 単位ではなく transcript message としても表示す�
 必要な tool:
 
 - `resolveManagedDataByPath(path)`
-  - workspace path から managed file / dataset の ID、current path、hash、format を返す
+  - workspace path から managed file / dataset の ID、current path、hash、datatype を返す
 - `resolveManagedDataById(id)`
-  - managed data ID から current path、hash、format を返す
+  - managed data ID から current path、hash、datatype を返す
 
 方針:
 

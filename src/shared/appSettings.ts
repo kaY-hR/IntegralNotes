@@ -1,19 +1,24 @@
 export interface AppSettings {
   dataRegistrationDirectory: string;
+  userId: string;
 }
 
 export interface SaveAppSettingsRequest {
   dataRegistrationDirectory?: string;
+  userId?: string;
 }
 
 export const DEFAULT_DATA_REGISTRATION_DIRECTORY = "\\Data";
+export const DEFAULT_USER_ID = "";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
-  dataRegistrationDirectory: DEFAULT_DATA_REGISTRATION_DIRECTORY
+  dataRegistrationDirectory: DEFAULT_DATA_REGISTRATION_DIRECTORY,
+  userId: DEFAULT_USER_ID
 };
 
 const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:/u;
 const INVALID_WORKSPACE_PATH_SEGMENT_PATTERN = /[<>:"|?*\u0000-\u001F]/u;
+const INVALID_USER_ID_PATTERN = /[\s<>:"/\\|?*\u0000-\u001F]/u;
 
 export function normalizeDataRegistrationDirectory(value: unknown): string {
   const rawValue = typeof value === "string" ? value.trim() : "";
@@ -60,4 +65,22 @@ export function toDataRegistrationDirectoryRelativePath(value: string): string {
   return normalizeDataRegistrationDirectory(value)
     .replace(/^\\+/u, "")
     .replace(/\\/gu, "/");
+}
+
+export function normalizeUserId(value: unknown): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+
+  if (normalized.length === 0) {
+    return DEFAULT_USER_ID;
+  }
+
+  if (
+    normalized === "." ||
+    normalized === ".." ||
+    INVALID_USER_ID_PATTERN.test(normalized)
+  ) {
+    throw new Error("ユーザーIDには空白やファイル名に使えない文字を含められません。");
+  }
+
+  return normalized;
 }

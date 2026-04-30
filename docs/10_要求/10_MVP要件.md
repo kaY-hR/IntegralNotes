@@ -9,7 +9,7 @@
   - `id`
   - `path`
   - `hash`
-  - `formatId`
+  - `datatype`
   - `createdByBlockId`
 - `path` は current canonical workspace relative path とする
 - `hash` は current content identity とする
@@ -38,18 +38,20 @@
 - 保存時は本文だけを更新し、frontmatter は壊さず保持する
 - `見たまま編集` と `body-only raw text` を切り替えられる
 
-## 4. Format
+## 4. Datatype
 
-- format は managed file とは別の registry で管理する
-- MVP の format は少なくとも次を持つ
-  - `id`
-  - `name`
-  - `description`
+- datatype は、解析の入出力を接続できるかを判断するための意味ラベルである
+- datatype は物理的な file format そのものではなく、`extension(s)` や `.idts` 表現とは責務を分ける
+- MVP の datatype は registry や別 ID を持たない任意の string とする
+- output slot は生成する datatype を宣言し、生成された managed file / dataset はその datatype を metadata として持つ
+- input slot は要求する datatype を宣言し、picker / validation は datatype の完全一致を強い候補として扱う
+- datatype が未設定の場合は、`extension(s)` や `.idts` 表現だけで候補を出してよい
+- 運用上、skill や user 定義の datatype は `{userId}/xxxx` のように namespace を付けることを推奨する
 - 例:
-  - `table/csv`
-  - `chromatogram/json`
-  - `bundle/idts`
-  - `report/html`
+  - `shimadzu-lc/chromatogram-json`
+  - `shimadzu-lc/pca-result-bundle`
+  - `demo/table-csv`
+  - `{userId}/html-report`
 
 ## 5. 処理 Block
 
@@ -82,7 +84,7 @@
 - slot は少なくとも次を定義できる
   - `name`
   - `extension` または `extensions`
-  - `format`
+  - `datatype`
 - output slot では追加で次を定義できる
   - `auto_insert_to_work_note`
   - `share_note_with_input`
@@ -90,7 +92,8 @@
 - input slot では `extensions` によって選択可能な file suffix を表せる
 - output slot では `extension` によって生成される file suffix を表せる
 - output slot の初期 file 名は `slot名 + "_" + 英数字3文字 + extension` とする
-- `format` は slot が意味的に扱う file type を表す
+- `datatype` は slot が意味的に要求または生成する data type を表す
+- `.idts` は拡張子で bundle 表現を表すだけであり、datatype そのものではない
 - `auto_insert_to_work_note` は、その output を block が置かれている作業 note へ `![]()` として自動挿入するかを表す
 - `share_note_with_input` は、その output がどの input の data-note target を共有するかを表す
 - `embed_to_shared_note` は、その output を共有先 data-note に provenance link と `![]()` 付きで追記するかを表す
@@ -104,11 +107,13 @@
 - `.idts` 自体は workspace 上の visible file とする
 - `.idts` が指す中身は `.store/objects/{id}/` の hidden directory に置いてよい
 - `.idts` manifest には少なくとも次を持てる
-  - `id`
+  - `datasetId`
   - `name`
-  - `formatId`
-  - `bundleRootPath`
   - `memberIds`
+- `.idts` manifest には必要に応じて次を持てる
+  - `dataPath`
+  - `datatype`
+  - `noteTargetId`
 - 1 file が複数 bundle に所属できる
 - `.idts` は universal な I/O 単位ではなく、bundle が必要な場合にだけ使う
 
@@ -138,14 +143,14 @@
     display_name="PCA",
     description="CSV から PCA を計算する",
     inputs=[
-        {"name": "samples", "extensions": [".csv"], "format": "table/csv"}
+        {"name": "samples", "extensions": [".csv"], "datatype": "demo/table-csv"}
     ],
     outputs=[
-        {"name": "score", "extension": ".csv", "format": "table/pca-score"},
+        {"name": "score", "extension": ".csv", "datatype": "demo/pca-score-table"},
         {
             "name": "report",
             "extension": ".html",
-            "format": "report/html",
+            "datatype": "demo/pca-report-html",
             "auto_insert_to_work_note": True,
             "share_note_with_input": "samples",
             "embed_to_shared_note": True,
@@ -208,7 +213,7 @@
 - output slot が `share_note_with_input` を持つ場合、app は output の note target を指定 input の note target に合わせる
 - output slot が `embed_to_shared_note = true` を持つ場合、app は共有先 data-note へ provenance link と `![]()` を追記してよい
 - note への自動反映は append-only とし、古い embed の整理は app ではなくユーザー操作に委ねてよい
-- generated file が持つべき最低限の情報は `createdByBlockId` と `formatId` でよい
+- generated file が持つべき最低限の情報は `createdByBlockId` と `datatype` でよい
 - 実行時の current working directory は workspace root を基本とする
 - `analysis-args.json` や log は `.store/.integral/runtime/` 配下へ置いてよい
 

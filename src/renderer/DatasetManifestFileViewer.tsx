@@ -32,7 +32,7 @@ export function DatasetManifestFileViewer({
               {manifest.members.length > 0 ? `${manifest.members.length} items` : "manifest"}
             </span>
             <span className="workspace-dataset-viewer__summary-chip">
-              {manifest.datasetKind || "dataset"}
+              {manifest.datatype ?? "datatype 未設定"}
             </span>
           </div>
         </div>
