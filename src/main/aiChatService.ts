@@ -1288,8 +1288,11 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
 
   return [
     "Use from integral import integral_block.",
-    "The decorator supports display_name, description, inputs, and outputs.",
+    "The decorator supports display_name, description, inputs, outputs, and params.",
     "Slot objects support name, extension/extensions, format, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "Define user-editable parameters with params={...}, using a Python literal JSON Schema subset.",
+    "The supported params schema is root type object with properties whose type is string, number, integer, or boolean. Supported UI metadata: title, description, default, enum, minimum, maximum.",
+    "Decorator params is the source of truth. Do not rely on undeclared YAML params; schema-external params are removed by the app.",
     "Do not group files with different roles or user intent into one .idts output just for convenience.",
     "Use .idts outputs only when multiple files of the same nature are generated as one set.",
     "Make user-facing renderables such as HTML reports, plots, images, SVG/PNG/JPEG/WebP files, and readable Markdown/text reports their own output slots.",

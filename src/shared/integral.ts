@@ -16,6 +16,25 @@ export interface IntegralSlotDefinition {
   producedKind?: string;
 }
 
+export type IntegralParamPrimitiveType = "boolean" | "integer" | "number" | "string";
+
+export type IntegralParamValue = boolean | number | string | null;
+
+export interface IntegralParamSchemaProperty {
+  default?: IntegralParamValue;
+  description?: string;
+  enum?: IntegralParamValue[];
+  maximum?: number;
+  minimum?: number;
+  title?: string;
+  type: IntegralParamPrimitiveType;
+}
+
+export interface IntegralParamsSchema {
+  properties: Record<string, IntegralParamSchemaProperty>;
+  type: "object";
+}
+
 export interface IntegralExternalPluginDefinition {
   actions?: PluginActionContribution[];
   namespace: string;
@@ -42,6 +61,7 @@ export interface IntegralBlockTypeDefinition {
   executionMode: "display" | "manual";
   inputSlots: IntegralSlotDefinition[];
   outputSlots: IntegralSlotDefinition[];
+  paramsSchema?: IntegralParamsSchema;
   pluginDescription: string;
   pluginDisplayName: string;
   pluginId: string;
@@ -236,4 +256,230 @@ export function createDefaultIntegralOutputPathWithRandomSuffix(
   slot: IntegralSlotDefinition
 ): string {
   return createDefaultIntegralOutputPath(slot, createIntegralOutputPathRandomSuffix());
+}
+
+export function normalizeIntegralParamsSchema(value: unknown): IntegralParamsSchema | undefined {
+  if (!isIntegralRecord(value) || value.type !== "object" || !isIntegralRecord(value.properties)) {
+    return undefined;
+  }
+
+  const properties: Record<string, IntegralParamSchemaProperty> = {};
+
+  for (const [rawName, rawProperty] of Object.entries(value.properties)) {
+    const name = rawName.trim();
+
+    if (name.length === 0 || !isIntegralRecord(rawProperty)) {
+      continue;
+    }
+
+    const type = normalizeIntegralParamPrimitiveType(rawProperty.type);
+
+    if (!type) {
+      continue;
+    }
+
+    const property: IntegralParamSchemaProperty = {
+      type
+    };
+    const title = normalizeOptionalIntegralString(rawProperty.title);
+    const description = normalizeOptionalIntegralString(rawProperty.description);
+    const defaultValue = normalizeIntegralParamValue(rawProperty.default, type, rawProperty);
+    const enumValues = normalizeIntegralParamEnum(rawProperty.enum, type, rawProperty);
+
+    if (title !== undefined) {
+      property.title = title;
+    }
+
+    if (description !== undefined) {
+      property.description = description;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(rawProperty, "default")) {
+      property.default = defaultValue ?? null;
+    }
+
+    if (enumValues !== undefined) {
+      property.enum = enumValues;
+    }
+
+    if (type === "integer" || type === "number") {
+      const minimum = normalizeIntegralParamNumberConstraint(rawProperty.minimum);
+      const maximum = normalizeIntegralParamNumberConstraint(rawProperty.maximum);
+
+      if (minimum !== undefined) {
+        property.minimum = minimum;
+      }
+
+      if (maximum !== undefined) {
+        property.maximum = maximum;
+      }
+    }
+
+    properties[name] = property;
+  }
+
+  return Object.keys(properties).length > 0
+    ? {
+        properties,
+        type: "object"
+      }
+    : undefined;
+}
+
+export function createDefaultIntegralParams(
+  paramsSchema: IntegralParamsSchema | null | undefined
+): Record<string, unknown> {
+  if (!paramsSchema) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(paramsSchema.properties).map(([name, property]) => [
+      name,
+      Object.prototype.hasOwnProperty.call(property, "default") ? property.default ?? null : null
+    ])
+  );
+}
+
+export function normalizeIntegralParams(
+  currentParams: Record<string, unknown> | null | undefined,
+  paramsSchema: IntegralParamsSchema | null | undefined
+): Record<string, unknown> {
+  if (!paramsSchema) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(paramsSchema.properties).map(([name, property]) => {
+      const currentValue = currentParams?.[name];
+
+      if (isIntegralParamValueAllowed(currentValue, property)) {
+        return [name, currentValue];
+      }
+
+      return [
+        name,
+        Object.prototype.hasOwnProperty.call(property, "default") ? property.default ?? null : null
+      ];
+    })
+  );
+}
+
+function normalizeIntegralParamPrimitiveType(value: unknown): IntegralParamPrimitiveType | null {
+  return value === "boolean" || value === "integer" || value === "number" || value === "string"
+    ? value
+    : null;
+}
+
+function normalizeOptionalIntegralString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeIntegralParamValue(
+  value: unknown,
+  type: IntegralParamPrimitiveType,
+  property: Record<string, unknown>
+): IntegralParamValue | undefined {
+  if (isIntegralParamValueForType(value, type)) {
+    if (!isIntegralParamNumberInRange(value, property)) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  return undefined;
+}
+
+function normalizeIntegralParamEnum(
+  value: unknown,
+  type: IntegralParamPrimitiveType,
+  property: Record<string, unknown>
+): IntegralParamValue[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const normalized = value.filter((item): item is IntegralParamValue => {
+    return (
+      isIntegralParamValueForType(item, type) &&
+      isIntegralParamNumberInRange(item, property)
+    );
+  });
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeIntegralParamNumberConstraint(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isIntegralParamValueAllowed(
+  value: unknown,
+  property: IntegralParamSchemaProperty
+): value is IntegralParamValue {
+  if (value === null) {
+    return true;
+  }
+
+  if (!isIntegralParamValueForType(value, property.type)) {
+    return false;
+  }
+
+  if (!isIntegralParamNumberInRange(value, property)) {
+    return false;
+  }
+
+  if (property.enum && !property.enum.some((item) => item === value)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isIntegralParamValueForType(
+  value: unknown,
+  type: IntegralParamPrimitiveType
+): value is IntegralParamValue {
+  if (type === "boolean") {
+    return typeof value === "boolean";
+  }
+
+  if (type === "integer") {
+    return typeof value === "number" && Number.isInteger(value);
+  }
+
+  if (type === "number") {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+
+  return typeof value === "string";
+}
+
+function isIntegralParamNumberInRange(
+  value: unknown,
+  property: Pick<IntegralParamSchemaProperty, "maximum" | "minimum">
+): boolean {
+  if (typeof value !== "number") {
+    return true;
+  }
+
+  if (typeof property.minimum === "number" && value < property.minimum) {
+    return false;
+  }
+
+  if (typeof property.maximum === "number" && value > property.maximum) {
+    return false;
+  }
+
+  return true;
+}
+
+function isIntegralRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

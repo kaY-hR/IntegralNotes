@@ -2,7 +2,11 @@ import type {
   IntegralBlockDocument,
   IntegralBlockTypeDefinition
 } from "../shared/integral";
-import { createDefaultIntegralOutputPathWithRandomSuffix } from "../shared/integral";
+import {
+  createDefaultIntegralOutputPathWithRandomSuffix,
+  createDefaultIntegralParams,
+  normalizeIntegralParams
+} from "../shared/integral";
 
 import { getInstalledIntegralBlockDefinition } from "./integralPluginRuntime";
 import {
@@ -63,7 +67,7 @@ export function createInitialIntegralBlock(
         createDefaultIntegralOutputPathWithRandomSuffix(slot)
       ])
     ),
-    params: {},
+    params: createDefaultIntegralParams(definition.paramsSchema),
     plugin: definition.pluginId
   };
 }
@@ -73,13 +77,15 @@ export function createIntegralBlockMarkdown(definition: IntegralBlockDefinition)
 }
 
 export function createPythonIntegralBlockMarkdown(blockType: string): string {
+  const definition = getIntegralBlockDefinition(GENERAL_ANALYSIS_PLUGIN_ID, blockType);
+
   return toIntegralCodeBlock(
     serializeIntegralBlockContent({
       "block-type": blockType,
       id: createBlockId(),
       inputs: {},
       outputs: {},
-      params: {},
+      params: createDefaultIntegralParams(definition?.paramsSchema),
       plugin: GENERAL_ANALYSIS_PLUGIN_ID
     })
   );
@@ -177,13 +183,18 @@ function parseIntegralYamlSource(content: string): ParsedIntegralBlockSource | n
       return null;
     }
 
+    const definition = getIntegralBlockDefinition(plugin, blockType);
+    const rawParams = isJsonRecord(parsed.params) ? parsed.params : {};
+
     return {
       block: {
         "block-type": blockType,
         id: readOptionalString(parsed.id) ?? undefined,
         inputs: normalizeInputMap(parsed.in ?? parsed.inputs),
         outputs: normalizeSlotReferenceMap(parsed.out ?? parsed.outputs),
-        params: isJsonRecord(parsed.params) ? parsed.params : {},
+        params: definition
+          ? normalizeIntegralParams(rawParams, definition.paramsSchema)
+          : rawParams,
         plugin
       }
     };
@@ -206,7 +217,11 @@ function buildIntegralYamlDocument(block: IntegralBlockDocument): SimpleYamlObje
   document.in = Object.fromEntries(
     Object.entries(block.inputs).map(([slotName, datasetRef]) => [slotName, datasetRef])
   );
-  document.params = block.params;
+
+  if (Object.keys(block.params).length > 0) {
+    document.params = block.params as SimpleYamlObject;
+  }
+
   document.out = Object.fromEntries(
     Object.entries(block.outputs).map(([slotName, outputRef]) => [slotName, outputRef])
   );

@@ -118,7 +118,13 @@
 - `general-analysis` plugin は `cwd` 配下の `.py` を走査し、decorator 付き関数を block-type 候補として動的生成する
 - Python callable の canonical ID は `relative/path.py:function` とする
 - `block-type` はその canonical callable string を使う
-- Python block の `params` は free-form object とし、schema enforcement はしない
+- Python block の `params` 契約は `@integral_block(..., params={...})` の Python literal JSON Schema subset を正とする
+- `params` schema が無い callable では有効な param は空とし、YAML 側の `params:` は削除してよい
+- MVP の `params` schema は root `type: object` と `properties` を扱う
+- MVP の property type は `string / number / integer / boolean` と `enum` に限る
+- MVP の property metadata は `title / description / default / minimum / maximum` を扱う
+- `default` が無い property の初期値は `null` とし、`required` は MVP では扱わない
+- YAML 側の schema 外 param、未対応型 param は保存・フォーム反映・実行前正規化で削除してよい
 
 ## 9. Python Callable Discovery
 
@@ -145,6 +151,29 @@
             "embed_to_shared_note": True,
         },
     ],
+    params={
+        "type": "object",
+        "properties": {
+            "n_components": {
+                "type": "integer",
+                "title": "主成分数",
+                "description": "計算する主成分の数",
+                "default": 2,
+                "minimum": 1,
+            },
+            "scale": {
+                "type": "boolean",
+                "title": "標準化",
+                "default": True,
+            },
+            "method": {
+                "type": "string",
+                "title": "手法",
+                "enum": ["pca", "kernel-pca"],
+                "default": "pca",
+            },
+        },
+    },
 )
 ```
 
@@ -153,6 +182,8 @@
 - 候補選択時には `run:` を持つ YAML `itg-notes` block を note へ挿入する
 - `.py` file や補助 file を app 側の専用ディレクトリへ copy しない
 - MVP の scan 契約は `@integral_block(...)` の直後に `def ...(` が続く形とする
+- app は decorator の `params` schema から block 上の param 編集フォームを生成する
+- param 編集フォームは YAML の `params:` を更新する補助 UI であり、source of truth は正規化済みの `itg-notes` YAML と decorator schema の組み合わせとする
 
 ## 10. Python 実行
 
@@ -164,7 +195,8 @@
 - `.idts` input は hidden bundle directory へ resolve した path を渡す
 - 非 `.idts` output は、指定された output file path をそのまま渡す
 - `.idts` output は、visible manifest path と hidden bundle directory を app 側で事前に確保し、Python には hidden bundle directory path を渡す
-- `params` は note source から読んだ object をそのまま渡す
+- `params` は decorator schema に沿って正規化した note source の object を渡す
+- decorator schema に無い param、未対応型 param、schema 外 key は Python 実行 payload から削除する
 - runner は `analysis-args.json` を読んで target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - 成功/失敗判定は exit code のみで行う
 - exit code が非 0 の場合、note 上の実行結果には Python の `stderr` / `stdout` / runner error message を優先して表示する

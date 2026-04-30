@@ -26,12 +26,16 @@ import type {
   IntegralBlockDocument,
   IntegralDatasetSummary,
   IntegralManagedFileSummary,
+  IntegralParamSchemaProperty,
+  IntegralParamsSchema,
+  IntegralParamValue,
   IntegralSlotDefinition
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPath,
   getIntegralSlotPrimaryExtension,
   isIntegralBundleExtension,
+  normalizeIntegralParams,
   normalizeIntegralSlotExtensions
 } from "../shared/integral";
 import type { WorkspaceEntry } from "../shared/workspace";
@@ -874,6 +878,17 @@ function IntegralBlockPanel({
     blockDefinition.outputSlots.every((slot) =>
       isExecutedOutputReference(parsed.block.outputs[slot.name] ?? null, parsed.block.id)
     );
+  const paramsForm = blockDefinition?.paramsSchema ? (
+    <IntegralParamsForm
+      disabled={isExecutedBlock || runState.status === "running"}
+      onUpdateParams={(nextParams) => {
+        setInlineError(null);
+        onUpdateParams(normalizeIntegralParams(nextParams, blockDefinition.paramsSchema));
+      }}
+      params={parsed.block.params}
+      schema={blockDefinition.paramsSchema}
+    />
+  ) : null;
 
   if (!blockDefinition) {
     return (
@@ -1209,6 +1224,8 @@ function IntegralBlockPanel({
             onUpdateParams={onUpdateParams}
           />
 
+          {paramsForm}
+
           {slotAssignments}
         </div>
 
@@ -1249,6 +1266,8 @@ function IntegralBlockPanel({
         {blockDefinition.description ? (
           <p className="integral-json-preview__description">{blockDefinition.description}</p>
         ) : null}
+
+        {paramsForm}
 
         {slotAssignments}
 
@@ -1323,6 +1342,189 @@ function RunStateView({ runState }: { runState: RunState }): JSX.Element {
         </ul>
       ) : null}
     </div>
+  );
+}
+
+function IntegralParamsForm({
+  disabled,
+  onUpdateParams,
+  params,
+  schema
+}: {
+  disabled: boolean;
+  onUpdateParams: (nextParams: Record<string, unknown>) => void;
+  params: Record<string, unknown>;
+  schema: IntegralParamsSchema;
+}): JSX.Element | null {
+  const entries = Object.entries(schema.properties);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const normalizedParams = normalizeIntegralParams(params, schema);
+
+  return (
+    <section className="integral-slot-section integral-param-section">
+      <div className="integral-slot-section__header">
+        <strong>Params</strong>
+        <span>{entries.length} fields</span>
+      </div>
+
+      {entries.map(([name, property]) => (
+        <IntegralParamField
+          disabled={disabled}
+          key={name}
+          name={name}
+          onChange={(value) => {
+            onUpdateParams({
+              ...normalizedParams,
+              [name]: value
+            });
+          }}
+          property={property}
+          value={(normalizedParams[name] ?? null) as IntegralParamValue}
+        />
+      ))}
+    </section>
+  );
+}
+
+function IntegralParamField({
+  disabled,
+  name,
+  onChange,
+  property,
+  value
+}: {
+  disabled: boolean;
+  name: string;
+  onChange: (value: IntegralParamValue) => void;
+  property: IntegralParamSchemaProperty;
+  value: IntegralParamValue;
+}): JSX.Element {
+  const label = property.title?.trim() || name;
+
+  return (
+    <div className="integral-param-row">
+      <label className="integral-param-row__meta">
+        <strong>{label}</strong>
+        <span>{name}</span>
+      </label>
+
+      <div className="integral-param-row__field">
+        <IntegralParamControl
+          disabled={disabled}
+          onChange={onChange}
+          property={property}
+          value={value}
+        />
+        {property.description ? (
+          <span className="integral-param-row__description">{property.description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function IntegralParamControl({
+  disabled,
+  onChange,
+  property,
+  value
+}: {
+  disabled: boolean;
+  onChange: (value: IntegralParamValue) => void;
+  property: IntegralParamSchemaProperty;
+  value: IntegralParamValue;
+}): JSX.Element {
+  if (property.enum && property.enum.length > 0) {
+    const selectedIndex = property.enum.findIndex((item) => item === value);
+
+    return (
+      <select
+        className="integral-param-row__input"
+        disabled={disabled}
+        onChange={(event) => {
+          const optionIndex = Number(event.target.value);
+          onChange(Number.isInteger(optionIndex) ? property.enum?.[optionIndex] ?? null : null);
+        }}
+        value={selectedIndex >= 0 ? `${selectedIndex}` : ""}
+      >
+        <option value="">未設定</option>
+        {property.enum.map((option, index) => (
+          <option key={`${index}:${String(option)}`} value={`${index}`}>
+            {String(option)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (property.type === "boolean") {
+    return (
+      <select
+        className="integral-param-row__input"
+        disabled={disabled}
+        onChange={(event) => {
+          onChange(
+            event.target.value === "true"
+              ? true
+              : event.target.value === "false"
+                ? false
+                : null
+          );
+        }}
+        value={value === true ? "true" : value === false ? "false" : ""}
+      >
+        <option value="">未設定</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+    );
+  }
+
+  if (property.type === "number" || property.type === "integer") {
+    return (
+      <input
+        className="integral-param-row__input"
+        disabled={disabled}
+        max={property.maximum}
+        min={property.minimum}
+        onChange={(event) => {
+          const rawValue = event.target.value.trim();
+
+          if (rawValue.length === 0) {
+            onChange(null);
+            return;
+          }
+
+          const numericValue = Number(rawValue);
+
+          if (!Number.isFinite(numericValue)) {
+            onChange(null);
+            return;
+          }
+
+          onChange(property.type === "integer" ? Math.trunc(numericValue) : numericValue);
+        }}
+        step={property.type === "integer" ? 1 : "any"}
+        type="number"
+        value={typeof value === "number" ? `${value}` : ""}
+      />
+    );
+  }
+
+  return (
+    <input
+      className="integral-param-row__input"
+      disabled={disabled}
+      onChange={(event) => {
+        onChange(event.target.value);
+      }}
+      type="text"
+      value={typeof value === "string" ? value : ""}
+    />
   );
 }
 
