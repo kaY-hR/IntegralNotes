@@ -227,7 +227,9 @@ export function createDefaultIntegralOutputPath(
 ): string {
   const extension = getIntegralSlotPrimaryExtension(slot, ".idts") ?? ".idts";
   const stem = slot.name.trim().length > 0 ? slot.name.trim() : "output";
-  return `${DEFAULT_OUTPUT_DIRECTORY}/${stem}${suffix}${extension}`;
+  const normalizedSuffix = suffix.trim().replace(/^_+/u, "");
+  const suffixSegment = normalizedSuffix.length > 0 ? `_${normalizedSuffix}` : "";
+  return `${DEFAULT_OUTPUT_DIRECTORY}/${stem}${suffixSegment}${extension}`;
 }
 
 export function createDefaultIntegralOutputPathWithRandomSuffix(

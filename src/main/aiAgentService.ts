@@ -20,6 +20,7 @@ import {
   type AiHostCommandToolResult,
   type AiChatMessage,
   type AiChatMessageDiagnostics,
+  type AiChatSkillInvocation,
   type AiChatToolTraceEntry
 } from "../shared/aiChat";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
@@ -876,11 +877,13 @@ function toModelMessage(message: AiChatMessage): ModelMessage | null {
     };
   }
 
+  const userText = buildModelUserMessageText(message.text, message.skillInvocations ?? []);
+
   if (message.attachments && message.attachments.length > 0) {
     return {
       content: [
         {
-          text: message.text,
+          text: userText,
           type: "text"
         },
         ...message.attachments.map((attachment) => ({
@@ -893,9 +896,24 @@ function toModelMessage(message: AiChatMessage): ModelMessage | null {
   }
 
   return {
-    content: message.text,
+    content: userText,
     role: "user"
   };
+}
+
+function buildModelUserMessageText(
+  text: string,
+  skillInvocations: readonly AiChatSkillInvocation[]
+): string {
+  if (skillInvocations.length === 0) {
+    return text;
+  }
+
+  return [
+    `Explicit skills requested: ${skillInvocations.map((skill) => skill.name).join(", ")}`,
+    "",
+    text
+  ].join("\n");
 }
 
 function buildToolTrace(
@@ -970,6 +988,14 @@ function summarizeToolInput(toolName: string, input: unknown): string {
 
   if (toolName === "bash" && isRecord(input) && typeof input.command === "string") {
     return truncateTraceText(input.command);
+  }
+
+  if (toolName === "skill" && isRecord(input)) {
+    const skillName = ["skillName", "skill", "name", "id"]
+      .map((key) => input[key])
+      .find((value) => typeof value === "string" && value.trim().length > 0);
+
+    return typeof skillName === "string" ? `skill: ${skillName.trim()}` : "skill invocation";
   }
 
   if ((toolName === "readFile" || toolName === "writeFile" || toolName === "writeWorkspaceFile") && isRecord(input)) {
@@ -1069,6 +1095,10 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
     return [exitCode, stdout, stderr].filter(isDefined).join(" | ");
   }
 
+  if (toolName === "skill") {
+    return summarizeSkillToolOutput(output);
+  }
+
   if (toolName === "readFile" && isRecord(output) && typeof output.content === "string") {
     return `${output.content.length} chars`;
   }
@@ -1140,6 +1170,24 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
     typeof output.path === "string"
   ) {
     return `${output.id} -> ${output.path}`;
+  }
+
+  return summarizeUnknownValue(output);
+}
+
+function summarizeSkillToolOutput(output: unknown): string {
+  if (isRecord(output)) {
+    const skillName = ["skillName", "skill", "name", "id"]
+      .map((key) => output[key])
+      .find((value) => typeof value === "string" && value.trim().length > 0);
+    const summary = ["summary", "description", "message"]
+      .map((key) => output[key])
+      .find((value) => typeof value === "string" && value.trim().length > 0);
+
+    return [skillName, summary]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => truncateTraceText(value))
+      .join(" | ") || summarizeUnknownValue(output);
   }
 
   return summarizeUnknownValue(output);

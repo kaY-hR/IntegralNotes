@@ -25,12 +25,25 @@ export interface AiChatMessageDiagnostics {
   toolTrace: AiChatToolTraceEntry[];
 }
 
+export interface AiChatSkillSummary {
+  description: string;
+  name: string;
+  relativePath: string;
+}
+
+export interface AiChatSkillInvocation {
+  description?: string;
+  name: string;
+  relativePath?: string;
+}
+
 export interface AiChatMessage {
   attachments?: AiChatImageAttachment[];
   createdAt: string;
   diagnostics?: AiChatMessageDiagnostics | null;
   id: string;
   role: AiChatRole;
+  skillInvocations?: AiChatSkillInvocation[];
   text: string;
   toolTraceEntry?: AiChatToolTraceEntry | null;
 }
@@ -129,6 +142,7 @@ export interface AiChatStatus {
   notes: string[];
   providerLabel: string;
   selectedModelId: string | null;
+  availableSkills: AiChatSkillSummary[];
   skillsDirectoryPath: string | null;
   shellExecutablePath: string | null;
   systemPrompts: AiChatSystemPrompts;
@@ -177,6 +191,7 @@ export interface SubmitAiChatRequest {
   context: AiChatContextSummary;
   history: AiChatMessage[];
   prompt: string;
+  requestedSkills?: AiChatSkillInvocation[];
   streamId?: string | null;
 }
 
@@ -193,6 +208,7 @@ export interface SubmitInlineAiInsertionRequest {
   history: AiChatMessage[];
   insertionPosition: number;
   prompt: string;
+  requestedSkills?: AiChatSkillInvocation[];
   sessionId?: string | null;
   sourceNotePath: string;
   streamId?: string | null;
@@ -219,6 +235,7 @@ export interface SubmitInlinePythonBlockRequest {
   history: AiChatMessage[];
   insertionPosition: number;
   prompt: string;
+  requestedSkills?: AiChatSkillInvocation[];
   sessionId?: string | null;
   sourceNotePath: string;
   streamId?: string | null;

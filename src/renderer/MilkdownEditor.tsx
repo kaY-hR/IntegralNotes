@@ -5,7 +5,14 @@ import type { Selection } from "@milkdown/kit/prose/state";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 
 import type {
   ExecuteIntegralBlockResult,
@@ -15,10 +22,18 @@ import type {
 import type {
   AiChatContextSummary,
   AiChatMessage,
+  AiChatSkillInvocation,
+  AiChatSkillSummary,
   AiChatStreamEvent,
   AiChatToolTraceEntry,
   InlinePythonBlockInsertion
 } from "../shared/aiChat";
+import {
+  findActiveAiSkillTrigger,
+  findExplicitAiSkillMentions,
+  getAiSkillSuggestions,
+  type AiSkillTextTrigger
+} from "../shared/aiChatSkills";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   resolveWorkspaceMarkdownTarget,
@@ -39,6 +54,8 @@ import {
   toIntegralCodeBlock
 } from "./integralBlockRegistry";
 import { AiMarkdown } from "./AiMarkdown";
+import { AiSkillChips } from "./AiSkillChips";
+import { AiSkillCompletionList } from "./AiSkillCompletionList";
 import { installWorkspaceEmbedFeature } from "./workspaceEmbedFeature";
 
 interface MilkdownEditorProps {
@@ -104,6 +121,18 @@ interface InlineAiPromptState {
   y: number;
 }
 
+interface InlineAiPopupDragState {
+  height: number;
+  offsetX: number;
+  offsetY: number;
+  pointerId: number;
+  width: number;
+}
+
+interface InlineAiSkillCompletionState extends AiSkillTextTrigger {
+  selectedIndex: number;
+}
+
 interface InlineAiTriggerState {
   afterText: string;
   beforeText: string;
@@ -117,6 +146,7 @@ interface InlineAiTriggerState {
 const INLINE_AI_INSERTION_PREVIEW_FRAME_MS = 24;
 const INLINE_AI_INSERTION_PREVIEW_TARGET_FRAMES = 64;
 const INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE = 2;
+const INLINE_AI_POPUP_WIDTH = 520;
 
 export function MilkdownEditor({
   focusedBlockId,
@@ -136,6 +166,8 @@ export function MilkdownEditor({
 }: MilkdownEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Crepe | null>(null);
+  const inlineAiPopupRef = useRef<HTMLFormElement | null>(null);
+  const inlineAiDragStateRef = useRef<InlineAiPopupDragState | null>(null);
   const onChangeRef = useRef(onChange);
   const onFocusedBlockHandledRef = useRef(onFocusedBlockHandled);
   const onIntegralAssetCatalogChangedRef = useRef(onIntegralAssetCatalogChanged);
@@ -161,6 +193,9 @@ export function MilkdownEditor({
   const [linkCompletion, setLinkCompletion] = useState<LinkCompletionState | null>(null);
   const [analysisCompletion, setAnalysisCompletion] = useState<AnalysisCompletionState | null>(null);
   const [inlineAiPrompt, setInlineAiPrompt] = useState<InlineAiPromptState | null>(null);
+  const [inlineAiSkillCompletion, setInlineAiSkillCompletion] =
+    useState<InlineAiSkillCompletionState | null>(null);
+  const [availableAiSkills, setAvailableAiSkills] = useState<AiChatSkillSummary[]>([]);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -193,6 +228,8 @@ export function MilkdownEditor({
       setLinkCompletion(null);
       setAnalysisCompletion(null);
       activeInlineAiStreamIdRef.current = null;
+      inlineAiDragStateRef.current = null;
+      setInlineAiSkillCompletion(null);
       setInlineAiPrompt(null);
     }
   }, [isActive]);
@@ -209,6 +246,30 @@ export function MilkdownEditor({
 
   useEffect(() => {
     workspaceRootNameRef.current = workspaceRootName;
+  }, [workspaceRootName]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAvailableAiSkills = async (): Promise<void> => {
+      try {
+        const status = await window.integralNotes.getAiChatStatus();
+
+        if (!cancelled) {
+          setAvailableAiSkills(status.availableSkills);
+        }
+      } catch {
+        if (!cancelled) {
+          setAvailableAiSkills([]);
+        }
+      }
+    };
+
+    void loadAvailableAiSkills();
+
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceRootName]);
 
   useEffect(() => {
@@ -669,6 +730,16 @@ export function MilkdownEditor({
           analysisCompletion?.selectedIndex ?? 0,
           visibleIntegralBlockSuggestions.length - 1
         );
+  const visibleInlineAiSkillSuggestions = inlineAiSkillCompletion
+    ? getAiSkillSuggestions(availableAiSkills, inlineAiSkillCompletion.query)
+    : [];
+  const selectedInlineAiSkillSuggestionIndex =
+    visibleInlineAiSkillSuggestions.length === 0
+      ? -1
+      : Math.min(
+          inlineAiSkillCompletion?.selectedIndex ?? 0,
+          visibleInlineAiSkillSuggestions.length - 1
+        );
 
   const openInlineAiPrompt = (view: EditorView, trigger: InlineAiTriggerState): void => {
     const nextPrompt: InlineAiPromptState = {
@@ -691,6 +762,7 @@ export function MilkdownEditor({
 
     inlineAiPromptRef.current = nextPrompt;
     setInlineAiPrompt(nextPrompt);
+    setInlineAiSkillCompletion(null);
     setLinkCompletion(null);
     setAnalysisCompletion(null);
 
@@ -704,15 +776,36 @@ export function MilkdownEditor({
       return;
     }
 
+    inlineAiDragStateRef.current = null;
     inlineAiPromptRef.current = null;
     activeInlineAiStreamIdRef.current = null;
+    setInlineAiSkillCompletion(null);
     setInlineAiPrompt(null);
     editorRef.current?.editor.action((ctx) => {
       ctx.get(editorViewCtx).focus();
     });
   };
 
-  const updateInlineAiPrompt = (prompt: string): void => {
+  const syncInlineAiSkillCompletion = (prompt: string, cursorPosition: number): void => {
+    const trigger = findActiveAiSkillTrigger(prompt, cursorPosition);
+
+    if (!trigger) {
+      setInlineAiSkillCompletion(null);
+      return;
+    }
+
+    setInlineAiSkillCompletion((current) => ({
+      ...trigger,
+      selectedIndex:
+        current &&
+        current.replaceFrom === trigger.replaceFrom &&
+        current.replaceTo === trigger.replaceTo
+          ? current.selectedIndex
+          : 0
+    }));
+  };
+
+  const updateInlineAiPrompt = (prompt: string, cursorPosition?: number): void => {
     setInlineAiPrompt((current) => {
       if (!current) {
         return current;
@@ -722,6 +815,167 @@ export function MilkdownEditor({
       inlineAiPromptRef.current = next;
       return next;
     });
+    syncInlineAiSkillCompletion(prompt, cursorPosition ?? prompt.length);
+  };
+
+  const updateInlineAiPromptPosition = (x: number, y: number): void => {
+    setInlineAiPrompt((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const next = { ...current, x, y };
+      inlineAiPromptRef.current = next;
+      return next;
+    });
+  };
+
+  const insertInlineAiSkill = (skill: AiChatSkillSummary): void => {
+    const current = inlineAiPromptRef.current;
+    const completion = inlineAiSkillCompletion;
+
+    if (!current || !completion) {
+      return;
+    }
+
+    const beforeText = current.prompt.slice(0, completion.replaceFrom);
+    const afterText = current.prompt.slice(completion.replaceTo);
+    const insertion = `$${skill.name}${afterText.length === 0 || !/^\s/u.test(afterText) ? " " : ""}`;
+    const nextPrompt = `${beforeText}${insertion}${afterText}`;
+    const nextCursorPosition = beforeText.length + insertion.length;
+
+    setInlineAiSkillCompletion(null);
+    updateInlineAiPrompt(nextPrompt, nextCursorPosition);
+    setInlineAiSkillCompletion(null);
+    window.requestAnimationFrame(() => {
+      const textarea = inlineAiTextareaRef.current;
+
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(nextCursorPosition, nextCursorPosition);
+    });
+  };
+
+  const handleInlineAiPromptKeyDown = (
+    event: ReactKeyboardEvent<HTMLTextAreaElement>
+  ): void => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      setInlineAiSkillCompletion(null);
+      void submitInlineAiPrompt();
+      return;
+    }
+
+    if (inlineAiSkillCompletion) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setInlineAiSkillCompletion(null);
+        return;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+
+        if (visibleInlineAiSkillSuggestions.length === 0) {
+          return;
+        }
+
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setInlineAiSkillCompletion((current) =>
+          current
+            ? {
+                ...current,
+                selectedIndex:
+                  (selectedInlineAiSkillSuggestionIndex +
+                    direction +
+                    visibleInlineAiSkillSuggestions.length) %
+                  visibleInlineAiSkillSuggestions.length
+              }
+            : current
+        );
+        return;
+      }
+
+      if (
+        (event.key === "Enter" || event.key === "Tab") &&
+        selectedInlineAiSkillSuggestionIndex >= 0
+      ) {
+        const selectedSkill = visibleInlineAiSkillSuggestions[selectedInlineAiSkillSuggestionIndex];
+
+        if (!selectedSkill) {
+          return;
+        }
+
+        event.preventDefault();
+        insertInlineAiSkill(selectedSkill);
+        return;
+      }
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeInlineAiPrompt();
+    }
+  };
+
+  const startInlineAiPopupDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!event.isPrimary || event.button !== 0) {
+      return;
+    }
+
+    const target = event.target;
+
+    if (target instanceof HTMLElement && target.closest("button")) {
+      return;
+    }
+
+    const popupElement = inlineAiPopupRef.current;
+
+    if (!popupElement) {
+      return;
+    }
+
+    const popupRect = popupElement.getBoundingClientRect();
+    inlineAiDragStateRef.current = {
+      height: popupRect.height,
+      offsetX: event.clientX - popupRect.left,
+      offsetY: event.clientY - popupRect.top,
+      pointerId: event.pointerId,
+      width: popupRect.width
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const moveInlineAiPopupDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const dragState = inlineAiDragStateRef.current;
+
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    updateInlineAiPromptPosition(
+      clampPopupCoordinate(event.clientX - dragState.offsetX, dragState.width, window.innerWidth),
+      clampPopupCoordinate(event.clientY - dragState.offsetY, dragState.height, window.innerHeight)
+    );
+    event.preventDefault();
+  };
+
+  const stopInlineAiPopupDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const dragState = inlineAiDragStateRef.current;
+
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    inlineAiDragStateRef.current = null;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const playInlineAiInsertionPreview = async (
@@ -795,6 +1049,7 @@ export function MilkdownEditor({
       return;
     }
 
+    const requestedSkills = findExplicitAiSkillMentions(current.prompt, availableAiSkills);
     const streamId = createInlineAiStreamId();
     const submittingState = {
       ...current,
@@ -807,6 +1062,7 @@ export function MilkdownEditor({
 
     activeInlineAiStreamIdRef.current = streamId;
     inlineAiPromptRef.current = submittingState;
+    setInlineAiSkillCompletion(null);
     setInlineAiPrompt(submittingState);
 
     try {
@@ -819,6 +1075,7 @@ export function MilkdownEditor({
           history: current.messages,
           insertionPosition: current.anchorPos,
           prompt: current.prompt,
+          requestedSkills,
           sessionId: current.sessionId,
           sourceNotePath: relativePath,
           streamId
@@ -870,6 +1127,7 @@ export function MilkdownEditor({
           history: current.messages,
           insertionPosition: current.anchorPos,
           prompt: current.prompt,
+          requestedSkills,
           sessionId: current.sessionId,
           sourceNotePath: relativePath,
           streamId
@@ -1203,6 +1461,10 @@ export function MilkdownEditor({
     };
   }, [focusedBlockId, initialValue, isActive]);
 
+  const inlineAiPromptSkills: AiChatSkillInvocation[] = inlineAiPrompt
+    ? findExplicitAiSkillMentions(inlineAiPrompt.prompt, availableAiSkills)
+    : [];
+
   return (
     <div className="editor-shell">
       {toolbar ? <div className="editor-toolbar">{toolbar}</div> : null}
@@ -1217,12 +1479,19 @@ export function MilkdownEditor({
             event.preventDefault();
             void submitInlineAiPrompt();
           }}
+          ref={inlineAiPopupRef}
           style={{
             left: `${inlineAiPrompt.x}px`,
             top: `${inlineAiPrompt.y}px`
           }}
         >
-          <div className="editor-ai-popup__header">
+          <div
+            className="editor-ai-popup__header"
+            onPointerCancel={stopInlineAiPopupDrag}
+            onPointerDown={startInlineAiPopupDrag}
+            onPointerMove={moveInlineAiPopupDrag}
+            onPointerUp={stopInlineAiPopupDrag}
+          >
             <strong>
               {inlineAiPrompt.mode === "insert-text" ? "AI 挿入" : "Python block 生成"}
             </strong>
@@ -1246,6 +1515,7 @@ export function MilkdownEditor({
                   <span className="editor-ai-popup__message-role">
                     {formatInlineAiMessageRole(message)}
                   </span>
+                  <AiSkillChips compact skills={message.skillInvocations ?? []} />
                   {message.role === "tool" ? (
                     <pre className="editor-ai-popup__message-text editor-ai-popup__message-text--plain">
                       {formatInlineAiMessageText(message)}
@@ -1293,19 +1563,32 @@ export function MilkdownEditor({
           <textarea
             className="editor-ai-popup__input"
             disabled={inlineAiPrompt.isSubmitting}
+            onClick={(event) => {
+              syncInlineAiSkillCompletion(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart
+              );
+            }}
             onChange={(event) => {
-              updateInlineAiPrompt(event.target.value);
+              updateInlineAiPrompt(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart
+              );
             }}
             onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                closeInlineAiPrompt();
-                return;
-              }
-
-              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                event.preventDefault();
-                void submitInlineAiPrompt();
+              handleInlineAiPromptKeyDown(event);
+            }}
+            onKeyUp={(event) => {
+              if (
+                event.key === "ArrowLeft" ||
+                event.key === "ArrowRight" ||
+                event.key === "Home" ||
+                event.key === "End"
+              ) {
+                syncInlineAiSkillCompletion(
+                  event.currentTarget.value,
+                  event.currentTarget.selectionStart
+                );
               }
             }}
             placeholder={
@@ -1321,6 +1604,20 @@ export function MilkdownEditor({
             rows={4}
             value={inlineAiPrompt.prompt}
           />
+          {inlineAiSkillCompletion ? (
+            <AiSkillCompletionList
+              compact
+              onHighlight={(index) => {
+                setInlineAiSkillCompletion((current) =>
+                  current ? { ...current, selectedIndex: index } : current
+                );
+              }}
+              onSelect={insertInlineAiSkill}
+              selectedIndex={selectedInlineAiSkillSuggestionIndex}
+              skills={visibleInlineAiSkillSuggestions}
+            />
+          ) : null}
+          <AiSkillChips compact skills={inlineAiPromptSkills} />
           {inlineAiPrompt.error ? (
             <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
           ) : null}
@@ -1455,7 +1752,8 @@ function computeInlineAiTriggerState(
 
   const { $from, from } = selection;
   const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
-  const marker = textBefore.endsWith("??") ? "??" : textBefore.endsWith(">>") ? ">>" : null;
+  const currentLineBefore = textBefore.slice(textBefore.lastIndexOf("\n") + 1);
+  const marker = currentLineBefore === "??" ? "??" : currentLineBefore === ">>" ? ">>" : null;
 
   if (!marker) {
     return null;
@@ -1474,7 +1772,7 @@ function computeInlineAiTriggerState(
       mode: marker === "??" ? "insert-text" : "python-block",
       replaceFrom,
       replaceTo,
-      x: clampPopupCoordinate(coords.left, 420, window.innerWidth),
+      x: clampPopupCoordinate(coords.left, INLINE_AI_POPUP_WIDTH, window.innerWidth),
       y: popupLayout.y
     };
   } catch {

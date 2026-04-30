@@ -16,6 +16,8 @@ import {
   type AiChatMessageDiagnostics,
   type AiChatSession,
   type AiChatSessionSummary,
+  type AiChatSkillInvocation,
+  type AiChatSkillSummary,
   type AiChatStatus,
   type AiChatStreamEvent,
   type AiChatSystemPrompts,
@@ -31,6 +33,7 @@ import {
   type SubmitInlinePythonBlockRequest,
   type SubmitInlinePythonBlockResult
 } from "../shared/aiChat";
+import { findExplicitAiSkillMentions, normalizeAiSkillNameKey, toAiSkillInvocation } from "../shared/aiChatSkills";
 import {
   AiAgentService,
   type AiAgentExecutionRuntime,
@@ -176,9 +179,10 @@ export class AiChatService {
 
   async getStatus(): Promise<AiChatStatus> {
     const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
-    const [catalog, settings] = await Promise.all([
+    const [catalog, settings, availableSkills] = await Promise.all([
       this.getModelCatalog(false),
-      this.readPersistedSettings()
+      this.readPersistedSettings(),
+      listWorkspaceAiSkills(workspaceRootPath)
     ]);
     const selectedModelId = selectValidModelId(settings.selectedModelId ?? null, catalog.models);
     const systemPrompts = resolveAiChatSystemPrompts(settings);
@@ -217,6 +221,7 @@ export class AiChatService {
       ],
       providerLabel: runtimeSelection.providerLabel,
       selectedModelId,
+      availableSkills,
       skillsDirectoryPath:
         workspaceRootPath === null ? null : path.join(workspaceRootPath, ".codex", "skills"),
       shellExecutablePath: normalizeNullableString(settings.shellExecutablePath),
@@ -374,7 +379,16 @@ export class AiChatService {
     const [status, settings] = await Promise.all([this.getStatus(), this.readPersistedSettings()]);
     const selectedModelId = status.selectedModelId ?? FALLBACK_MODELS[0]?.id ?? "openai/gpt-5.4";
     const systemPrompts = resolveAiChatSystemPrompts(settings);
-    const normalizedHistoryResult = await normalizeAiChatHistory(request.history, workspaceRootPath);
+    const requestedSkills = resolveExplicitAiSkillInvocations(
+      request.prompt,
+      request.requestedSkills ?? [],
+      status.availableSkills
+    );
+    const normalizedHistoryResult = await normalizeAiChatHistory(
+      request.history,
+      workspaceRootPath,
+      requestedSkills
+    );
     const runtimeSelection = await this.resolveRuntimeSelection({
       modelId: selectedModelId,
       settings,
@@ -402,7 +416,10 @@ export class AiChatService {
               history: normalizedHistoryResult.history,
               runtimeSelection,
               stream,
-              systemPrompt: systemPrompts.chatPanel
+              systemPrompt: appendExplicitSkillInstructions(
+                systemPrompts.chatPanel,
+                requestedSkills
+              )
             }))
           };
     const toolMessages = buildToolMessages(assistantMessage);
@@ -434,6 +451,11 @@ export class AiChatService {
       this.readPersistedSettings()
     ]);
     const systemPrompts = resolveAiChatSystemPrompts(settings);
+    const requestedSkills = resolveExplicitAiSkillInvocations(
+      request.prompt,
+      request.requestedSkills ?? [],
+      status.availableSkills
+    );
 
     if (runtimeSelection.mode === "stub") {
       throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
@@ -446,6 +468,7 @@ export class AiChatService {
       createdAt: new Date().toISOString(),
       id: createChatMessageId("user"),
       role: "user",
+      skillInvocations: requestedSkills.length > 0 ? requestedSkills : undefined,
       text: prompt
     };
     const conversationalMessages = [...normalizedPriorMessages, userMessage];
@@ -456,7 +479,10 @@ export class AiChatService {
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
       },
-      instructions: buildInlineInsertionInstructions(systemPrompts.inlineInsertion),
+      instructions: appendExplicitSkillInstructions(
+        buildInlineInsertionInstructions(systemPrompts.inlineInsertion),
+        requestedSkills
+      ),
       maxSteps: TOOL_LOOP_INLINE_INSERTION_MAX_STEPS,
       prompt: buildInlineInsertionPrompt(request, conversationalMessages),
       runtimeSelection,
@@ -515,6 +541,11 @@ export class AiChatService {
       this.readPersistedSettings()
     ]);
     const systemPrompts = resolveAiChatSystemPrompts(settings);
+    const requestedSkills = resolveExplicitAiSkillInvocations(
+      request.prompt,
+      request.requestedSkills ?? [],
+      status.availableSkills
+    );
 
     if (runtimeSelection.mode === "stub") {
       throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
@@ -527,6 +558,7 @@ export class AiChatService {
       createdAt: new Date().toISOString(),
       id: createChatMessageId("user"),
       role: "user",
+      skillInvocations: requestedSkills.length > 0 ? requestedSkills : undefined,
       text: prompt
     };
     const conversationalMessages = [...normalizedPriorMessages, userMessage];
@@ -538,7 +570,10 @@ export class AiChatService {
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
       },
-      instructions: buildInlinePythonBlockInstructions(systemPrompts.inlinePythonBlock, skillPrompt),
+      instructions: appendExplicitSkillInstructions(
+        buildInlinePythonBlockInstructions(systemPrompts.inlinePythonBlock, skillPrompt),
+        requestedSkills
+      ),
       maxSteps: TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS,
       prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
       runtimeSelection,
@@ -945,6 +980,69 @@ function buildInlineRuntimeNotConfiguredMessage(status: AiChatStatus): string {
   return `AI runtime が未設定です${model}。AI Chat settings で model と credential を設定してください。`;
 }
 
+function resolveExplicitAiSkillInvocations(
+  prompt: string,
+  requestedSkills: readonly AiChatSkillInvocation[],
+  availableSkills: readonly AiChatSkillSummary[]
+): AiChatSkillInvocation[] {
+  if (availableSkills.length === 0) {
+    return [];
+  }
+
+  const availableSkillsByKey = new Map(
+    availableSkills.map((skill) => [normalizeAiSkillNameKey(skill.name), skill] as const)
+  );
+  const resolvedSkills: AiChatSkillInvocation[] = [];
+  const seenKeys = new Set<string>();
+  const addSkill = (skillName: string): void => {
+    const key = normalizeAiSkillNameKey(skillName);
+    const skill = availableSkillsByKey.get(key);
+
+    if (!skill || seenKeys.has(key)) {
+      return;
+    }
+
+    resolvedSkills.push(toAiSkillInvocation(skill));
+    seenKeys.add(key);
+  };
+
+  for (const requestedSkill of requestedSkills) {
+    addSkill(requestedSkill.name);
+  }
+
+  for (const promptedSkill of findExplicitAiSkillMentions(prompt, availableSkills)) {
+    addSkill(promptedSkill.name);
+  }
+
+  return resolvedSkills;
+}
+
+function appendExplicitSkillInstructions(
+  instructions: string,
+  requestedSkills: readonly AiChatSkillInvocation[]
+): string {
+  if (requestedSkills.length === 0) {
+    return instructions;
+  }
+
+  return [
+    instructions.trim(),
+    "",
+    "# Explicitly Requested Skills",
+    "The user explicitly selected these workspace skills for this turn.",
+    "If the `skill` tool is available, call it for each listed skill name before completing the task, then follow the loaded instructions.",
+    "If the `skill` tool is unavailable, still treat the listed skill names as explicit user intent.",
+    ...requestedSkills.map((skill) => {
+      const description =
+        skill.description && skill.description.trim().length > 0
+          ? ` - ${skill.description.trim()}`
+          : "";
+
+      return `- ${skill.name}${description}`;
+    })
+  ].join("\n");
+}
+
 function createAiAgentStreamCallbacks(
   streamId: string | null,
   options: AiChatExecutionOptions
@@ -1208,6 +1306,99 @@ async function readTextIfExists(filePath: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+async function listWorkspaceAiSkills(
+  workspaceRootPath: string | null
+): Promise<AiChatSkillSummary[]> {
+  if (!workspaceRootPath) {
+    return [];
+  }
+
+  const skillRootPaths = [
+    path.join(workspaceRootPath, ".codex", "skills"),
+    path.join(workspaceRootPath, "Notes", ".codex", "skills")
+  ];
+  const skillsByKey = new Map<string, AiChatSkillSummary>();
+
+  for (const skillRootPath of skillRootPaths) {
+    const entries = await fs.readdir(skillRootPath, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const skillDirectoryPath = path.join(skillRootPath, entry.name);
+      const skillFilePath = path.join(skillDirectoryPath, "SKILL.md");
+      const skillBody = await readTextIfExists(skillFilePath);
+
+      if (!skillBody) {
+        continue;
+      }
+
+      const metadata = parseSkillMetadata(skillBody, entry.name);
+      const key = normalizeAiSkillNameKey(metadata.name);
+
+      if (!skillsByKey.has(key)) {
+        skillsByKey.set(key, {
+          description: metadata.description,
+          name: metadata.name,
+          relativePath: normalizeWorkspaceDisplayPath(
+            path.relative(workspaceRootPath, skillFilePath)
+          )
+        });
+      }
+    }
+  }
+
+  return Array.from(skillsByKey.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, "ja")
+  );
+}
+
+function parseSkillMetadata(
+  skillBody: string,
+  fallbackName: string
+): Pick<AiChatSkillSummary, "description" | "name"> {
+  const frontmatterMatch = /^---\s*\n([\s\S]*?)\n---/u.exec(skillBody);
+  const frontmatter = frontmatterMatch?.[1] ?? "";
+  const fields = new Map<string, string>();
+
+  for (const line of frontmatter.split(/\r?\n/u)) {
+    const match = /^([A-Za-z0-9_-]+):\s*(.*)$/u.exec(line);
+
+    if (!match) {
+      continue;
+    }
+
+    fields.set(match[1].toLowerCase(), unquoteSkillMetadataValue(match[2] ?? ""));
+  }
+
+  const name = fields.get("name")?.trim() || fallbackName;
+  const description = fields.get("description")?.trim() || "";
+
+  return {
+    description,
+    name
+  };
+}
+
+function unquoteSkillMetadataValue(value: string): string {
+  const trimmed = value.trim();
+
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
+function normalizeWorkspaceDisplayPath(value: string): string {
+  return value.replace(/\\/gu, "/");
 }
 
 function parseInlinePythonBlockInsertion(
@@ -1505,10 +1696,17 @@ function normalizeAiChatMessageForPersistence(value: unknown): AiChatMessage | n
     ? value.attachments.map(normalizeImageAttachment).filter(isDefined)
     : [];
   const diagnostics = normalizeMessageDiagnostics(value.diagnostics);
+  const skillInvocations = Array.isArray(value.skillInvocations)
+    ? normalizeSkillInvocations(value.skillInvocations)
+    : [];
   const toolTraceEntry = normalizeToolTraceEntry(value.toolTraceEntry);
 
   if (attachments.length > 0) {
     message.attachments = attachments;
+  }
+
+  if (skillInvocations.length > 0) {
+    message.skillInvocations = skillInvocations;
   }
 
   if (diagnostics) {
@@ -1541,6 +1739,76 @@ function normalizeImageAttachment(value: unknown): AiChatImageAttachment | null 
     name: value.name,
     sourcePath: value.sourcePath
   };
+}
+
+function normalizeSkillInvocations(value: readonly unknown[]): AiChatSkillInvocation[] {
+  const normalizedSkills: AiChatSkillInvocation[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const item of value) {
+    const skill = normalizeSkillInvocation(item);
+
+    if (!skill) {
+      continue;
+    }
+
+    const key = normalizeAiSkillNameKey(skill.name);
+
+    if (seenKeys.has(key)) {
+      continue;
+    }
+
+    normalizedSkills.push(skill);
+    seenKeys.add(key);
+  }
+
+  return normalizedSkills;
+}
+
+function normalizeSkillInvocation(value: unknown): AiChatSkillInvocation | null {
+  if (!isRecord(value) || typeof value.name !== "string") {
+    return null;
+  }
+
+  const name = value.name.trim();
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/u.test(name)) {
+    return null;
+  }
+
+  const description =
+    typeof value.description === "string" && value.description.trim().length > 0
+      ? value.description.trim()
+      : undefined;
+  const relativePath =
+    typeof value.relativePath === "string" && value.relativePath.trim().length > 0
+      ? normalizeWorkspaceDisplayPath(value.relativePath.trim())
+      : undefined;
+
+  return {
+    ...(description ? { description } : {}),
+    name,
+    ...(relativePath ? { relativePath } : {})
+  };
+}
+
+function areSkillInvocationsEquivalent(
+  left: readonly AiChatSkillInvocation[],
+  right: readonly AiChatSkillInvocation[]
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((skill, index) => {
+    const other = right[index];
+
+    return (
+      skill.name === other?.name &&
+      (skill.description ?? "") === (other.description ?? "") &&
+      (skill.relativePath ?? "") === (other.relativePath ?? "")
+    );
+  });
 }
 
 function normalizeMessageDiagnostics(value: unknown): AiChatMessageDiagnostics | null {
@@ -1940,7 +2208,8 @@ function selectValidModelId(
 
 async function normalizeAiChatHistory(
   history: AiChatMessage[],
-  workspaceRootPath: string | null
+  workspaceRootPath: string | null,
+  skillInvocations: readonly AiChatSkillInvocation[] = []
 ): Promise<{
   history: AiChatMessage[];
   updatedUserMessage?: AiChatMessage;
@@ -1957,14 +2226,23 @@ async function normalizeAiChatHistory(
     workspaceRootPath,
     latestUserMessage.attachments ?? []
   );
+  const normalizedSkillInvocations = normalizeSkillInvocations(skillInvocations);
 
-  if (areImageAttachmentsEquivalent(latestUserMessage.attachments ?? [], resolvedAttachments)) {
+  if (
+    areImageAttachmentsEquivalent(latestUserMessage.attachments ?? [], resolvedAttachments) &&
+    areSkillInvocationsEquivalent(
+      latestUserMessage.skillInvocations ?? [],
+      normalizedSkillInvocations
+    )
+  ) {
     return { history };
   }
 
   const updatedUserMessage: AiChatMessage = {
     ...latestUserMessage,
-    attachments: resolvedAttachments
+    attachments: resolvedAttachments.length > 0 ? resolvedAttachments : undefined,
+    skillInvocations:
+      normalizedSkillInvocations.length > 0 ? normalizedSkillInvocations : undefined
   };
   const nextHistory = history.slice();
   nextHistory[latestUserMessageIndex] = updatedUserMessage;

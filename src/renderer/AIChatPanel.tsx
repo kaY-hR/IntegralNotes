@@ -4,7 +4,8 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type ClipboardEvent
+  type ClipboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 
 import {
@@ -14,13 +15,24 @@ import {
   type AiChatImageAttachment,
   type AiChatMessage,
   type AiChatSessionSummary,
+  type AiChatSkillInvocation,
+  type AiChatSkillSummary,
   type AiChatStatus,
   type AiChatStreamEvent,
   type AiChatSystemPrompts,
   type AiChatToolTraceEntry
 } from "../shared/aiChat";
+import {
+  findActiveAiSkillTrigger,
+  findExplicitAiSkillMentions,
+  getAiSkillSuggestions,
+  type AiSkillTextTrigger,
+  toAiSkillInvocation
+} from "../shared/aiChatSkills";
 import type { WorkspaceFileDocument } from "../shared/workspace";
 import { AiMarkdown } from "./AiMarkdown";
+import { AiSkillChips } from "./AiSkillChips";
+import { AiSkillCompletionList } from "./AiSkillCompletionList";
 
 interface AIChatPanelProps {
   contextRelativePath: string | null;
@@ -28,6 +40,10 @@ interface AIChatPanelProps {
   selectedEntryPaths: string[];
   workspaceRevision: number;
   workspaceRootName: string | null;
+}
+
+interface AiSkillCompletionState extends AiSkillTextTrigger {
+  selectedIndex: number;
 }
 
 export function AIChatPanel({
@@ -62,6 +78,7 @@ export function AIChatPanel({
   const [prompt, setPrompt] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [shellExecutablePathInput, setShellExecutablePathInput] = useState("");
+  const [skillCompletion, setSkillCompletion] = useState<AiSkillCompletionState | null>(null);
   const [streamingAssistantText, setStreamingAssistantText] = useState("");
   const [streamingToolTrace, setStreamingToolTrace] = useState<AiChatToolTraceEntry[]>([]);
   const [status, setStatus] = useState<AiChatStatus | null>(null);
@@ -70,6 +87,7 @@ export function AIChatPanel({
   );
   const messagesRef = useRef<HTMLElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
 
   const applyHistoryMetadata = (snapshot: AiChatHistorySnapshot): void => {
@@ -296,6 +314,25 @@ export function AIChatPanel({
       systemPromptInputs.inlinePythonBlock.trim().length > 0,
     [systemPromptInputs]
   );
+  const recognizedPromptSkills = useMemo<AiChatSkillInvocation[]>(
+    () => findExplicitAiSkillMentions(prompt, status?.availableSkills ?? []),
+    [prompt, status?.availableSkills]
+  );
+  const availableSkillInvocations = useMemo<AiChatSkillInvocation[]>(
+    () => (status?.availableSkills ?? []).map(toAiSkillInvocation),
+    [status?.availableSkills]
+  );
+  const visibleSkillSuggestions = useMemo(
+    () =>
+      skillCompletion
+        ? getAiSkillSuggestions(status?.availableSkills ?? [], skillCompletion.query)
+        : [],
+    [skillCompletion, status?.availableSkills]
+  );
+  const selectedSkillSuggestionIndex =
+    visibleSkillSuggestions.length === 0
+      ? -1
+      : Math.min(skillCompletion?.selectedIndex ?? 0, visibleSkillSuggestions.length - 1);
 
   const activeSessionTitle = historySnapshot?.activeSession.title ?? "New chat";
   const sessionCount = historySnapshot?.sessions.length ?? 0;
@@ -455,6 +492,107 @@ export function AIChatPanel({
     }));
   };
 
+  const syncSkillCompletion = (value: string, cursorPosition: number): void => {
+    const trigger = findActiveAiSkillTrigger(value, cursorPosition);
+
+    if (!trigger) {
+      setSkillCompletion(null);
+      return;
+    }
+
+    setSkillCompletion((current) => ({
+      ...trigger,
+      selectedIndex:
+        current &&
+        current.replaceFrom === trigger.replaceFrom &&
+        current.replaceTo === trigger.replaceTo
+          ? current.selectedIndex
+          : 0
+    }));
+  };
+
+  const updatePromptInput = (value: string, cursorPosition: number): void => {
+    setPrompt(value);
+    syncSkillCompletion(value, cursorPosition);
+  };
+
+  const insertPromptSkill = (skill: AiChatSkillSummary): void => {
+    const completion = skillCompletion;
+
+    if (!completion) {
+      return;
+    }
+
+    const beforeText = prompt.slice(0, completion.replaceFrom);
+    const afterText = prompt.slice(completion.replaceTo);
+    const insertion = `$${skill.name}${afterText.length === 0 || !/^\s/u.test(afterText) ? " " : ""}`;
+    const nextPrompt = `${beforeText}${insertion}${afterText}`;
+    const nextCursorPosition = beforeText.length + insertion.length;
+
+    setPrompt(nextPrompt);
+    setSkillCompletion(null);
+    window.requestAnimationFrame(() => {
+      const textarea = composerTextareaRef.current;
+
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(nextCursorPosition, nextCursorPosition);
+    });
+  };
+
+  const handlePromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void handleSubmit();
+      return;
+    }
+
+    if (!skillCompletion) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSkillCompletion(null);
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+
+      if (visibleSkillSuggestions.length === 0) {
+        return;
+      }
+
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setSkillCompletion((current) =>
+        current
+          ? {
+              ...current,
+              selectedIndex:
+                (selectedSkillSuggestionIndex + direction + visibleSkillSuggestions.length) %
+                visibleSkillSuggestions.length
+            }
+          : current
+      );
+      return;
+    }
+
+    if ((event.key === "Enter" || event.key === "Tab") && selectedSkillSuggestionIndex >= 0) {
+      const selectedSkill = visibleSkillSuggestions[selectedSkillSuggestionIndex];
+
+      if (!selectedSkill) {
+        return;
+      }
+
+      event.preventDefault();
+      insertPromptSkill(selectedSkill);
+    }
+  };
+
   const handleSubmit = async (): Promise<void> => {
     const trimmedPrompt = prompt.trim();
 
@@ -480,6 +618,8 @@ export function AIChatPanel({
       createdAt: new Date().toISOString(),
       id: createChatMessageId("user"),
       role: "user",
+      skillInvocations:
+        recognizedPromptSkills.length > 0 ? recognizedPromptSkills : undefined,
       text: trimmedPrompt
     };
     const nextHistory = [...messages.filter((message) => message.role !== "tool"), userMessage];
@@ -487,6 +627,7 @@ export function AIChatPanel({
 
     setMessages(optimisticMessages);
     setPrompt("");
+    setSkillCompletion(null);
     setComposerAttachments([]);
 
     const streamId = createChatStreamId();
@@ -499,6 +640,7 @@ export function AIChatPanel({
         context: contextSummary,
         history: nextHistory,
         prompt: trimmedPrompt,
+        requestedSkills: recognizedPromptSkills,
         streamId
       });
 
@@ -660,6 +802,8 @@ export function AIChatPanel({
                 <span>{formatMessageTime(message.createdAt)}</span>
               </div>
 
+              <AiSkillChips skills={message.skillInvocations ?? []} />
+
               {message.attachments && message.attachments.length > 0 ? (
                 <div className="ai-chat-panel__attachments">
                   {message.attachments.map((attachment) => (
@@ -802,22 +946,48 @@ export function AIChatPanel({
         <textarea
           className="ai-chat-panel__composer-input"
           disabled={isSubmitting}
+          onClick={(event) => {
+            syncSkillCompletion(event.currentTarget.value, event.currentTarget.selectionStart);
+          }}
           onChange={(event) => {
-            setPrompt(event.target.value);
+            updatePromptInput(event.currentTarget.value, event.currentTarget.selectionStart);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-              event.preventDefault();
-              void handleSubmit();
+            handlePromptKeyDown(event);
+          }}
+          onKeyUp={(event) => {
+            if (
+              event.key === "ArrowLeft" ||
+              event.key === "ArrowRight" ||
+              event.key === "Home" ||
+              event.key === "End"
+            ) {
+              syncSkillCompletion(event.currentTarget.value, event.currentTarget.selectionStart);
             }
           }}
           onPaste={(event) => {
             void handlePasteImages(event);
           }}
           placeholder="workspace に対してやりたいことを書く"
+          ref={composerTextareaRef}
           rows={5}
           value={prompt}
         />
+
+        {skillCompletion ? (
+          <AiSkillCompletionList
+            onHighlight={(index) => {
+              setSkillCompletion((current) =>
+                current ? { ...current, selectedIndex: index } : current
+              );
+            }}
+            onSelect={insertPromptSkill}
+            selectedIndex={selectedSkillSuggestionIndex}
+            skills={visibleSkillSuggestions}
+          />
+        ) : null}
+
+        <AiSkillChips skills={recognizedPromptSkills} />
 
         {composerAttachments.length > 0 ? (
           <div className="ai-chat-panel__attachments ai-chat-panel__attachments--composer">
@@ -1257,9 +1427,20 @@ export function AIChatPanel({
                   </div>
                   <div className="ai-chat-panel__context-field">
                     <span className="ai-chat-panel__context-label">Skills</span>
-                    <strong>{status?.skillsDirectoryPath ?? "(workspace 未選択)"}</strong>
+                    <strong>
+                      {status?.availableSkills.length ?? 0} available
+                    </strong>
                   </div>
                 </div>
+
+                {availableSkillInvocations.length > 0 ? (
+                  <div className="ai-chat-panel__context-field ai-chat-panel__context-field--wide">
+                    <span className="ai-chat-panel__context-label">
+                      {status?.skillsDirectoryPath ?? "Skills"}
+                    </span>
+                    <AiSkillChips skills={availableSkillInvocations} />
+                  </div>
+                ) : null}
 
                 {contextSummary.activeDocumentExcerpt ? (
                   <div className="ai-chat-panel__excerpt">
