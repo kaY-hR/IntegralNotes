@@ -311,7 +311,8 @@ export function AIChatPanel({
     () =>
       systemPromptInputs.chatPanel.trim().length > 0 &&
       systemPromptInputs.inlineInsertion.trim().length > 0 &&
-      systemPromptInputs.inlinePythonBlock.trim().length > 0,
+      systemPromptInputs.inlinePythonBlock.trim().length > 0 &&
+      systemPromptInputs.promptlessContinuation.trim().length > 0,
     [systemPromptInputs]
   );
   const recognizedPromptSkills = useMemo<AiChatSkillInvocation[]>(
@@ -1263,7 +1264,7 @@ export function AIChatPanel({
                     <span className="ai-chat-panel__context-label">Prompts</span>
                     <h3 className="ai-chat-panel__section-title">System Prompts</h3>
                     <p className="ai-chat-panel__description">
-                      保存すると、通常chat、??のAI挿入、&gt;&gt;のPython block生成に反映されます。
+                      保存すると、通常chat、??のAI挿入、&gt;&gt;のPython block生成、@@の続きを生成に反映されます。
                     </p>
                   </div>
 
@@ -1316,9 +1317,21 @@ export function AIChatPanel({
                     />
                   </label>
 
+                  <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
+                    <span className="ai-chat-panel__context-label">@@ Promptless continuation</span>
+                    <textarea
+                      className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
+                      onChange={(event) => {
+                        updateSystemPromptInput("promptlessContinuation", event.target.value);
+                      }}
+                      rows={9}
+                      value={systemPromptInputs.promptlessContinuation}
+                    />
+                  </label>
+
                   {!systemPromptInputsAreValid ? (
                     <p className="ai-chat-panel__note">
-                      system prompt は3種類とも空にできません。既定値に戻す場合は Reset Prompts を使ってください。
+                      system prompt は4種類とも空にできません。既定値に戻す場合は Reset Prompts を使ってください。
                     </p>
                   ) : null}
                 </div>

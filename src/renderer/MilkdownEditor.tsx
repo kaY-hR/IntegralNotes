@@ -26,7 +26,8 @@ import type {
   AiChatSkillSummary,
   AiChatStreamEvent,
   AiChatToolTraceEntry,
-  InlinePythonBlockInsertion
+  InlinePythonBlockInsertion,
+  PromptlessContinuationInsertion
 } from "../shared/aiChat";
 import {
   findActiveAiSkillTrigger,
@@ -101,7 +102,8 @@ interface AnalysisCompletionState {
   y: number;
 }
 
-type InlineAiMode = "insert-text" | "python-block";
+type InlineAiMode = "insert-text" | "python-block" | "promptless-continuation";
+type InlineAiTriggerMarker = "??" | ">>" | "@@";
 
 interface InlineAiPromptState {
   afterText: string;
@@ -136,6 +138,7 @@ interface InlineAiSkillCompletionState extends AiSkillTextTrigger {
 interface InlineAiTriggerState {
   afterText: string;
   beforeText: string;
+  marker: InlineAiTriggerMarker;
   mode: InlineAiMode;
   replaceFrom: number;
   replaceTo: number;
@@ -337,7 +340,7 @@ export function MilkdownEditor({
   }, []);
 
   useEffect(() => {
-    if (!inlineAiPrompt) {
+    if (!inlineAiPrompt || inlineAiPrompt.mode === "promptless-continuation") {
       return;
     }
 
@@ -481,7 +484,11 @@ export function MilkdownEditor({
           const inlineTrigger = computeInlineAiTriggerState(view, selection);
 
           if (inlineTrigger && !inlineAiPromptRef.current) {
-            openInlineAiPrompt(view, inlineTrigger);
+            if (inlineTrigger.mode === "promptless-continuation") {
+              startPromptlessContinuation(view, inlineTrigger);
+            } else {
+              openInlineAiPrompt(view, inlineTrigger);
+            }
             return;
           }
 
@@ -769,6 +776,40 @@ export function MilkdownEditor({
     const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
     transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
     view.dispatch(transaction.scrollIntoView());
+  };
+
+  const startPromptlessContinuation = (view: EditorView, trigger: InlineAiTriggerState): void => {
+    const streamId = createInlineAiStreamId();
+    const nextPrompt: InlineAiPromptState = {
+      afterText: trigger.afterText,
+      anchorPos: trigger.replaceFrom,
+      beforeText: trigger.beforeText,
+      documentMarkdown: lastSyncedMarkdownRef.current,
+      error: null,
+      isSubmitting: true,
+      messages: [],
+      mode: "promptless-continuation",
+      prompt: "",
+      sessionId: null,
+      streamId,
+      streamingText: "",
+      streamingToolTrace: [],
+      x: trigger.x,
+      y: trigger.y
+    };
+
+    inlineAiPromptRef.current = nextPrompt;
+    activeInlineAiStreamIdRef.current = streamId;
+    setInlineAiPrompt(nextPrompt);
+    setInlineAiSkillCompletion(null);
+    setLinkCompletion(null);
+    setAnalysisCompletion(null);
+
+    const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
+    transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
+    view.dispatch(transaction.scrollIntoView());
+
+    void submitPromptlessContinuation(nextPrompt);
   };
 
   const closeInlineAiPrompt = (): void => {
@@ -1180,10 +1221,107 @@ export function MilkdownEditor({
     }
   };
 
+  const submitPromptlessContinuation = async (
+    current: InlineAiPromptState
+  ): Promise<void> => {
+    const editor = editorRef.current;
+    const streamId = current.streamId;
+
+    if (!editor || current.mode !== "promptless-continuation" || !streamId) {
+      return;
+    }
+
+    try {
+      const result = await window.integralNotes.submitPromptlessContinuation({
+        afterText: current.afterText,
+        beforeText: current.beforeText,
+        context: buildInlineAiContextSummary(current),
+        documentMarkdown: current.documentMarkdown,
+        history: current.messages,
+        insertionPosition: current.anchorPos,
+        sessionId: current.sessionId,
+        sourceNotePath: relativePath,
+        streamId
+      });
+      const nextMessages = [...current.messages, result.userMessage, ...result.messages];
+
+      if (!result.insertion) {
+        const nextState = {
+          ...current,
+          error: "AI が挿入内容を確定しませんでした。必要なら ?? で明示的に指示してください。",
+          isSubmitting: false,
+          messages: nextMessages,
+          sessionId: result.sessionId,
+          streamId: null,
+          streamingText: "",
+          streamingToolTrace: []
+        };
+
+        activeInlineAiStreamIdRef.current = null;
+        inlineAiPromptRef.current = nextState;
+        setInlineAiPrompt(nextState);
+        return;
+      }
+
+      await insertPromptlessContinuationResult(
+        current.anchorPos,
+        result.insertion,
+        current.afterText,
+        streamId
+      );
+
+      inlineAiPromptRef.current = null;
+      activeInlineAiStreamIdRef.current = null;
+      setInlineAiPrompt(null);
+    } catch (error) {
+      const nextState = {
+        ...current,
+        error: toErrorMessage(error),
+        isSubmitting: false,
+        streamId: null,
+        streamingText: "",
+        streamingToolTrace: []
+      };
+
+      activeInlineAiStreamIdRef.current = null;
+      inlineAiPromptRef.current = nextState;
+      setInlineAiPrompt(nextState);
+    }
+  };
+
+  const insertPromptlessContinuationResult = async (
+    anchorPos: number,
+    insertion: PromptlessContinuationInsertion,
+    originalAfterText: string,
+    streamId: string
+  ): Promise<void> => {
+    if (insertion.kind === "markdown") {
+      const shouldInsert = await playInlineAiInsertionPreview(streamId, insertion.markdown.text);
+
+      if (!shouldInsert) {
+        return;
+      }
+
+      insertMarkdownAtPosition(anchorPos, insertion.markdown.text, {
+        marker: "@@",
+        originalAfterText
+      });
+      return;
+    }
+
+    await insertInlinePythonBlockResult(
+      anchorPos,
+      insertion.pythonBlock,
+      originalAfterText,
+      "",
+      "@@"
+    );
+  };
+
   const insertMarkdownAtPosition = (
     position: number,
     markdown: string,
-    triggerCleanup?: { marker: "??" | ">>"; originalAfterText: string }
+    triggerCleanup?: { marker: InlineAiTriggerMarker; originalAfterText: string }
   ): void => {
     const editor = editorRef.current;
 
@@ -1223,7 +1361,8 @@ export function MilkdownEditor({
     anchorPos: number,
     insertion: InlinePythonBlockInsertion,
     originalAfterText: string,
-    transcript: string
+    transcript: string,
+    marker: InlineAiTriggerMarker = ">>"
   ): Promise<void> => {
     const snapshot = await window.integralNotes.syncWorkspace();
 
@@ -1251,7 +1390,7 @@ export function MilkdownEditor({
       anchorPos,
       prependInlineAiTranscript(blockMarkdown, transcript),
       {
-        marker: ">>",
+        marker,
         originalAfterText
       }
     );
@@ -1493,7 +1632,11 @@ export function MilkdownEditor({
             onPointerUp={stopInlineAiPopupDrag}
           >
             <strong>
-              {inlineAiPrompt.mode === "insert-text" ? "AI 挿入" : "Python block 生成"}
+              {inlineAiPrompt.mode === "insert-text"
+                ? "AI 挿入"
+                : inlineAiPrompt.mode === "python-block"
+                  ? "Python block 生成"
+                  : "@@ 続き生成"}
             </strong>
             <button
               aria-label="閉じる"
@@ -1560,88 +1703,114 @@ export function MilkdownEditor({
               ) : null}
             </div>
           ) : null}
-          <textarea
-            className="editor-ai-popup__input"
-            disabled={inlineAiPrompt.isSubmitting}
-            onClick={(event) => {
-              syncInlineAiSkillCompletion(
-                event.currentTarget.value,
-                event.currentTarget.selectionStart
-              );
-            }}
-            onChange={(event) => {
-              updateInlineAiPrompt(
-                event.currentTarget.value,
-                event.currentTarget.selectionStart
-              );
-            }}
-            onKeyDown={(event) => {
-              handleInlineAiPromptKeyDown(event);
-            }}
-            onKeyUp={(event) => {
-              if (
-                event.key === "ArrowLeft" ||
-                event.key === "ArrowRight" ||
-                event.key === "Home" ||
-                event.key === "End"
-              ) {
-                syncInlineAiSkillCompletion(
-                  event.currentTarget.value,
-                  event.currentTarget.selectionStart
-                );
-              }
-            }}
-            placeholder={
-              inlineAiPrompt.mode === "insert-text"
-                ? inlineAiPrompt.messages.length > 0
-                  ? "追加の指示や回答を入力"
-                  : "挿入したい内容を指示"
-                : inlineAiPrompt.messages.length > 0
-                  ? "追加の指示や回答を入力"
-                  : "実装したい解析 block を指示"
-            }
-            ref={inlineAiTextareaRef}
-            rows={4}
-            value={inlineAiPrompt.prompt}
-          />
-          {inlineAiSkillCompletion ? (
-            <AiSkillCompletionList
-              compact
-              onHighlight={(index) => {
-                setInlineAiSkillCompletion((current) =>
-                  current ? { ...current, selectedIndex: index } : current
-                );
-              }}
-              onSelect={insertInlineAiSkill}
-              selectedIndex={selectedInlineAiSkillSuggestionIndex}
-              skills={visibleInlineAiSkillSuggestions}
-            />
-          ) : null}
-          <AiSkillChips compact skills={inlineAiPromptSkills} />
-          {inlineAiPrompt.error ? (
-            <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
-          ) : null}
-          <div className="editor-ai-popup__actions">
-            <button
-              className="button button--ghost button--xs"
-              disabled={inlineAiPrompt.isSubmitting}
-              onClick={closeInlineAiPrompt}
-              type="button"
-            >
-              キャンセル
-            </button>
-            <button
-              className="button button--primary button--xs"
-              disabled={inlineAiPrompt.isSubmitting || inlineAiPrompt.prompt.trim().length === 0}
-              type="submit"
-            >
-              {inlineAiPrompt.isSubmitting
-                ? "送信中..."
-                : inlineAiPrompt.messages.length > 0
-                  ? "返信"
-                  : "送信"}
-            </button>
-          </div>
+          {inlineAiPrompt.mode === "promptless-continuation" ? (
+            <>
+              <div className="editor-ai-popup__status">
+                {inlineAiPrompt.isSubmitting
+                  ? "@@ から続きを生成しています"
+                  : "@@ の処理を停止しました"}
+              </div>
+              {inlineAiPrompt.error ? (
+                <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
+              ) : null}
+              {!inlineAiPrompt.isSubmitting ? (
+                <div className="editor-ai-popup__actions">
+                  <button
+                    className="button button--ghost button--xs"
+                    onClick={closeInlineAiPrompt}
+                    type="button"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <textarea
+                className="editor-ai-popup__input"
+                disabled={inlineAiPrompt.isSubmitting}
+                onClick={(event) => {
+                  syncInlineAiSkillCompletion(
+                    event.currentTarget.value,
+                    event.currentTarget.selectionStart
+                  );
+                }}
+                onChange={(event) => {
+                  updateInlineAiPrompt(
+                    event.currentTarget.value,
+                    event.currentTarget.selectionStart
+                  );
+                }}
+                onKeyDown={(event) => {
+                  handleInlineAiPromptKeyDown(event);
+                }}
+                onKeyUp={(event) => {
+                  if (
+                    event.key === "ArrowLeft" ||
+                    event.key === "ArrowRight" ||
+                    event.key === "Home" ||
+                    event.key === "End"
+                  ) {
+                    syncInlineAiSkillCompletion(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart
+                    );
+                  }
+                }}
+                placeholder={
+                  inlineAiPrompt.mode === "insert-text"
+                    ? inlineAiPrompt.messages.length > 0
+                      ? "追加の指示や回答を入力"
+                      : "挿入したい内容を指示"
+                    : inlineAiPrompt.messages.length > 0
+                      ? "追加の指示や回答を入力"
+                      : "実装したい解析 block を指示"
+                }
+                ref={inlineAiTextareaRef}
+                rows={4}
+                value={inlineAiPrompt.prompt}
+              />
+              {inlineAiSkillCompletion ? (
+                <AiSkillCompletionList
+                  compact
+                  onHighlight={(index) => {
+                    setInlineAiSkillCompletion((current) =>
+                      current ? { ...current, selectedIndex: index } : current
+                    );
+                  }}
+                  onSelect={insertInlineAiSkill}
+                  selectedIndex={selectedInlineAiSkillSuggestionIndex}
+                  skills={visibleInlineAiSkillSuggestions}
+                />
+              ) : null}
+              <AiSkillChips compact skills={inlineAiPromptSkills} />
+              {inlineAiPrompt.error ? (
+                <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
+              ) : null}
+              <div className="editor-ai-popup__actions">
+                <button
+                  className="button button--ghost button--xs"
+                  disabled={inlineAiPrompt.isSubmitting}
+                  onClick={closeInlineAiPrompt}
+                  type="button"
+                >
+                  キャンセル
+                </button>
+                <button
+                  className="button button--primary button--xs"
+                  disabled={inlineAiPrompt.isSubmitting || inlineAiPrompt.prompt.trim().length === 0}
+                  type="submit"
+                >
+                  {inlineAiPrompt.isSubmitting
+                    ? "送信中..."
+                    : inlineAiPrompt.messages.length > 0
+                      ? "返信"
+                      : "送信"}
+                </button>
+              </div>
+            </>
+          )}
         </form>
       ) : null}
       {analysisCompletion ? (
@@ -1753,7 +1922,14 @@ function computeInlineAiTriggerState(
   const { $from, from } = selection;
   const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
   const currentLineBefore = textBefore.slice(textBefore.lastIndexOf("\n") + 1);
-  const marker = currentLineBefore === "??" ? "??" : currentLineBefore === ">>" ? ">>" : null;
+  const marker: InlineAiTriggerMarker | null =
+    currentLineBefore === "??"
+      ? "??"
+      : currentLineBefore === ">>"
+        ? ">>"
+        : currentLineBefore === "@@"
+          ? "@@"
+          : null;
 
   if (!marker) {
     return null;
@@ -1769,7 +1945,13 @@ function computeInlineAiTriggerState(
     return {
       afterText: view.state.doc.textBetween(replaceTo, view.state.doc.content.size, "\n", "\0"),
       beforeText: view.state.doc.textBetween(0, replaceFrom, "\n", "\0"),
-      mode: marker === "??" ? "insert-text" : "python-block",
+      marker,
+      mode:
+        marker === "??"
+          ? "insert-text"
+          : marker === ">>"
+            ? "python-block"
+            : "promptless-continuation",
       replaceFrom,
       replaceTo,
       x: clampPopupCoordinate(coords.left, INLINE_AI_POPUP_WIDTH, window.innerWidth),

@@ -647,6 +647,13 @@ function registerIpcHandlers(): void {
       }
     })
   );
+  ipcMain.handle("ai-chat:submitPromptlessContinuation", async (event, request) =>
+    aiChatService.submitPromptlessContinuation(request, {
+      onStreamEvent: (streamEvent) => {
+        event.sender.send("ai-chat:streamEvent", streamEvent);
+      }
+    })
+  );
   aiHostCommandService.registerIpcHandlers(ipcMain);
 }
 
