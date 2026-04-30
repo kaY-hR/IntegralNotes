@@ -28,6 +28,7 @@ import type {
 } from "./aiChat";
 import type {
   CreateDatasetRequest,
+  CreateDatasetFromFileDialogRequest,
   CreateDatasetFromWorkspaceEntriesRequest,
   CreateDatasetResult,
   ExecuteIntegralBlockRequest,
@@ -272,6 +273,9 @@ export interface IntegralNotesApi {
   getAppSettings: () => Promise<AppSettings>;
   saveAppSettings: (request: SaveAppSettingsRequest) => Promise<AppSettings>;
   createDataset: (request: CreateDatasetRequest) => Promise<CreateDatasetResult>;
+  createDatasetFromFileDialog: (
+    request?: CreateDatasetFromFileDialogRequest | null
+  ) => Promise<CreateDatasetResult | null>;
   createDatasetFromWorkspaceEntries: (
     request: CreateDatasetFromWorkspaceEntriesRequest
   ) => Promise<CreateDatasetResult>;

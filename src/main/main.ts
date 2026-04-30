@@ -5,11 +5,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-import type {
-  SaveAppSettingsRequest
+import {
+  toDataRegistrationDirectoryRelativePath,
+  type SaveAppSettingsRequest
 } from "../shared/appSettings";
 import type {
   CreateDatasetRequest,
+  CreateDatasetFromFileDialogRequest,
   CreateDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
   ResolveIntegralManagedDataTrackingIssueRequest
@@ -162,6 +164,36 @@ function readWorkspaceSelectionFromClipboard(): string[] {
 
 function formatWindowTitle(snapshot: WorkspaceSnapshot | null): string {
   return snapshot ? `${snapshot.rootName} - IntegralNotes` : "IntegralNotes";
+}
+
+function toWorkspaceRelativePathOrThrow(
+  rootPath: string,
+  absolutePath: string,
+  label: string
+): string {
+  const selectedPath = path.resolve(absolutePath);
+  const relativePath = path.relative(rootPath, selectedPath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath) || relativePath.length === 0) {
+    throw new Error(`${label}は workspace 内を指定してください。`);
+  }
+
+  return relativePath.split(path.sep).join("/");
+}
+
+function appendIdtsExtensionIfMissing(absolutePath: string): string {
+  return path.extname(absolutePath).toLowerCase() === ".idts"
+    ? absolutePath
+    : `${absolutePath}.idts`;
+}
+
+function sanitizeDatasetDialogDefaultName(value: string | undefined): string {
+  const normalized = `${value ?? ""}`
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
+    .replace(/[. ]+$/gu, "");
+
+  return normalized.length > 0 ? normalized : "dataset";
 }
 
 const workspaceService = new WorkspaceService({
@@ -453,6 +485,68 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("integral:createDataset", async (_event, request: CreateDatasetRequest) =>
     getIntegralWorkspaceService().createDataset(request)
+  );
+  ipcMain.handle(
+    "integral:createDatasetFromFileDialog",
+    async (_event, request?: CreateDatasetFromFileDialogRequest | null) => {
+      if (!mainWindow) {
+        throw new Error("main window is not available.");
+      }
+
+      const rootPath = workspaceService.currentRootPath;
+
+      if (!rootPath) {
+        throw new Error("workspace folder is not open.");
+      }
+
+      const fileResult = await dialog.showOpenDialog(mainWindow, {
+        defaultPath: rootPath,
+        properties: ["openFile", "multiSelections"],
+        title: "Dataset に含めるファイルを選択"
+      });
+
+      if (fileResult.canceled || fileResult.filePaths.length === 0) {
+        return null;
+      }
+
+      const settings = await appSettingsService.getSettings();
+      const dataRegistrationDirectory = toDataRegistrationDirectoryRelativePath(
+        settings.dataRegistrationDirectory
+      );
+      const defaultName = sanitizeDatasetDialogDefaultName(request?.defaultName);
+      const defaultPath = path.join(rootPath, dataRegistrationDirectory, `${defaultName}.idts`);
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        defaultPath,
+        filters: [
+          {
+            extensions: ["idts"],
+            name: "IntegralNotes Dataset"
+          }
+        ],
+        title: "Dataset manifest の保存先を選択"
+      });
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return null;
+      }
+
+      const manifestAbsolutePath = appendIdtsExtensionIfMissing(saveResult.filePath);
+      const manifestPath = toWorkspaceRelativePathOrThrow(
+        rootPath,
+        manifestAbsolutePath,
+        "dataset manifest 保存先"
+      );
+      const imported = await getIntegralWorkspaceService().importManagedFilePaths(
+        fileResult.filePaths
+      );
+
+      return getIntegralWorkspaceService().createDataset({
+        datatype: request?.datatype ?? null,
+        managedFileIds: imported.managedFiles.map((file) => file.id),
+        manifestPath,
+        name: path.basename(manifestPath, ".idts")
+      });
+    }
   );
   ipcMain.handle(
     "integral:createDatasetFromWorkspaceEntries",

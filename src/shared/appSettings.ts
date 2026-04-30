@@ -1,17 +1,21 @@
 export interface AppSettings {
+  analysisResultDirectory: string;
   dataRegistrationDirectory: string;
   userId: string;
 }
 
 export interface SaveAppSettingsRequest {
+  analysisResultDirectory?: string;
   dataRegistrationDirectory?: string;
   userId?: string;
 }
 
+export const DEFAULT_ANALYSIS_RESULT_DIRECTORY = "\\analysis-result";
 export const DEFAULT_DATA_REGISTRATION_DIRECTORY = "\\Data";
 export const DEFAULT_USER_ID = "";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  analysisResultDirectory: DEFAULT_ANALYSIS_RESULT_DIRECTORY,
   dataRegistrationDirectory: DEFAULT_DATA_REGISTRATION_DIRECTORY,
   userId: DEFAULT_USER_ID
 };
@@ -20,17 +24,21 @@ const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:/u;
 const INVALID_WORKSPACE_PATH_SEGMENT_PATTERN = /[<>:"|?*\u0000-\u001F]/u;
 const INVALID_USER_ID_PATTERN = /[\s<>:"/\\|?*\u0000-\u001F]/u;
 
-export function normalizeDataRegistrationDirectory(value: unknown): string {
+function normalizeWorkspaceDirectory(
+  value: unknown,
+  defaultValue: string,
+  label: string
+): string {
   const rawValue = typeof value === "string" ? value.trim() : "";
 
   if (rawValue.length === 0) {
-    return DEFAULT_DATA_REGISTRATION_DIRECTORY;
+    return defaultValue;
   }
 
   const slashNormalizedValue = rawValue.replace(/\\/gu, "/");
 
   if (WINDOWS_DRIVE_PATTERN.test(slashNormalizedValue) || slashNormalizedValue.startsWith("//")) {
-    throw new Error("データ登録フォルダは workspace 内の相対フォルダを指定してください。");
+    throw new Error(`${label}は workspace 内の相対フォルダを指定してください。`);
   }
 
   const segments = slashNormalizedValue
@@ -40,7 +48,7 @@ export function normalizeDataRegistrationDirectory(value: unknown): string {
     .filter(Boolean);
 
   if (segments.length === 0) {
-    return DEFAULT_DATA_REGISTRATION_DIRECTORY;
+    return defaultValue;
   }
 
   if (
@@ -51,7 +59,7 @@ export function normalizeDataRegistrationDirectory(value: unknown): string {
         INVALID_WORKSPACE_PATH_SEGMENT_PATTERN.test(segment)
     )
   ) {
-    throw new Error("データ登録フォルダの path が不正です。");
+    throw new Error(`${label}の path が不正です。`);
   }
 
   if (segments[0]?.toLowerCase() === ".store") {
@@ -59,6 +67,28 @@ export function normalizeDataRegistrationDirectory(value: unknown): string {
   }
 
   return `\\${segments.join("\\")}`;
+}
+
+export function normalizeAnalysisResultDirectory(value: unknown): string {
+  return normalizeWorkspaceDirectory(
+    value,
+    DEFAULT_ANALYSIS_RESULT_DIRECTORY,
+    "解析結果フォルダ"
+  );
+}
+
+export function normalizeDataRegistrationDirectory(value: unknown): string {
+  return normalizeWorkspaceDirectory(
+    value,
+    DEFAULT_DATA_REGISTRATION_DIRECTORY,
+    "データ登録フォルダ"
+  );
+}
+
+export function toAnalysisResultDirectoryRelativePath(value: string): string {
+  return normalizeAnalysisResultDirectory(value)
+    .replace(/^\\+/u, "")
+    .replace(/\\/gu, "/");
 }
 
 export function toDataRegistrationDirectoryRelativePath(value: string): string {

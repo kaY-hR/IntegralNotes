@@ -3,6 +3,10 @@ import type {
   PluginActionContribution,
   ResolvedPluginViewer
 } from "./plugins";
+import {
+  DEFAULT_ANALYSIS_RESULT_DIRECTORY,
+  toAnalysisResultDirectoryRelativePath
+} from "./appSettings";
 
 export interface IntegralSlotDefinition {
   autoInsertToWorkNote?: boolean;
@@ -150,13 +154,22 @@ export interface ImportManagedFilesResult {
 }
 
 export interface CreateDatasetRequest {
+  datatype?: string | null;
+  manifestPath?: string;
   managedFileIds: string[];
   name?: string;
 }
 
 export interface CreateDatasetFromWorkspaceEntriesRequest {
+  datatype?: string | null;
+  manifestPath?: string;
   name?: string;
   relativePaths: string[];
+}
+
+export interface CreateDatasetFromFileDialogRequest {
+  datatype?: string | null;
+  defaultName?: string;
 }
 
 export interface CreateDatasetResult {
@@ -239,21 +252,71 @@ export function createIntegralOutputPathRandomSuffix(): string {
     .toUpperCase();
 }
 
+export interface CreateDefaultIntegralOutputPathOptions {
+  analysisDisplayName?: string | null;
+  outputRoot?: string | null;
+  timestamp?: Date | string | null;
+}
+
 export function createDefaultIntegralOutputPath(
   slot: IntegralSlotDefinition,
-  suffix = ""
+  suffix = "",
+  options: CreateDefaultIntegralOutputPathOptions = {}
 ): string {
   const extension = getIntegralSlotPrimaryExtension(slot, ".idts") ?? ".idts";
-  const stem = slot.name.trim().length > 0 ? slot.name.trim() : "output";
   const normalizedSuffix = suffix.trim().replace(/^_+/u, "");
   const suffixSegment = normalizedSuffix.length > 0 ? `_${normalizedSuffix}` : "";
+
+  if (isIntegralBundleExtension(extension)) {
+    const outputRoot = normalizeDefaultOutputRoot(
+      options.outputRoot ?? DEFAULT_ANALYSIS_RESULT_DIRECTORY
+    );
+    const displayStem = sanitizeOutputPathStem(options.analysisDisplayName ?? slot.name) || "analysis";
+    const timestamp = formatIntegralOutputTimestamp(options.timestamp ?? new Date());
+    return `${outputRoot}/${displayStem}_${timestamp}${suffixSegment}`;
+  }
+
+  const stem = slot.name.trim().length > 0 ? slot.name.trim() : "output";
   return `${DEFAULT_OUTPUT_DIRECTORY}/${stem}${suffixSegment}${extension}`;
 }
 
 export function createDefaultIntegralOutputPathWithRandomSuffix(
-  slot: IntegralSlotDefinition
+  slot: IntegralSlotDefinition,
+  options: CreateDefaultIntegralOutputPathOptions = {}
 ): string {
-  return createDefaultIntegralOutputPath(slot, createIntegralOutputPathRandomSuffix());
+  return createDefaultIntegralOutputPath(
+    slot,
+    createIntegralOutputPathRandomSuffix(),
+    options
+  );
+}
+
+export function formatIntegralOutputTimestamp(value: Date | string): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : "yyyyMMddHHmm";
+  }
+
+  const pad = (item: number): string => item.toString().padStart(2, "0");
+  return [
+    value.getFullYear().toString(),
+    pad(value.getMonth() + 1),
+    pad(value.getDate()),
+    pad(value.getHours()),
+    pad(value.getMinutes())
+  ].join("");
+}
+
+function normalizeDefaultOutputRoot(value: string): string {
+  return `/${toAnalysisResultDirectoryRelativePath(value)}`;
+}
+
+function sanitizeOutputPathStem(value: string | null | undefined): string {
+  return `${value ?? ""}`
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, "_")
+    .replace(/\s+/gu, "_")
+    .replace(/[. ]+$/gu, "");
 }
 
 export function normalizeIntegralParamsSchema(value: unknown): IntegralParamsSchema | undefined {

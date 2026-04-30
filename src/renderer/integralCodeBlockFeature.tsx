@@ -61,6 +61,7 @@ import {
 } from "./integralBlockRegistry";
 
 interface IntegralCodeBlockFeatureOptions {
+  getAnalysisResultDirectory?: () => string | null;
   getWorkspaceEntries?: () => WorkspaceEntry[];
   onExecuteBlockResult?: (payload: {
     previousBlockSource: string;
@@ -108,6 +109,7 @@ type SlotFieldPickerState =
     };
 
 interface PickerOption {
+  action?: "create-dataset";
   description: string;
   label: string;
   value: string;
@@ -295,8 +297,9 @@ class IntegralNotesBlockView implements NodeView {
     this.dom.dataset.integralBlockId = parsed.block?.id ?? "";
 
     this.root.render(
-      <IntegralBlockPanel
-        onAssignInputReference={(slotName, inputReference) => {
+        <IntegralBlockPanel
+          analysisResultDirectory={this.options.getAnalysisResultDirectory?.() ?? null}
+          onAssignInputReference={(slotName, inputReference) => {
           const result = applyIntegralBlockMutation(rawText, (currentBlock) => ({
             ...currentBlock,
             inputs: {
@@ -483,6 +486,7 @@ class IntegralNotesBlockView implements NodeView {
 }
 
 function IntegralBlockPanel({
+  analysisResultDirectory,
   onAssignInputReference,
   onAssignOutputReference,
   onDeleteBlock,
@@ -493,6 +497,7 @@ function IntegralBlockPanel({
   runState,
   selected
 }: {
+  analysisResultDirectory?: string | null;
   onAssignInputReference: (slotName: string, inputReference: string | null) => void;
   onAssignOutputReference: (slotName: string, outputReference: string | null) => void;
   onDeleteBlock: () => void;
@@ -762,6 +767,25 @@ function IntegralBlockPanel({
     });
   };
 
+  const chooseOutputDirectory = async (
+    slotName: string,
+    outputReference: string | null
+  ): Promise<void> => {
+    try {
+      const selectedPath = await window.integralNotes.selectWorkspaceDirectory(
+        resolveWorkspaceMarkdownTarget(outputReference ?? "") ?? outputReference
+      );
+
+      if (!selectedPath) {
+        return;
+      }
+
+      onAssignOutputReference(slotName, toCanonicalWorkspaceTarget(selectedPath));
+    } catch (error) {
+      setInlineError(toErrorMessage(error));
+    }
+  };
+
   const handleSlotFieldBlur = (fieldKey: string): void => {
     window.setTimeout(() => {
       closeSlotFieldPicker(fieldKey);
@@ -794,6 +818,29 @@ function IntegralBlockPanel({
     }
 
     setInlineError(null);
+
+    if (option.action === "create-dataset") {
+      void (async () => {
+        try {
+          const result = await window.integralNotes.createDatasetFromFileDialog({
+            datatype: picker.datatype ?? null,
+            defaultName: picker.slotName
+          });
+
+          if (!result) {
+            return;
+          }
+
+          const nextCatalog = await window.integralNotes.getIntegralAssetCatalog();
+          setAssetCatalog(nextCatalog);
+          onAssignInputReference(picker.slotName, toStoredDatasetReference(result.dataset.datasetId));
+          closeSlotFieldPicker(picker.fieldKey);
+        } catch (error) {
+          setInlineError(toErrorMessage(error));
+        }
+      })();
+      return;
+    }
 
     onAssignInputReference(picker.slotName, option.value);
     closeSlotFieldPicker(picker.fieldKey);
@@ -1139,6 +1186,14 @@ function IntegralBlockPanel({
                 const outputFieldValue = outputManagedData
                   ? toWorkspaceReferenceFieldValue(outputReference)
                   : outputReference ?? "";
+                const isBundleOutput = isIntegralBundleExtension(
+                  getIntegralSlotPrimaryExtension(slot, ".idts")
+                );
+                const outputPlaceholder = createDefaultIntegralOutputPath(slot, "A1B", {
+                  analysisDisplayName: blockDefinition.title,
+                  outputRoot: analysisResultDirectory,
+                  timestamp: isBundleOutput ? "yyyyMMddHHmm" : undefined
+                });
 
                 return (
                   <div
@@ -1166,11 +1221,22 @@ function IntegralBlockPanel({
                               event.target.value.trim().length > 0 ? event.target.value : null
                             );
                           }}
-                          placeholder={createDefaultIntegralOutputPath(slot, "A1B")}
+                          placeholder={outputPlaceholder}
                           spellCheck={false}
                           type="text"
                           value={outputFieldValue}
                         />
+                        {isBundleOutput && !isExecutedBlock ? (
+                          <button
+                            className="button button--ghost button--xs"
+                            onClick={() => {
+                              void chooseOutputDirectory(slot.name, outputReference);
+                            }}
+                            type="button"
+                          >
+                            選択
+                          </button>
+                        ) : null}
                       </div>
 
                       {outputManagedData?.canOpenDataNote ? (
@@ -1625,8 +1691,14 @@ function resolveSlotFieldPickerOptions({
     const preferredDatatype = slotFieldPicker.datatype?.trim() ?? "";
     const allowedExtensions =
       slotFieldPicker.extensions?.filter((value) => value.trim().length > 0) ?? [];
+    const createOption: PickerOption = {
+      action: "create-dataset",
+      description: "任意 file を選び、保存先 .idts を指定",
+      label: "新しいデータセットを作る",
+      value: "__create-dataset__"
+    };
 
-    return assetCatalog.datasets
+    const datasetOptions = assetCatalog.datasets
       .map((dataset) => {
         const lowerPath = dataset.path.toLocaleLowerCase("ja");
         const matchesDatatype =
@@ -1655,6 +1727,15 @@ function resolveSlotFieldPickerOptions({
       })
       .filter((option) => scorePickerOption(option, normalizedQuery) < Number.POSITIVE_INFINITY)
       .map(({ priority: _priority, ...option }) => option);
+
+    if (
+      normalizedQuery.length === 0 ||
+      scorePickerOption(createOption, normalizedQuery) < Number.POSITIVE_INFINITY
+    ) {
+      return [createOption, ...datasetOptions];
+    }
+
+    return datasetOptions;
   }
 
   if (slotFieldPicker.kind === "input-file") {
@@ -1695,6 +1776,10 @@ function resolveSlotFieldPickerOptions({
 }
 
 function scorePickerOption(option: PickerOption, normalizedQuery: string): number {
+  if (option.action === "create-dataset") {
+    return 0;
+  }
+
   if (normalizedQuery.length === 0) {
     return 0;
   }
@@ -1719,6 +1804,10 @@ function scorePickerOption(option: PickerOption, normalizedQuery: string): numbe
   }
 
   return Number.POSITIVE_INFINITY;
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatSlotFieldPickerEmptyMessage(slotFieldPicker: SlotFieldPickerState): string {

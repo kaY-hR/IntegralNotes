@@ -16,6 +16,7 @@ IntegralNotes の Python 解析 block は、workspace 内の `.py` file に `@in
 - user-facing renderable を block 直下に表示したい場合は `auto_insert_to_work_note=True` を付ける。
 - CSV/TSV/JSON などの機械可読・中間成果物は、表示用 output と分ける。
 - 複数 file を同じ役割の1セットとして出す場合だけ `.idts` output を使う。
+- `.idts` output の `outputs[slot名]` は directory path として渡される。Python はその directory 内に構成 file を作り、`.idts` manifest は作らない。
 
 `params` ルール:
 

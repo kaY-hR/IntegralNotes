@@ -29,6 +29,8 @@
 - app は data-note を file path ではなく target ID で開く
 - ユーザーは data-note の本文だけを編集できる
 - data-note 対象の managed data を管理対象から外したときは、対応する metadata と data-note も削除する
+- dataset の data-note 初期本文は、構成 file / folder への Markdown link 箇条書きを持つ
+- 初期本文が未編集の場合、app は構成 file / folder の変化に合わせて link 箇条書きを更新してよい
 
 ## 3. Markdown Note
 
@@ -90,8 +92,9 @@
   - `share_note_with_input`
   - `embed_to_shared_note`
 - input slot では `extensions` によって選択可能な file suffix を表せる
-- output slot では `extension` によって生成される file suffix を表せる
-- output slot の初期 file 名は `slot名 + "_" + 英数字3文字 + extension` とする
+- output slot では `extension` によって生成される file suffix または bundle 表現を表せる
+- 非 `.idts` output slot の初期 file 名は `slot名 + "_" + 英数字3文字 + extension` とする
+- `.idts` output slot の初期 folder 名は `解析表示名 + "_" + yyyyMMddHHmm + "_" + 英数字3文字` とし、既定 root は設定の `解析結果フォルダ` とする
 - `datatype` は slot が意味的に要求または生成する data type を表す
 - `.idts` は拡張子で bundle 表現を表すだけであり、datatype そのものではない
 - `auto_insert_to_work_note` は、その output を block が置かれている作業 note へ `![]()` として自動挿入するかを表す
@@ -105,7 +108,10 @@
 
 - `.idts` は「複数 file を束ねる optional な集合表現」とする
 - `.idts` 自体は workspace 上の visible file とする
-- `.idts` が指す中身は `.store/objects/{id}/` の hidden directory に置いてよい
+- source dataset の `.idts` は、複数 managed file / directory を束ねる manifest とする
+- derived dataset の `.idts` は、解析 output folder の中に `{folder名}.idts` として作る
+- derived dataset の中身は visible output folder に置き、Python にはその folder path を渡す
+- `.idts` が指す中身を hidden directory に置く設計は canonical にはしない
 - `.idts` manifest には少なくとも次を持てる
   - `datasetId`
   - `name`
@@ -116,6 +122,7 @@
   - `noteTargetId`
 - 1 file が複数 bundle に所属できる
 - `.idts` は universal な I/O 単位ではなく、bundle が必要な場合にだけ使う
+- `.idts` を開いたときは dedicated viewer ではなく、その dataset の data-note を表示する
 
 ## 8. Python 汎用解析
 
@@ -197,16 +204,19 @@
 - app は実行前 `outputs` の path を出力先として確定する
 - `inputs / outputs` には Python がそのまま使える絶対 path を渡す
 - 非 `.idts` input は、ID から解決した current file path を渡す
-- `.idts` input は hidden bundle directory へ resolve した path を渡す
+- `.idts` input は readable folder path へ resolve した path を渡す
+- source dataset は必要に応じて app が staging folder を materialize してよい
 - 非 `.idts` output は、指定された output file path をそのまま渡す
-- `.idts` output は、visible manifest path と hidden bundle directory を app 側で事前に確保し、Python には hidden bundle directory path を渡す
+- `.idts` output は、指定された output folder を app 側で事前に確保し、Python にはその folder path を渡す
+- `.idts` output の実行成功後、app は output folder 内に `{folder名}.idts` manifest を作成する
+- `.idts` output の `out:` は実行前は output folder path、実行後は生成された dataset ID とする
 - `params` は decorator schema に沿って正規化した note source の object を渡す
 - decorator schema に無い param、未対応型 param、schema 外 key は Python 実行 payload から削除する
 - runner は `analysis-args.json` を読んで target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - 成功/失敗判定は exit code のみで行う
 - exit code が非 0 の場合、note 上の実行結果には Python の `stderr` / `stdout` / runner error message を優先して表示する
 - exit code が 0 の場合でも、宣言された output path が作成されていなければ app 側の実行エラーとして note 上に表示する
-- 実行成功後は output path に対応する managed file metadata を作成または更新する
+- 実行成功後は output path に対応する managed file metadata、または output folder に対応する dataset metadata を作成または更新する
 - 実行成功後は `out:` の値を生成された managed file / dataset ID へ書き換える
 - 実行済み block の UI は read-only とし、削除だけ可能にする
 - output slot が `auto_insert_to_work_note = true` を持つ場合、app はその output を block 直下へ `![]()` として追記してよい
@@ -228,7 +238,7 @@
 
 - 表示対象 file は拡張子で自動判定する
 - 拡張子未登録でも text と読める file は text viewer で扱ってよい
-- `.idts` は bundle manifest viewer と bundle preview の両方を持てる
+- `.idts` は対応する data-note を表示する
 
 ## 12. 装置 Plugin
 
@@ -254,7 +264,7 @@
 
 ## 15. GC
 
-- block 実行で作られる hidden bundle directory や runtime log は GC 対象にできる
+- block 実行で作られる runtime log や source dataset materialize 用 staging folder は GC 対象にできる
 - user-facing workspace file 自体は app が勝手に消さない
 - 再実行で不要になった旧 bundle は、どこからも参照されなければ GC 対象にできる
 

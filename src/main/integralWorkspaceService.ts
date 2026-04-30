@@ -42,7 +42,10 @@ import {
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
 } from "../shared/workspaceLinks";
-import { toDataRegistrationDirectoryRelativePath } from "../shared/appSettings";
+import {
+  toAnalysisResultDirectoryRelativePath,
+  toDataRegistrationDirectoryRelativePath
+} from "../shared/appSettings";
 import type {
   WorkspaceDatasetManifestMember,
   WorkspaceFileDocument
@@ -56,7 +59,6 @@ const execFileAsync = promisify(execFile);
 const DATASET_JSON_EXTENSION = ".idts";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
-const STORE_OBJECTS_DIRECTORY = "objects";
 const STORE_RUNTIME_DIRECTORY = "runtime";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
 const PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY = "scripts";
@@ -425,14 +427,23 @@ export class IntegralWorkspaceService {
     const uniqueManagedFileIds = Array.from(new Set(managedFileIds));
     const datasetId = createOpaqueId("DTS");
     const datasetName = normalizeDatasetName(request.name, datasetId);
-    const dataRegistrationDirectory = await this.resolveDataRegistrationDirectory();
-    const manifestRelativePath = await this.createVisibleDatasetManifestRelativePath(
-      dataRegistrationDirectory,
-      datasetName,
-      datasetId
-    );
+    const manifestRelativePath =
+      typeof request.manifestPath === "string" && request.manifestPath.trim().length > 0
+        ? ensureOutputPathExtension(
+            normalizePlannedWorkspaceOutputPath(request.manifestPath),
+            DATASET_JSON_EXTENSION
+          )
+        : await this.createVisibleDatasetManifestRelativePath(
+            await this.resolveDataRegistrationDirectory(),
+            datasetName,
+            datasetId
+          );
     const manifestAbsolutePath = this.resolveWorkspacePath(manifestRelativePath);
     const memberIds: string[] = [];
+
+    if (await pathExists(manifestAbsolutePath)) {
+      throw new Error(`dataset manifest は既に存在します: ${manifestRelativePath}`);
+    }
 
     for (const managedFileId of uniqueManagedFileIds) {
       const managedFileMetadata = await this.readManagedFileMetadata(managedFileId);
@@ -445,6 +456,7 @@ export class IntegralWorkspaceService {
     }
 
     const manifest: DatasetManifest = {
+      datatype: request.datatype?.trim() || undefined,
       datasetId,
       memberIds,
       name: datasetName,
@@ -457,7 +469,7 @@ export class IntegralWorkspaceService {
     const datasetMetadata: DatasetMetadata = {
       createdAt: new Date().toISOString(),
       createdByBlockId: null,
-      datatype: null,
+      datatype: request.datatype?.trim() || null,
       datasetId,
       displayName: datasetName,
       entityType: "dataset",
@@ -512,6 +524,8 @@ export class IntegralWorkspaceService {
     }
 
     return this.createDataset({
+      datatype: request.datatype,
+      manifestPath: request.manifestPath,
       name: request.name,
       managedFileIds
     });
@@ -633,7 +647,11 @@ export class IntegralWorkspaceService {
       );
     }
 
-    const normalizedBlock = normalizeBlockDocument(request.block, definition);
+    const normalizedBlock = normalizeBlockDocument(
+      request.block,
+      definition,
+      await this.resolveAnalysisResultDirectory()
+    );
     const resolvedBlock = await this.resolveBlockInputReferences(normalizedBlock, definition);
 
     if (definition.executionMode === "display") {
@@ -795,6 +813,18 @@ export class IntegralWorkspaceService {
     const runtimeRootPath = this.resolvePythonRuntimeRootPath(sourceBlock.id ?? resolvedBlock.id ?? createOpaqueId("BLK"));
     await resetDirectory(runtimeRootPath);
     const outputDatasetMap = new Map<string, IntegralDatasetSummary>();
+    const outputDatasetPlanMap = new Map<
+      string,
+      {
+        createdAt: string;
+        dataPath: string;
+        datatype: string | null;
+        datasetId: string;
+        manifestPath: string;
+        name: string;
+        noteTargetId?: string;
+      }
+    >();
     const outputManagedFilePlanMap = new Map<
       string,
       {
@@ -825,61 +855,41 @@ export class IntegralWorkspaceService {
       const createdAt = new Date();
       const plannedOutputPath = await this.resolvePlannedOutputPath(
         resolvedBlock.outputs[outputSlot.name] ?? null,
-        outputSlot
+        outputSlot,
+        definition.title
       );
 
       if (isIntegralBundleExtension(outputExtension)) {
         const nextDatasetId = createOpaqueId("DTS");
         const datasetName = resolveOutputDisplayName(plannedOutputPath, outputSlot.name);
-        const datasetDataPath = createDatasetObjectRelativePath(nextDatasetId);
-        const datasetManifestPath = plannedOutputPath;
+        const datasetDataPath = plannedOutputPath;
+        const datasetManifestPath = createDatasetManifestPathInDirectory(
+          datasetDataPath,
+          datasetName,
+          nextDatasetId
+        );
         const datasetAbsolutePath = this.resolveWorkspacePath(datasetDataPath);
         const datasetManifestAbsolutePath = this.resolveWorkspacePath(datasetManifestPath);
 
         if (await pathExists(datasetManifestAbsolutePath)) {
-          throw new Error(`output path は既に存在します。削除するか別の path を指定してください: ${datasetManifestPath}`);
+          throw new Error(
+            `output folder 内の dataset manifest は既に存在します。削除するか別の folder を指定してください: ${datasetManifestPath}`
+          );
         }
 
-        const metadata: DatasetMetadata = {
+        await this.ensureOutputDatasetDirectory(datasetAbsolutePath, datasetDataPath);
+        outputDatasetPlanMap.set(outputSlot.name, {
           createdAt: createdAt.toISOString(),
-          createdByBlockId: sourceBlock.id ?? resolvedBlock.id ?? null,
           dataPath: datasetDataPath,
           datatype: outputSlot.datatype?.trim() || null,
           datasetId: nextDatasetId,
-          displayName: datasetName,
-          entityType: "dataset",
-          hash: "",
-          id: nextDatasetId,
+          manifestPath: datasetManifestPath,
+          name: datasetName,
           noteTargetId:
             (await this.resolveOutputSlotSharedNoteTargetId(outputSlot, resolvedBlock.inputs)) ??
-            undefined,
-          name: datasetName,
-          path: datasetManifestPath,
-          provenance: "derived",
-          representation: "dataset-json",
-          visibility: "visible"
-        };
-        const manifest: DatasetManifest = {
-          dataPath: datasetDataPath,
-          datatype: metadata.datatype ?? undefined,
-          datasetId: nextDatasetId,
-          name: datasetName,
-          noteTargetId: normalizeManagedDataNoteTargetId(metadata.noteTargetId, nextDatasetId)
-        };
-
-        await fs.mkdir(datasetAbsolutePath, { recursive: true });
-        await fs.mkdir(path.dirname(datasetManifestAbsolutePath), { recursive: true });
-        await fs.writeFile(datasetManifestAbsolutePath, JSON.stringify(manifest, null, 2), "utf8");
-        metadata.hash = await this.computeManagedDataHash(
-          datasetManifestAbsolutePath,
-          metadata.representation
-        );
-        await this.writeDatasetMetadata(nextDatasetId, metadata);
-        await this.writeDatasetNote(metadata);
-
-        const datasetSummary = await this.readDatasetSummary(nextDatasetId);
-        outputDatasetMap.set(outputSlot.name, datasetSummary);
-        outputMarkdownTargetMap.set(outputSlot.name, toCanonicalWorkspaceTarget(datasetSummary.path));
+            undefined
+        });
+        outputMarkdownTargetMap.set(outputSlot.name, toCanonicalWorkspaceTarget(datasetManifestPath));
         outputPaths[outputSlot.name] = datasetAbsolutePath;
         continue;
       }
@@ -966,7 +976,13 @@ export class IntegralWorkspaceService {
     }
 
     await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
-    await this.refreshOutputDatasetMetadata(outputDatasetMap);
+    const createdOutputDatasetMap = await this.createOutputDatasetsFromPlans(
+      outputDatasetPlanMap,
+      sourceBlock.id ?? resolvedBlock.id ?? null
+    );
+    for (const [slotName, dataset] of createdOutputDatasetMap) {
+      outputDatasetMap.set(slotName, dataset);
+    }
     const createdManagedFileMap = await this.refreshOutputManagedFileMetadata(
       outputManagedFilePlanMap,
       sourceBlock.id ?? resolvedBlock.id ?? null
@@ -1679,11 +1695,20 @@ export class IntegralWorkspaceService {
 
   private async collectInspectableFiles(
     datasetRootPath: string,
-    _metadata: DatasetMetadata
+    metadata: DatasetMetadata
   ): Promise<InspectableFileEntry[]> {
     const relativeFilePaths = await collectRelativeFiles(datasetRootPath);
+    const rootRelativePath = normalizeRelativePath(metadata.dataPath ?? "");
+    const manifestRelativePath = normalizeRelativePath(metadata.path);
 
     return relativeFilePaths
+      .filter((relativePath) => {
+        if (rootRelativePath.length === 0) {
+          return true;
+        }
+
+        return normalizeRelativePath(`${rootRelativePath}/${relativePath}`) !== manifestRelativePath;
+      })
       .map((relativePath) => ({
         absolutePath: path.join(datasetRootPath, relativePath),
         relativePath
@@ -1845,6 +1870,11 @@ export class IntegralWorkspaceService {
     return toDataRegistrationDirectoryRelativePath(settings.dataRegistrationDirectory);
   }
 
+  private async resolveAnalysisResultDirectory(): Promise<string> {
+    const settings = await this.appSettingsService.getSettings();
+    return toAnalysisResultDirectoryRelativePath(settings.analysisResultDirectory);
+  }
+
   private async copyManagedFileIntoWorkspace(
     sourcePath: string,
     destinationPath: string,
@@ -1901,12 +1931,18 @@ export class IntegralWorkspaceService {
 
   private async resolvePlannedOutputPath(
     outputReference: string | null,
-    outputSlot: IntegralSlotDefinition
+    outputSlot: IntegralSlotDefinition,
+    analysisDisplayName?: string | null
   ): Promise<string> {
+    const outputExtension =
+      getIntegralSlotPrimaryExtension(outputSlot, DATASET_JSON_EXTENSION) ?? DATASET_JSON_EXTENSION;
     const rawReference =
       typeof outputReference === "string" && outputReference.trim().length > 0
         ? outputReference.trim()
-        : createDefaultIntegralOutputPathWithRandomSuffix(outputSlot);
+        : createDefaultIntegralOutputPathWithRandomSuffix(outputSlot, {
+            analysisDisplayName,
+            outputRoot: await this.resolveAnalysisResultDirectory()
+          });
 
     if (await this.resolveManagedDataReferenceMetadata(rawReference)) {
       throw new Error(
@@ -1915,8 +1951,15 @@ export class IntegralWorkspaceService {
     }
 
     const normalizedPath = normalizePlannedWorkspaceOutputPath(rawReference);
-    const outputExtension =
-      getIntegralSlotPrimaryExtension(outputSlot, DATASET_JSON_EXTENSION) ?? DATASET_JSON_EXTENSION;
+    if (isIntegralBundleExtension(outputExtension)) {
+      if (path.posix.extname(normalizedPath).toLowerCase() === DATASET_JSON_EXTENSION) {
+        throw new Error(`.idts output には file path ではなく folder path を指定してください: ${rawReference}`);
+      }
+
+      this.resolveWorkspacePath(normalizedPath);
+      return normalizedPath;
+    }
+
     const outputPath = ensureOutputPathExtension(normalizedPath, outputExtension);
 
     this.resolveWorkspacePath(outputPath);
@@ -2119,6 +2162,82 @@ export class IntegralWorkspaceService {
     return computeFileHash(absolutePath);
   }
 
+  private async ensureOutputDatasetDirectory(
+    absolutePath: string,
+    relativePath: string
+  ): Promise<void> {
+    const stats = await fs.stat(absolutePath).catch(() => null);
+
+    if (stats === null) {
+      await fs.mkdir(absolutePath, { recursive: true });
+      return;
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error(`output folder path は directory ではありません: ${relativePath}`);
+    }
+
+    const entries = await fs.readdir(absolutePath);
+
+    if (entries.length > 0) {
+      throw new Error(`output folder は空である必要があります: ${relativePath}`);
+    }
+  }
+
+  private async createOutputDatasetsFromPlans(
+    outputDatasetPlanMap: ReadonlyMap<
+      string,
+      {
+        createdAt: string;
+        dataPath: string;
+        datatype: string | null;
+        datasetId: string;
+        manifestPath: string;
+        name: string;
+        noteTargetId?: string;
+      }
+    >,
+    createdByBlockId: string | null
+  ): Promise<Map<string, IntegralDatasetSummary>> {
+    const createdDatasets = new Map<string, IntegralDatasetSummary>();
+
+    for (const [slotName, plan] of outputDatasetPlanMap) {
+      const manifest: DatasetManifest = {
+        dataPath: plan.dataPath,
+        datatype: plan.datatype ?? undefined,
+        datasetId: plan.datasetId,
+        name: plan.name,
+        noteTargetId: normalizeManagedDataNoteTargetId(plan.noteTargetId, plan.datasetId)
+      };
+      const manifestAbsolutePath = this.resolveWorkspacePath(plan.manifestPath);
+      await fs.mkdir(path.dirname(manifestAbsolutePath), { recursive: true });
+      await fs.writeFile(manifestAbsolutePath, JSON.stringify(manifest, null, 2), "utf8");
+
+      const metadata: DatasetMetadata = {
+        createdAt: plan.createdAt,
+        createdByBlockId,
+        dataPath: plan.dataPath,
+        datatype: plan.datatype,
+        datasetId: plan.datasetId,
+        displayName: plan.name,
+        entityType: "dataset",
+        hash: await this.computeManagedDataHash(manifestAbsolutePath, "dataset-json"),
+        id: plan.datasetId,
+        name: plan.name,
+        noteTargetId: plan.noteTargetId,
+        path: plan.manifestPath,
+        provenance: "derived",
+        representation: "dataset-json",
+        visibility: "visible"
+      };
+
+      await this.writeDatasetMetadata(plan.datasetId, metadata);
+      createdDatasets.set(slotName, await this.readDatasetSummary(plan.datasetId));
+    }
+
+    return createdDatasets;
+  }
+
   private async refreshOutputDatasetMetadata(
     outputDatasetMap: ReadonlyMap<string, IntegralDatasetSummary>
   ): Promise<void> {
@@ -2270,6 +2389,9 @@ export class IntegralWorkspaceService {
           reconciled.metadata.path,
           reconciled.metadata.representation
         );
+        if (reconciled.metadata.dataPath) {
+          reserveManagedPath(reservedManagedPaths, reconciled.metadata.dataPath, "directory");
+        }
       }
 
       if (!areDatasetMetadataEqual(metadata, reconciled.metadata)) {
@@ -2607,7 +2729,8 @@ function buildPythonCallableBlockType(
 
 function normalizeBlockDocument(
   block: IntegralBlockDocument,
-  definition: IntegralBlockTypeDefinition
+  definition: IntegralBlockTypeDefinition,
+  analysisResultDirectory?: string | null
 ): IntegralBlockDocument {
   const blockId =
     typeof block.id === "string" && block.id.trim().length > 0
@@ -2618,7 +2741,12 @@ function normalizeBlockDocument(
     "block-type": definition.blockType,
     id: blockId,
     inputs: normalizeSlotMap(block.inputs, definition.inputSlots),
-    outputs: normalizeOutputSlotMap(block.outputs, definition.outputSlots),
+    outputs: normalizeOutputSlotMap(
+      block.outputs,
+      definition.outputSlots,
+      definition.title,
+      analysisResultDirectory
+    ),
     params: normalizeIntegralParams(
       isJsonRecord(block.params) ? block.params : {},
       definition.paramsSchema
@@ -2644,7 +2772,9 @@ function normalizeSlotMap(
 
 function normalizeOutputSlotMap(
   currentValue: Record<string, string | null> | undefined,
-  slotDefinitions: readonly IntegralSlotDefinition[]
+  slotDefinitions: readonly IntegralSlotDefinition[],
+  analysisDisplayName?: string | null,
+  outputRoot?: string | null
 ): Record<string, string | null> {
   const normalized: Record<string, string | null> = {};
 
@@ -2653,7 +2783,10 @@ function normalizeOutputSlotMap(
     normalized[slot.name] =
       typeof value === "string" && value.trim().length > 0
         ? value.trim()
-        : createDefaultIntegralOutputPathWithRandomSuffix(slot);
+        : createDefaultIntegralOutputPathWithRandomSuffix(slot, {
+            analysisDisplayName,
+            outputRoot
+          });
   }
 
   return normalized;
@@ -3367,8 +3500,14 @@ function parsePythonCallableBlockType(
   };
 }
 
-function createDatasetObjectRelativePath(datasetId: string): string {
-  return `${STORE_DIRECTORY}/${STORE_OBJECTS_DIRECTORY}/${datasetId}`;
+function createDatasetManifestPathInDirectory(
+  directoryRelativePath: string,
+  datasetName: string,
+  datasetId: string
+): string {
+  const normalizedDirectory = normalizeRelativePath(directoryRelativePath);
+  const stem = sanitizeFileStem(path.posix.basename(datasetName)) || datasetId;
+  return normalizeRelativePath(`${normalizedDirectory}/${stem}${DATASET_JSON_EXTENSION}`);
 }
 
 function createUniqueSourceMemberEntryName(
@@ -3436,6 +3575,10 @@ function normalizePlannedWorkspaceOutputPath(value: string): string {
 
   if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) {
     throw new Error(`output path が不正です: ${value}`);
+  }
+
+  if (parts[0]?.toLowerCase() === STORE_DIRECTORY) {
+    throw new Error(".store 配下は system 管理領域のため指定できません。");
   }
 
   return parts.join("/");

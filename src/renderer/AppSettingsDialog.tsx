@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  DEFAULT_ANALYSIS_RESULT_DIRECTORY,
   DEFAULT_DATA_REGISTRATION_DIRECTORY,
   DEFAULT_USER_ID,
   type AppSettings,
@@ -22,6 +23,9 @@ export function AppSettingsDialog({
   pending,
   settings
 }: AppSettingsDialogProps): JSX.Element {
+  const [analysisResultDirectoryInput, setAnalysisResultDirectoryInput] = useState(
+    settings?.analysisResultDirectory ?? DEFAULT_ANALYSIS_RESULT_DIRECTORY
+  );
   const [dataRegistrationDirectoryInput, setDataRegistrationDirectoryInput] = useState(
     settings?.dataRegistrationDirectory ?? DEFAULT_DATA_REGISTRATION_DIRECTORY
   );
@@ -29,6 +33,9 @@ export function AppSettingsDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    setAnalysisResultDirectoryInput(
+      settings?.analysisResultDirectory ?? DEFAULT_ANALYSIS_RESULT_DIRECTORY
+    );
     setDataRegistrationDirectoryInput(
       settings?.dataRegistrationDirectory ?? DEFAULT_DATA_REGISTRATION_DIRECTORY
     );
@@ -40,6 +47,7 @@ export function AppSettingsDialog({
 
     try {
       await onSave({
+        analysisResultDirectory: analysisResultDirectoryInput,
         dataRegistrationDirectory: dataRegistrationDirectoryInput,
         userId: userIdInput
       });
@@ -78,6 +86,24 @@ export function AppSettingsDialog({
             </label>
             <p className="app-settings-dialog__note">
               外部ファイルやフォルダを managed file として取り込むときの workspace 内配置先です。
+            </p>
+          </section>
+
+          <section className="app-settings-dialog__section">
+            <label className="dialog-field">
+              <span>解析結果フォルダ</span>
+              <input
+                disabled={pending}
+                onChange={(event) => {
+                  setAnalysisResultDirectoryInput(event.target.value);
+                }}
+                placeholder={DEFAULT_ANALYSIS_RESULT_DIRECTORY}
+                type="text"
+                value={analysisResultDirectoryInput}
+              />
+            </label>
+            <p className="app-settings-dialog__note">
+              `.idts` output の既定保存先 root として使います。
             </p>
           </section>
 

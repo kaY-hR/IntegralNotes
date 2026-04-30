@@ -25,6 +25,8 @@ const api: IntegralNotesApi = {
   getAppSettings: () => ipcRenderer.invoke("app-settings:get"),
   saveAppSettings: (request) => ipcRenderer.invoke("app-settings:save", request),
   createDataset: (request) => ipcRenderer.invoke("integral:createDataset", request),
+  createDatasetFromFileDialog: (request) =>
+    ipcRenderer.invoke("integral:createDatasetFromFileDialog", request),
   createDatasetFromWorkspaceEntries: (request) =>
     ipcRenderer.invoke("integral:createDatasetFromWorkspaceEntries", request),
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),

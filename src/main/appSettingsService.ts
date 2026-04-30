@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   DEFAULT_APP_SETTINGS,
+  normalizeAnalysisResultDirectory,
   normalizeDataRegistrationDirectory,
   normalizeUserId,
   type AppSettings,
@@ -20,6 +21,10 @@ export class AppSettingsService {
     const currentSettings = await this.readPersistedSettings();
     const nextSettings: AppSettings = {
       ...currentSettings,
+      analysisResultDirectory:
+        request.analysisResultDirectory === undefined
+          ? currentSettings.analysisResultDirectory
+          : normalizeAnalysisResultDirectory(request.analysisResultDirectory),
       dataRegistrationDirectory:
         request.dataRegistrationDirectory === undefined
           ? currentSettings.dataRegistrationDirectory
@@ -44,6 +49,9 @@ export class AppSettingsService {
       }
 
       return {
+        analysisResultDirectory: normalizeAnalysisResultDirectory(
+          parsed.analysisResultDirectory
+        ),
         dataRegistrationDirectory: normalizeDataRegistrationDirectory(
           parsed.dataRegistrationDirectory
         ),

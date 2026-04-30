@@ -1518,6 +1518,7 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
     "Decorator params is the source of truth. Do not rely on undeclared YAML params; schema-external params are removed by the app.",
     "Do not group files with different roles or user intent into one .idts output just for convenience.",
     "Use .idts outputs only when multiple files of the same nature are generated as one set.",
+    "When writing to a .idts output, treat outputs[slotName] as a directory path and create the member files inside that directory. Do not create the .idts manifest yourself.",
     "Make user-facing renderables such as HTML reports, plots, images, SVG/PNG/JPEG/WebP files, and readable Markdown/text reports their own output slots.",
     "Set auto_insert_to_work_note=true for user-facing renderable output slots that should appear under the block.",
     "Keep CSV/TSV/JSON and other machine-readable or intermediate outputs in separate output slots, with auto_insert_to_work_note omitted or false unless the user explicitly wants that file as the visible result.",

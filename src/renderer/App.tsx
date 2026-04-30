@@ -1922,6 +1922,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshWorkspace();
+    void loadAppSettings();
   }, []);
 
   useEffect(() => {
@@ -2294,6 +2295,14 @@ export function App(): JSX.Element {
 
     try {
       const document = await window.integralNotes.readWorkspaceFile(relativePath);
+
+      if (document.kind === "dataset-json" && document.datasetManifest) {
+        await openWorkspaceFile(createManagedDataNoteRelativePath(document.datasetManifest.noteTargetId), {
+          ...options,
+          tabNameOverride: createManagedDataNoteTabName(document.datasetManifest.datasetName)
+        });
+        return;
+      }
 
       if (
         openUnsupportedExternally &&
@@ -3429,6 +3438,7 @@ export function App(): JSX.Element {
           initialValue={tab.content}
           isActive={selectedTabPath === relativePath}
           key={`${relativePath}:${tab.editorMode}:${pluginCatalogRevision}`}
+          analysisResultDirectory={appSettings?.analysisResultDirectory ?? null}
           onChange={(markdown) => {
             updateTabContent(relativePath, markdown);
           }}
