@@ -836,6 +836,12 @@ function isDirty(tab: OpenWorkspaceTab | undefined): boolean {
   return Boolean(isMarkdownTab(tab) && tab.content !== tab.savedContent);
 }
 
+function getDirtyTabPaths(tabs: Record<string, OpenWorkspaceTab>): string[] {
+  return Object.values(tabs)
+    .filter((tab): tab is OpenMarkdownTab => isMarkdownTab(tab) && isDirty(tab))
+    .map((tab) => tab.relativePath);
+}
+
 function createOpenTab(document: WorkspaceFileDocument, nameOverride?: string): OpenWorkspaceTab {
   const name = nameOverride ?? document.name;
 
@@ -1066,6 +1072,7 @@ export function App(): JSX.Element {
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
+  const pendingTabCloseConfirmationRef = useRef<Set<string>>(new Set());
   const shouldAutoOpenInitialFileRef = useRef(false);
   const sidebarPanelRef = useRef<HTMLElement>(null);
   const workspaceSearchSequenceRef = useRef(0);
@@ -1092,6 +1099,38 @@ export function App(): JSX.Element {
   useEffect(() => {
     openTabsRef.current = openTabs;
   }, [openTabs]);
+
+  const confirmDiscardDirtyTabs = async (
+    dirtyPaths: string[],
+    scope: "app" | "tab"
+  ): Promise<boolean> => {
+    try {
+      return await window.integralNotes.confirmDiscardUnsavedChanges({
+        dirtyPaths,
+        scope
+      });
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = window.integralNotes.onBeforeCloseRequest((request) => {
+      void (async () => {
+        const dirtyPaths = getDirtyTabPaths(openTabsRef.current);
+        const allowClose =
+          dirtyPaths.length === 0 ? true : await confirmDiscardDirtyTabs(dirtyPaths, "app");
+
+        window.integralNotes.respondBeforeClose({
+          allowClose,
+          requestId: request.requestId
+        });
+      })();
+    });
+
+    return unsubscribe;
+  }, []);
 
   const openMarkdownContentOverrides = useMemo(
     () =>
@@ -2461,6 +2500,51 @@ export function App(): JSX.Element {
     }
   };
 
+  const closeWorkspaceTabImmediately = (relativePath: string): void => {
+    const tabId = toTabId(relativePath);
+
+    if (model.getNodeById(tabId)) {
+      model.doAction(FlexLayout.Actions.deleteTab(tabId));
+    }
+
+    setOpenTabs((currentTabs) => {
+      if (!(relativePath in currentTabs)) {
+        return currentTabs;
+      }
+
+      const nextTabs = { ...currentTabs };
+      delete nextTabs[relativePath];
+      return nextTabs;
+    });
+    setSelectedTabId(findSelectedTabId(model));
+  };
+
+  const requestCloseDirtyTab = (relativePath: string): void => {
+    if (pendingTabCloseConfirmationRef.current.has(relativePath)) {
+      return;
+    }
+
+    pendingTabCloseConfirmationRef.current.add(relativePath);
+    void (async () => {
+      try {
+        const tab = openTabsRef.current[relativePath];
+
+        if (!isDirty(tab)) {
+          closeWorkspaceTabImmediately(relativePath);
+          return;
+        }
+
+        const shouldDiscard = await confirmDiscardDirtyTabs([relativePath], "tab");
+
+        if (shouldDiscard) {
+          closeWorkspaceTabImmediately(relativePath);
+        }
+      } finally {
+        pendingTabCloseConfirmationRef.current.delete(relativePath);
+      }
+    })();
+  };
+
   const closeTabsMatching = (predicate: (relativePath: string) => boolean): void => {
     const targetPaths = Object.keys(openTabsRef.current).filter(predicate);
 
@@ -3272,6 +3356,21 @@ export function App(): JSX.Element {
     );
   };
 
+  const handleLayoutAction = (action: FlexLayout.Action): FlexLayout.Action | undefined => {
+    if (action.type !== FlexLayout.Actions.DELETE_TAB) {
+      return action;
+    }
+
+    const relativePath = toRelativePathFromTabId(action.data.node as string);
+
+    if (!relativePath || !isDirty(openTabsRef.current[relativePath])) {
+      return action;
+    }
+
+    requestCloseDirtyTab(relativePath);
+    return undefined;
+  };
+
   const handleLayoutModelChange = (
     nextModel: FlexLayout.Model,
     action: FlexLayout.Action
@@ -3913,6 +4012,7 @@ export function App(): JSX.Element {
           <FlexLayout.Layout
             factory={editorFactory}
             model={model}
+            onAction={handleLayoutAction}
             onModelChange={handleLayoutModelChange}
             onTabSetPlaceHolder={() => (
               <div className="layout-placeholder">

@@ -269,7 +269,26 @@ export interface SelectWorkspaceFileRequest {
   initialRelativePath?: string | null;
 }
 
+export type UnsavedChangesCloseScope = "app" | "tab";
+
+export interface ConfirmDiscardUnsavedChangesRequest {
+  dirtyPaths: string[];
+  scope: UnsavedChangesCloseScope;
+}
+
+export interface BeforeCloseRequest {
+  requestId: string;
+}
+
+export interface BeforeCloseResponse {
+  allowClose: boolean;
+  requestId: string;
+}
+
 export interface IntegralNotesApi {
+  confirmDiscardUnsavedChanges: (request: ConfirmDiscardUnsavedChangesRequest) => Promise<boolean>;
+  onBeforeCloseRequest: (handler: (request: BeforeCloseRequest) => void) => () => void;
+  respondBeforeClose: (response: BeforeCloseResponse) => void;
   getAppSettings: () => Promise<AppSettings>;
   saveAppSettings: (request: SaveAppSettingsRequest) => Promise<AppSettings>;
   createDataset: (request: CreateDatasetRequest) => Promise<CreateDatasetResult>;

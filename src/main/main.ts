@@ -1,4 +1,13 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMainEvent,
+  type MessageBoxOptions
+} from "electron";
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -29,6 +38,8 @@ import type {
   SaveClipboardImageRequest,
   SaveNoteImageRequest,
   SelectWorkspaceFileRequest,
+  BeforeCloseResponse,
+  ConfirmDiscardUnsavedChangesRequest,
   WorkspaceReplaceRequest,
   WorkspaceSearchRequest,
   WorkspaceSnapshot
@@ -139,6 +150,113 @@ function writeWorkspaceSelectionToClipboard(relativePaths: string[]): void {
   );
 }
 
+function formatDirtyPathList(dirtyPaths: string[]): string {
+  const visiblePaths = dirtyPaths.slice(0, 12);
+  const hiddenCount = dirtyPaths.length - visiblePaths.length;
+  const visibleList = visiblePaths.map((relativePath) => `- ${relativePath}`).join("\n");
+
+  return hiddenCount > 0 ? `${visibleList}\n- 他 ${hiddenCount} 件` : visibleList;
+}
+
+async function confirmDiscardUnsavedChanges(
+  request: ConfirmDiscardUnsavedChangesRequest
+): Promise<boolean> {
+  const dirtyPaths = Array.from(
+    new Set(request.dirtyPaths.map((value) => value.trim()).filter((value) => value.length > 0))
+  );
+
+  if (dirtyPaths.length === 0) {
+    return true;
+  }
+
+  const isAppClose = request.scope === "app";
+  const actionLabel = isAppClose ? "保存せず終了" : "保存せず閉じる";
+  const message =
+    dirtyPaths.length === 1
+      ? `${dirtyPaths[0]} に未保存の変更があります。`
+      : `${dirtyPaths.length} 件のファイルに未保存の変更があります。`;
+  const options: MessageBoxOptions = {
+    buttons: ["キャンセル", actionLabel],
+    cancelId: 0,
+    defaultId: 0,
+    detail: `${formatDirtyPathList(dirtyPaths)}\n\n保存していない変更は失われます。`,
+    message: `${message}${isAppClose ? "IntegralNotes を終了しますか？" : "このタブを閉じますか？"}`,
+    noLink: true,
+    title: "未保存の変更",
+    type: "warning"
+  };
+  const result = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+
+  return result.response === 1;
+}
+
+function requestBeforeCloseFromRenderer(window: BrowserWindow): Promise<boolean> {
+  if (window.webContents.isDestroyed()) {
+    return Promise.resolve(true);
+  }
+
+  const requestId = `before-close-${Date.now()}-${++closeConfirmationRequestSequence}`;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (allowClose: boolean): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      ipcMain.removeListener("app:beforeCloseResponse", listener);
+      resolve(allowClose);
+    };
+    const listener = (event: IpcMainEvent, response: BeforeCloseResponse): void => {
+      if (event.sender !== window.webContents || response.requestId !== requestId) {
+        return;
+      }
+
+      settle(response.allowClose);
+    };
+    const timeout = setTimeout(() => {
+      settle(true);
+    }, 5000);
+
+    ipcMain.on("app:beforeCloseResponse", listener);
+    window.webContents.send("app:beforeCloseRequest", { requestId });
+  });
+}
+
+function registerUnsavedChangesCloseHandler(window: BrowserWindow): void {
+  window.on("close", (event) => {
+    if (closingAfterUnsavedConfirmation) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (closeConfirmationPending) {
+      return;
+    }
+
+    closeConfirmationPending = true;
+    void (async () => {
+      try {
+        const allowClose = await requestBeforeCloseFromRenderer(window);
+
+        if (!allowClose || window.isDestroyed()) {
+          return;
+        }
+
+        closingAfterUnsavedConfirmation = true;
+        window.close();
+      } finally {
+        closeConfirmationPending = false;
+      }
+    })();
+  });
+}
+
 function readWorkspaceSelectionFromClipboard(): string[] {
   try {
     if (!clipboard.has(WORKSPACE_SELECTION_CLIPBOARD_FORMAT)) {
@@ -224,6 +342,9 @@ let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 let pluginRegistry: PluginRegistry | null = null;
 let integralWorkspaceService: IntegralWorkspaceService | null = null;
+let closingAfterUnsavedConfirmation = false;
+let closeConfirmationPending = false;
+let closeConfirmationRequestSequence = 0;
 const MIN_ZOOM_LEVEL = -3;
 const MAX_ZOOM_LEVEL = 3;
 const ZOOM_LEVEL_STEP = 0.5;
@@ -271,6 +392,8 @@ function registerDevelopmentShortcuts(window: BrowserWindow): void {
 }
 
 async function createMainWindow(): Promise<void> {
+  closingAfterUnsavedConfirmation = false;
+  closeConfirmationPending = false;
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 980,
@@ -286,6 +409,7 @@ async function createMainWindow(): Promise<void> {
   });
   registerWindowZoomHandlers(mainWindow);
   registerDevelopmentShortcuts(mainWindow);
+  registerUnsavedChangesCloseHandler(mainWindow);
   mainWindow.removeMenu();
 
   const snapshot = await workspaceService.getSnapshot();
@@ -309,6 +433,11 @@ function registerIpcHandlers(): void {
 
   ipcRegistered = true;
 
+  ipcMain.handle(
+    "app:confirmDiscardUnsavedChanges",
+    async (_event, request: ConfirmDiscardUnsavedChangesRequest) =>
+      confirmDiscardUnsavedChanges(request)
+  );
   ipcMain.handle("app-settings:get", async () => appSettingsService.getSettings());
   ipcMain.handle("app-settings:save", async (_event, request: SaveAppSettingsRequest) =>
     appSettingsService.saveSettings(request)

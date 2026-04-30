@@ -22,6 +22,19 @@ function adjustZoomLevel(direction: "in" | "out" | "reset"): void {
 }
 
 const api: IntegralNotesApi = {
+  confirmDiscardUnsavedChanges: (request) =>
+    ipcRenderer.invoke("app:confirmDiscardUnsavedChanges", request),
+  onBeforeCloseRequest: (handler) => {
+    const listener = (_event: IpcRendererEvent, request: Parameters<typeof handler>[0]) => {
+      handler(request);
+    };
+
+    ipcRenderer.on("app:beforeCloseRequest", listener);
+    return () => {
+      ipcRenderer.removeListener("app:beforeCloseRequest", listener);
+    };
+  },
+  respondBeforeClose: (response) => ipcRenderer.send("app:beforeCloseResponse", response),
   getAppSettings: () => ipcRenderer.invoke("app-settings:get"),
   saveAppSettings: (request) => ipcRenderer.invoke("app-settings:save", request),
   createDataset: (request) => ipcRenderer.invoke("integral:createDataset", request),
