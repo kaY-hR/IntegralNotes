@@ -4097,7 +4097,8 @@ pre.ai-chat-panel__message-body--plain {
 .ai-markdown ul,
 .ai-markdown ol,
 .ai-markdown blockquote,
-.ai-markdown pre {
+.ai-markdown pre,
+.ai-markdown table {
   margin: 0;
 }
 
@@ -4167,6 +4168,47 @@ pre.ai-chat-panel__message-body--plain {
 .ai-markdown__code-language {
   color: #687d91;
   font-size: 0.72em;
+  font-weight: 700;
+}
+
+.ai-markdown__table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid rgba(196, 210, 224, 0.82);
+  border-radius: 6px;
+  background: rgba(250, 252, 254, 0.95);
+}
+
+.ai-markdown table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.ai-markdown th,
+.ai-markdown td {
+  min-width: 84px;
+  max-width: 280px;
+  padding: 7px 9px;
+  border-right: 1px solid rgba(196, 210, 224, 0.72);
+  border-bottom: 1px solid rgba(196, 210, 224, 0.72);
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ai-markdown th:last-child,
+.ai-markdown td:last-child {
+  border-right: 0;
+}
+
+.ai-markdown tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ai-markdown th {
+  background: rgba(238, 244, 249, 0.86);
+  color: #263b4d;
   font-weight: 700;
 }
 

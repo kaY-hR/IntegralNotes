@@ -29,7 +29,15 @@ type MarkdownBlock =
   | {
       content: string;
       type: "quote";
+    }
+  | {
+      alignments: TableColumnAlignment[];
+      headers: string[];
+      rows: string[][];
+      type: "table";
     };
+
+type TableColumnAlignment = "center" | "left" | "right" | undefined;
 
 export function AiMarkdown({ className, compact = false, text }: AiMarkdownProps): JSX.Element {
   const blocks = parseMarkdownBlocks(text);
@@ -107,6 +115,13 @@ function parseMarkdownBlocks(source: string): MarkdownBlock[] {
       continue;
     }
 
+    if (isTableStart(lines, index)) {
+      const table = parseTableBlock(lines, index);
+      blocks.push(table.block);
+      index = table.nextIndex;
+      continue;
+    }
+
     const unorderedMatch = /^\s*[-*]\s+(.+)$/u.exec(line);
     const orderedMatch = /^\s*\d+[.)]\s+(.+)$/u.exec(line);
 
@@ -168,6 +183,7 @@ function parseMarkdownBlocks(source: string): MarkdownBlock[] {
         paragraphLine.trim().length === 0 ||
         /^(`{3,}|~{3,})/u.test(paragraphLine.trim()) ||
         /^(#{1,3})\s+/u.test(paragraphLine) ||
+        isTableStart(lines, index) ||
         /^\s*(?:[-*]|\d+[.)])\s+/u.test(paragraphLine) ||
         /^>\s?/u.test(paragraphLine)
       ) {
@@ -226,9 +242,189 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number): ReactNode {
         </blockquote>
       );
 
+    case "table":
+      return (
+        <div className="ai-markdown__table-scroll" key={index}>
+          <table>
+            <thead>
+              <tr>
+                {block.headers.map((header, cellIndex) => (
+                  <th key={cellIndex} style={getTableCellStyle(block.alignments[cellIndex])}>
+                    {renderInlineMarkdown(header, `table-${index}-head-${cellIndex}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      key={cellIndex}
+                      style={getTableCellStyle(block.alignments[cellIndex])}
+                    >
+                      {renderInlineMarkdownWithBreaks(
+                        cell,
+                        `table-${index}-row-${rowIndex}-cell-${cellIndex}`
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+
     case "paragraph":
       return <p key={index}>{renderInlineMarkdownWithBreaks(block.content, `paragraph-${index}`)}</p>;
   }
+}
+
+function isTableStart(lines: string[], index: number): boolean {
+  const headerLine = lines[index] ?? "";
+  const separatorLine = lines[index + 1] ?? "";
+
+  if (!hasUnescapedPipe(headerLine) || !hasUnescapedPipe(separatorLine)) {
+    return false;
+  }
+
+  const headerCells = splitTableRow(headerLine);
+  const separatorCells = splitTableRow(separatorLine);
+
+  return (
+    headerCells.some((cell) => cell.trim().length > 0) &&
+    separatorCells.length > 0 &&
+    separatorCells.every(isTableSeparatorCell)
+  );
+}
+
+function parseTableBlock(
+  lines: string[],
+  startIndex: number
+): { block: Extract<MarkdownBlock, { type: "table" }>; nextIndex: number } {
+  const headerCells = splitTableRow(lines[startIndex] ?? "");
+  const separatorCells = splitTableRow(lines[startIndex + 1] ?? "");
+  const columnCount = Math.max(headerCells.length, separatorCells.length);
+  const headers = normalizeTableRow(headerCells, columnCount);
+  const alignments = normalizeTableAlignments(separatorCells.map(parseTableAlignment), columnCount);
+  const rows: string[][] = [];
+  let index = startIndex + 2;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+
+    if (line.trim().length === 0 || !hasUnescapedPipe(line)) {
+      break;
+    }
+
+    rows.push(normalizeTableRow(splitTableRow(line), columnCount));
+    index += 1;
+  }
+
+  return {
+    block: {
+      alignments,
+      headers,
+      rows,
+      type: "table"
+    },
+    nextIndex: index
+  };
+}
+
+function normalizeTableRow(cells: string[], columnCount: number): string[] {
+  return Array.from({ length: columnCount }, (_, index) => cells[index] ?? "");
+}
+
+function normalizeTableAlignments(
+  alignments: TableColumnAlignment[],
+  columnCount: number
+): TableColumnAlignment[] {
+  return Array.from({ length: columnCount }, (_, index) => alignments[index]);
+}
+
+function splitTableRow(line: string): string[] {
+  let row = line.trim();
+
+  if (row.startsWith("|")) {
+    row = row.slice(1);
+  }
+
+  if (row.endsWith("|") && !isEscaped(row, row.length - 1)) {
+    row = row.slice(0, -1);
+  }
+
+  const cells: string[] = [];
+  let cell = "";
+
+  for (let index = 0; index < row.length; index += 1) {
+    const character = row[index] ?? "";
+
+    if (character === "|" && !isEscaped(row, index)) {
+      cells.push(normalizeTableCell(cell));
+      cell = "";
+      continue;
+    }
+
+    cell += character;
+  }
+
+  cells.push(normalizeTableCell(cell));
+
+  return cells;
+}
+
+function normalizeTableCell(cell: string): string {
+  return cell.trim().replace(/\\\|/gu, "|");
+}
+
+function isTableSeparatorCell(cell: string): boolean {
+  return /^:?-{3,}:?$/u.test(cell.replace(/\s+/gu, ""));
+}
+
+function parseTableAlignment(cell: string): TableColumnAlignment {
+  const marker = cell.replace(/\s+/gu, "");
+  const alignsLeft = marker.startsWith(":");
+  const alignsRight = marker.endsWith(":");
+
+  if (alignsLeft && alignsRight) {
+    return "center";
+  }
+
+  if (alignsRight) {
+    return "right";
+  }
+
+  if (alignsLeft) {
+    return "left";
+  }
+
+  return undefined;
+}
+
+function getTableCellStyle(alignment: TableColumnAlignment): { textAlign: TableColumnAlignment } | undefined {
+  return alignment ? { textAlign: alignment } : undefined;
+}
+
+function hasUnescapedPipe(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "|" && !isEscaped(value, index)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isEscaped(value: string, index: number): boolean {
+  let slashCount = 0;
+
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+
+  return slashCount % 2 === 1;
 }
 
 function renderInlineMarkdownWithBreaks(value: string, keyPrefix: string): ReactNode[] {
