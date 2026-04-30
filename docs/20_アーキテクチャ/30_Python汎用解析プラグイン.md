@@ -52,9 +52,10 @@ def main(inputs, outputs, params):
 - `description`
 - `inputs`
 - `outputs`
+- `params`
 
-MVP ではここに params schema は持たせない。  
-`params` 自体は free-form object として note source から与える。
+`params` は user-editable parameter の schema を持つ。
+schema は Python literal の JSON Schema subset とし、root `{"type": "object", "properties": {...}}` を扱う。property type は `string / number / integer / boolean`、metadata は `title / description / default / enum / minimum / maximum` を扱う。
 
 ## Discovery
 
@@ -133,7 +134,8 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 - note source 上の `out:` は実行前 target path、実行後 output managed data ID とする
 - 非 `.idts` output は実行前 `out:` の target file path をそのまま渡す
 - `.idts` output は hidden bundle directory path を渡す
-- `params` は free-form object をそのまま渡す
+- `params` は decorator schema に沿って正規化した note source の object を渡す
+- decorator schema に無い param、未対応型 param、schema 外 key は実行 payload から削除する
 - runner が `analysis-args.json` を読んだ上で target callable を `inputs`, `outputs`, `params` 引数で呼び出す
 - 実行成功後、app は output metadata を作成または更新し、block source の `out:` を生成された ID へ書き換える
 

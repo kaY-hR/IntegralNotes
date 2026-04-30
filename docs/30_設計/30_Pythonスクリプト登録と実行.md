@@ -4,7 +4,8 @@
 
 - plugin ID は `general-analysis`
 - block-type は `relative/path.py:function`
-- `params` は free-form object
+- decorator `params` schema は Python literal の JSON Schema subset
+- 実行時の `params` は decorator schema に沿って正規化した note source の object
 - `inputs` は internal normalized form では `Record<string, managedDataId | null>`
 - `outputs` は実行前 `Record<string, workspacePath | null>`、実行後 `Record<string, managedDataId | null>`
 
@@ -35,6 +36,17 @@ from integral import integral_block
             "embed_to_shared_note": True,
         },
     ],
+    params={
+        "type": "object",
+        "properties": {
+            "n_components": {
+                "type": "integer",
+                "title": "主成分数",
+                "default": 2,
+                "minimum": 1,
+            },
+        },
+    },
 )
 def main(inputs, outputs, params):
     ...
@@ -48,6 +60,16 @@ def main(inputs, outputs, params):
 - `outputs`
 - slot ごとの `extension(s)` / `datatype`
 - output slot ごとの `auto_insert_to_work_note` / `share_note_with_input` / `embed_to_shared_note`
+- `params` schema
+
+### params schema
+
+- root は `{"type": "object", "properties": {...}}`
+- property type は `string / number / integer / boolean`
+- property metadata は `title / description / default / enum / minimum / maximum`
+- `required` は MVP では扱わない
+- schema が無い callable では有効な param は空とする
+- legacy `params=[{"name": ...}]` は使わない
 
 ### 現行 scan 条件
 
@@ -171,7 +193,8 @@ app は実行前に次を行う。
 - 値は絶対パスまたは `null`
 - 非 `.idts` input / output は current path をそのまま使う
 - `.idts` input / output は runtime 用 directory path を渡す
-- `params` は note source から読んだ object をそのまま渡す
+- `params` は decorator schema に沿って正規化した note source の object を渡す
+- decorator schema に無い param、未対応型 param、schema 外 key は実行 payload から削除する
 
 ## 8. 実行
 
@@ -191,6 +214,8 @@ app は実行前に次を行う。
 
 - `.idts` output の中身が空でも成功なら空の結果として確定する
 - stdout / stderr は `.store/.integral/runtime/BLK-.../` に残してよい
+- 実行失敗時の error text は block UI 上で選択・コピー可能な `<pre><code>` 相当として表示する
+- 実行失敗時は対象 `itg-notes` block 直下へ `integral-error` fenced code block として error text を反映してよい
 - 実行成功後、app は output slot ごとの生成 managed data ID を block source の `out:` に反映する
 - 実行元 note が分かる場合、app は provenance 用に `note-path#BLK-...` の deep link を生成して data-note へ追記してよい
 

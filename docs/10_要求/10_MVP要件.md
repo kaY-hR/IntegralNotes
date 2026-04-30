@@ -206,6 +206,8 @@
 - 成功/失敗判定は exit code のみで行う
 - exit code が非 0 の場合、note 上の実行結果には Python の `stderr` / `stdout` / runner error message を優先して表示する
 - exit code が 0 の場合でも、宣言された output path が作成されていなければ app 側の実行エラーとして note 上に表示する
+- 実行失敗時の詳細 error text は選択・コピー可能な表示にする
+- 実行失敗時は、対象 `itg-notes` block 直下へ `integral-error` fenced code block として error text を反映してよい
 - 実行成功後は output path に対応する managed file metadata を作成または更新する
 - 実行成功後は `out:` の値を生成された managed file / dataset ID へ書き換える
 - 実行済み block の UI は read-only とし、削除だけ可能にする
