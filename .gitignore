@@ -3,4 +3,5 @@ dist/
 dist-electron/
 out/
 scripts/backup.bat
+.integralnotes-dev.local.json
 **/__pycache__/

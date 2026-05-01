@@ -2,9 +2,11 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { getLocalDevRuntime } = require("./dev-local-config.cjs");
 
-const HOST = "127.0.0.1";
-const PORT = 5173;
+const localDevRuntime = getLocalDevRuntime(process.cwd());
+const HOST = localDevRuntime.host;
+const PORT = localDevRuntime.devPort;
 const APP_MARKER_PATH = "/src/renderer/App.tsx";
 const APP_MARKER_TEXT = "Open Folder";
 
@@ -113,9 +115,12 @@ async function main() {
 
   const vitePackageJson = require.resolve("vite/package.json");
   const viteBin = path.join(path.dirname(vitePackageJson), "bin", "vite.js");
-  const child = spawn(process.execPath, [viteBin], {
+  const child = spawn(process.execPath, [viteBin, "--host", HOST, "--port", String(PORT), "--strictPort"], {
     stdio: "inherit",
-    env: process.env,
+    env: {
+      ...process.env,
+      INTEGRALNOTES_DEV_PORT: String(PORT)
+    },
     cwd: process.cwd()
   });
 
