@@ -1967,7 +1967,7 @@ function toRunState(result: ExecuteIntegralBlockResult): RunState {
     finishedAt: result.finishedAt,
     logLines: result.logLines,
     startedAt: result.startedAt,
-    status: "success",
+    status: result.status,
     summary: result.summary
   };
 }

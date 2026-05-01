@@ -83,8 +83,14 @@ interface WorkspaceFileSuggestion {
 }
 
 const INTEGRAL_ERROR_BLOCK_LANGUAGE = "integral-error";
-const INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN =
-  /(```itg-notes\r?\n([\s\S]*?)\r?\n```)((?:\r?\n){2}(`{3,})integral-error\r?\n[\s\S]*?\r?\n\4)?/gu;
+const INTEGRAL_LOG_BLOCK_LANGUAGE = "integral-log";
+const INTEGRAL_EXECUTION_LOG_LANGUAGE_PATTERN = `${INTEGRAL_ERROR_BLOCK_LANGUAGE}|${INTEGRAL_LOG_BLOCK_LANGUAGE}`;
+const INTEGRAL_EXECUTION_LOG_EMBED_DIRECTORY = "integral-block-logs";
+const INTEGRAL_EXECUTION_LOG_EMBED_PATTERN = `!\\[\\]\\([^\\r\\n)]*${INTEGRAL_EXECUTION_LOG_EMBED_DIRECTORY}/[^\\r\\n)]*\\.log(?:#integral-embed-height=\\d+)?\\)`;
+const INTEGRAL_BLOCK_WITH_OPTIONAL_EXECUTION_LOG_PATTERN = new RegExp(
+  `(\`\`\`itg-notes\\r?\\n([\\s\\S]*?)\\r?\\n\`\`\`)(?:(?:\\r?\\n){2}(?:(\`{3,})(?:${INTEGRAL_EXECUTION_LOG_LANGUAGE_PATTERN})\\r?\\n[\\s\\S]*?\\r?\\n\\3|${INTEGRAL_EXECUTION_LOG_EMBED_PATTERN}))?`,
+  "gu"
+);
 
 interface LinkCompletionState {
   kind: "embed" | "link";
@@ -449,23 +455,8 @@ export function MilkdownEditor({
       installIntegralCodeBlockFeature(editor, {
         getAnalysisResultDirectory: () => analysisResultDirectoryRef.current,
         getWorkspaceEntries: () => workspaceEntriesRef.current,
-        onExecuteBlockError: ({ errorMessage, previousBlockSource }) => {
-          const nextMarkdown = applyIntegralExecutionErrorToMarkdown(
-            editor.getMarkdown(),
-            previousBlockSource,
-            errorMessage
-          );
-
-          if (nextMarkdown === null) {
-            onWorkspaceLinkErrorRef.current("実行エラーを現在のノートへ反映できませんでした。");
-            return;
-          }
-
-          editor?.editor.action((ctx) => {
-            replaceAll(nextMarkdown)(ctx);
-          });
-          lastSyncedMarkdownRef.current = nextMarkdown;
-          onChangeRef.current(nextMarkdown);
+        onExecuteBlockError: ({ errorMessage }) => {
+          onWorkspaceLinkErrorRef.current(errorMessage);
         },
         onExecuteBlockResult: ({ previousBlockSource, result }) => {
           const nextMarkdown = applyIntegralExecutionResultToMarkdown(
@@ -2419,11 +2410,15 @@ function applyIntegralExecutionResultToMarkdown(
   const normalizedPreviousBlockSource = normalizeMarkdownForComparison(previousBlockSource);
   const nextBlockMarkdown = toIntegralCodeBlock(serializeIntegralBlockContent(result.block));
   const appendMarkdown = result.workNoteMarkdownToAppend?.trim() ?? "";
+  const executionLogMarkdown = result.executionLogMarkdownTarget?.trim()
+    ? `![](${result.executionLogMarkdownTarget.trim()})`
+    : "";
+  const markdownToAppend = [executionLogMarkdown, appendMarkdown].filter(Boolean).join("\n\n");
   const nextBlockId = result.block.id?.trim() ?? "";
   let hasReplaced = false;
 
   const nextMarkdown = markdown.replace(
-    INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN,
+    INTEGRAL_BLOCK_WITH_OPTIONAL_EXECUTION_LOG_PATTERN,
     (fullMatch, _blockMarkdown, blockSource) => {
       if (hasReplaced) {
         return fullMatch;
@@ -2442,48 +2437,9 @@ function applyIntegralExecutionResultToMarkdown(
       }
 
       hasReplaced = true;
-      return appendMarkdown.length > 0 ? `${nextBlockMarkdown}\n\n${appendMarkdown}` : nextBlockMarkdown;
-    }
-  );
-
-  return hasReplaced ? nextMarkdown : null;
-}
-
-function applyIntegralExecutionErrorToMarkdown(
-  markdown: string,
-  previousBlockSource: string,
-  errorMessage: string
-): string | null {
-  const normalizedPreviousBlockSource = normalizeMarkdownForComparison(previousBlockSource);
-  const previousBlockId =
-    parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, previousBlockSource)?.block.id?.trim() ?? "";
-  const errorMarkdown = toMarkdownCodeFence(
-    errorMessage.trim() || "Unknown Integral block execution error",
-    INTEGRAL_ERROR_BLOCK_LANGUAGE
-  );
-  let hasReplaced = false;
-
-  const nextMarkdown = markdown.replace(
-    INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN,
-    (fullMatch, blockMarkdown, blockSource) => {
-      if (hasReplaced) {
-        return fullMatch;
-      }
-
-      const rawBlockSource = typeof blockSource === "string" ? blockSource : "";
-      const parsed = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, rawBlockSource);
-      const parsedBlockId = parsed?.block.id?.trim() ?? "";
-      const matchesById =
-        previousBlockId.length > 0 && parsedBlockId.length > 0 && parsedBlockId === previousBlockId;
-      const matchesBySource =
-        normalizeMarkdownForComparison(rawBlockSource) === normalizedPreviousBlockSource;
-
-      if (!matchesById && !matchesBySource) {
-        return fullMatch;
-      }
-
-      hasReplaced = true;
-      return `${blockMarkdown}\n\n${errorMarkdown}`;
+      return markdownToAppend.length > 0
+        ? `${nextBlockMarkdown}\n\n${markdownToAppend}`
+        : nextBlockMarkdown;
     }
   );
 

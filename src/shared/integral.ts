@@ -184,10 +184,11 @@ export interface ExecuteIntegralBlockRequest {
 export interface ExecuteIntegralBlockResult {
   block: IntegralBlockDocument;
   createdDatasets: IntegralDatasetSummary[];
+  executionLogMarkdownTarget?: string | null;
   finishedAt: string;
   logLines: string[];
   startedAt: string;
-  status: "success";
+  status: "error" | "success";
   summary: string;
   workNoteMarkdownToAppend: string | null;
 }

@@ -61,6 +61,8 @@ const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
 const STORE_RUNTIME_DIRECTORY = "runtime";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
+const INTEGRAL_BLOCK_LOG_DIRECTORY = "integral-block-logs";
+const INTEGRAL_BLOCK_LOG_DATATYPE = "integral-notes/python-execution-log";
 const PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY = "scripts";
 const PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY = `${PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY}/integral`;
 const PYTHON_EDITOR_IMPORT_PATH = "./scripts";
@@ -810,7 +812,8 @@ export class IntegralWorkspaceService {
       throw new Error(`Python file が見つかりません: ${callable.relativePath}`);
     }
 
-    const runtimeRootPath = this.resolvePythonRuntimeRootPath(sourceBlock.id ?? resolvedBlock.id ?? createOpaqueId("BLK"));
+    const executionBlockId = sourceBlock.id ?? resolvedBlock.id ?? createOpaqueId("BLK");
+    const runtimeRootPath = this.resolvePythonRuntimeRootPath(executionBlockId);
     await resetDirectory(runtimeRootPath);
     const outputDatasetMap = new Map<string, IntegralDatasetSummary>();
     const outputDatasetPlanMap = new Map<
@@ -955,24 +958,52 @@ export class IntegralWorkspaceService {
       const executionError = error as ExecFileError;
       stdout = executionError.stdout ?? "";
       stderr = executionError.stderr ?? "";
+      const finishedAt = new Date().toISOString();
+      const errorMessage = [
+        `${definition.title} の実行に失敗しました。`,
+        stderr.trim() || stdout.trim() || executionError.message
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
       await this.refreshOutputDatasetMetadata(outputDatasetMap);
       await this.refreshOutputManagedFileMetadata(
         outputManagedFilePlanMap,
-        sourceBlock.id ?? resolvedBlock.id ?? null,
+        executionBlockId,
         { allowMissingOutputs: true }
       );
+      const executionLogMarkdownTarget = await this.writeVisiblePythonExecutionLog({
+        blockId: executionBlockId,
+        definitionTitle: definition.title,
+        errorMessage,
+        finishedAt,
+        startedAt,
+        status: "error",
+        stderr,
+        stdout
+      });
       await this.workspaceService.syncManagedDataNotes();
 
-      throw new Error(
-        [
-          `${definition.title} の実行に失敗しました。`,
-          stderr.trim() || stdout.trim() || executionError.message
-        ]
-          .filter(Boolean)
-          .join("\n")
-      );
+      return {
+        block: {
+          ...sourceBlock,
+          inputs: {
+            ...sourceBlock.inputs,
+            ...resolvedBlock.inputs
+          }
+        },
+        createdDatasets: [],
+        executionLogMarkdownTarget,
+        finishedAt,
+        logLines: [],
+        startedAt,
+        status: "error",
+        summary: executionLogMarkdownTarget
+          ? `${definition.title} の実行に失敗しました。ログを保存しました。`
+          : `${definition.title} の実行に失敗しました。`,
+        workNoteMarkdownToAppend: null
+      };
     }
 
     await this.writePythonExecutionLogs(runtimeRootPath, stdout, stderr);
@@ -1008,6 +1039,15 @@ export class IntegralWorkspaceService {
         ];
       })
     );
+    const executionLogMarkdownTarget = await this.writeVisiblePythonExecutionLog({
+      blockId: executionBlockId,
+      definitionTitle: definition.title,
+      finishedAt,
+      startedAt,
+      status: "success",
+      stderr,
+      stdout
+    });
     const workNoteMarkdownToAppend = buildWorkNoteProjectionMarkdown(
       definition.outputSlots.flatMap((slot) =>
         slot.autoInsertToWorkNote && outputMarkdownTargetMap.get(slot.name)
@@ -1030,6 +1070,7 @@ export class IntegralWorkspaceService {
         )
       );
     }
+    await this.workspaceService.syncManagedDataNotes();
 
     return {
       block: {
@@ -1044,11 +1085,14 @@ export class IntegralWorkspaceService {
         }
       },
       createdDatasets,
+      executionLogMarkdownTarget,
       finishedAt,
-      logLines: [...splitLogLines(stdout), ...splitLogLines(stderr)],
+      logLines: [],
       startedAt,
       status: "success",
-      summary: `${definition.title} を実行しました。`,
+      summary: executionLogMarkdownTarget
+        ? `${definition.title} を実行しました。ログを保存しました。`
+        : `${definition.title} を実行しました。`,
       workNoteMarkdownToAppend
     };
   }
@@ -1474,6 +1518,65 @@ export class IntegralWorkspaceService {
       fs.writeFile(path.join(scriptRootPath, "stdout.log"), stdout, "utf8"),
       fs.writeFile(path.join(scriptRootPath, "stderr.log"), stderr, "utf8")
     ]);
+  }
+
+  private async writeVisiblePythonExecutionLog({
+    blockId,
+    definitionTitle,
+    errorMessage,
+    finishedAt,
+    startedAt,
+    status,
+    stderr,
+    stdout
+  }: {
+    blockId: string;
+    definitionTitle: string;
+    errorMessage?: string;
+    finishedAt: string;
+    startedAt: string;
+    status: "error" | "success";
+    stderr: string;
+    stdout: string;
+  }): Promise<string | null> {
+    const content = buildPythonExecutionLogText({
+      definitionTitle,
+      errorMessage,
+      finishedAt,
+      startedAt,
+      status,
+      stderr,
+      stdout
+    });
+
+    if (!content) {
+      return null;
+    }
+
+    const analysisResultDirectory = await this.resolveAnalysisResultDirectory();
+    const safeBlockId = sanitizeFileStem(blockId) || createOpaqueId("BLK");
+    const relativePath = normalizeRelativePath(
+      `${analysisResultDirectory}/${INTEGRAL_BLOCK_LOG_DIRECTORY}/${safeBlockId}.log`
+    );
+    const absolutePath = this.resolveWorkspacePath(relativePath);
+
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, content, "utf8");
+    await this.refreshOutputManagedFileMetadata(
+      new Map([
+        [
+          "executionLog",
+          {
+            datatype: INTEGRAL_BLOCK_LOG_DATATYPE,
+            displayName: `${definitionTitle} execution log`,
+            relativePath
+          }
+        ]
+      ]),
+      blockId
+    );
+
+    return toCanonicalWorkspaceTarget(relativePath);
   }
 
   private async readManagedFileMetadata(managedFileId: string): Promise<ManagedFileMetadata | null> {
@@ -4256,16 +4359,50 @@ function isReservedManagedPath(
   });
 }
 
-function splitLogLines(value: string): string[] {
-  return value
-    .split(/\r?\n/u)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0);
-}
-
 function resolvePythonCommand(): string {
   const configured = process.env.INTEGRALNOTES_PYTHON?.trim();
   return configured && configured.length > 0 ? configured : "python";
+}
+
+function buildPythonExecutionLogText({
+  definitionTitle,
+  errorMessage,
+  finishedAt,
+  startedAt,
+  status,
+  stderr,
+  stdout
+}: {
+  definitionTitle: string;
+  errorMessage?: string;
+  finishedAt: string;
+  startedAt: string;
+  status: "error" | "success";
+  stderr: string;
+  stdout: string;
+}): string | null {
+  const normalizedStdout = stdout.trimEnd();
+  const normalizedStderr = stderr.trimEnd();
+  const normalizedErrorMessage = errorMessage?.trim() ?? "";
+
+  if (
+    status === "success" &&
+    normalizedStdout.length === 0 &&
+    normalizedStderr.length === 0
+  ) {
+    return null;
+  }
+
+  return [
+    `${definitionTitle} execution log`,
+    "",
+    `status: ${status}`,
+    `startedAt: ${startedAt}`,
+    `finishedAt: ${finishedAt}`,
+    ...(normalizedErrorMessage.length > 0 ? ["", "error:", normalizedErrorMessage] : []),
+    ...(normalizedStderr.length > 0 ? ["", "stderr:", normalizedStderr] : []),
+    ...(normalizedStdout.length > 0 ? ["", "stdout:", normalizedStdout] : [])
+  ].join("\n");
 }
 
 function resolveBundledPythonSdkPackageTemplatePath(): string {
