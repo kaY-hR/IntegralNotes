@@ -62,6 +62,18 @@ const WORKSPACE_SELECTION_CLIPBOARD_FORMAT = "application/x-integralnotes-worksp
 
 initializeNetworkProxyFromEnvironment();
 
+function configureAutomationUserDataPath(): void {
+  const configuredUserDataPath = process.env.INTEGRALNOTES_USER_DATA_DIR?.trim();
+
+  if (!configuredUserDataPath) {
+    return;
+  }
+
+  app.setPath("userData", path.resolve(configuredUserDataPath));
+}
+
+configureAutomationUserDataPath();
+
 function resolveInitialWorkspacePath(): string | undefined {
   const configuredRootPath = process.env.INTEGRALNOTES_DEFAULT_WORKSPACE?.trim();
 
