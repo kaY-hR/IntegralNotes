@@ -41,6 +41,22 @@ scripts\register-codex-playwright-mcp.bat
 
 既定の MCP 名は `integralnotes-playwright-<カレントフォルダ名>`。
 
+登録 script は worktree root に `.integralnotes-dev.local.json` が無ければ自動作成する。この file は gitignore 対象で、通常の `npm run dev` と Playwright MCP の両方が読む。
+
+`npm run dev` / `npm run dev:renderer` も起動前に同じ local config を作成する。
+
+例:
+
+```json
+{
+  "devPort": 5524,
+  "playwrightArtifactDir": "C:\\tmp\\integralnotes-playwright-mcp\\mcp-server-impl-xxxxxxxx\\artifacts",
+  "playwrightUserDataDir": "C:\\tmp\\integralnotes-playwright-mcp\\mcp-server-impl-xxxxxxxx\\user-data"
+}
+```
+
+`devPort` は Vite renderer port として使う。これにより別 worktree の `npm run dev` / MCP が `5173` を reuse して混ざる事故を避ける。
+
 任意の名前で登録する場合:
 
 ```bat
@@ -64,6 +80,8 @@ scripts\unregister-codex-playwright-mcp.bat integralnotes-playwright-my-worktree
 ```powershell
 codex mcp add <name> -- node <worktree>\src\dev\integral-playwright-mcp.mjs
 ```
+
+port / userData は command line ではなく worktree local config から読む。
 
 ## 提供 tools
 

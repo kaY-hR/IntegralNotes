@@ -18,16 +18,18 @@ const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
-const HOST = "127.0.0.1";
-const PORT = Number.parseInt(process.env.INTEGRALNOTES_PLAYWRIGHT_PORT ?? "5173", 10);
+const { getLocalDevRuntime } = require("./dev-local-config.cjs");
+const localDevRuntime = getLocalDevRuntime(ROOT_DIR);
+const HOST = localDevRuntime.host;
+const PORT = localDevRuntime.playwrightPort;
 const DEV_SERVER_URL = process.env.INTEGRALNOTES_PLAYWRIGHT_DEV_SERVER_URL ?? `http://${HOST}:${PORT}`;
 const MAIN_ENTRY = path.join(ROOT_DIR, "dist-electron", "main", "main.js");
 const MAIN_SOURCE_DIR = path.join(ROOT_DIR, "src", "main");
 const SHARED_SOURCE_DIR = path.join(ROOT_DIR, "src", "shared");
 const RENDERER_SCRIPT = path.join(ROOT_DIR, "src", "dev", "start-renderer.cjs");
 const TSC_BIN = path.join(path.dirname(require.resolve("typescript/package.json")), "bin", "tsc");
-const DEFAULT_ARTIFACT_DIR = path.join(os.tmpdir(), "integralnotes-playwright-mcp");
-const DEFAULT_USER_DATA_DIR = path.join(DEFAULT_ARTIFACT_DIR, "user-data");
+const DEFAULT_ARTIFACT_DIR = localDevRuntime.playwrightArtifactDir;
+const DEFAULT_USER_DATA_DIR = localDevRuntime.playwrightUserDataDir;
 const MAX_LOG_CHARS = 20000;
 const DEFAULT_TIMEOUT_MS = 30000;
 
@@ -194,6 +196,9 @@ async function ensureRendererStarted(timeoutMs) {
 
   if (!rendererProcess || rendererProcess.exitCode !== null) {
     rendererProcess = spawnBuffered(process.execPath, [RENDERER_SCRIPT], {
+      env: {
+        INTEGRALNOTES_DEV_PORT: String(PORT)
+      },
       logPrefix: "[renderer] "
     });
   }

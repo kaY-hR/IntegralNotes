@@ -5,19 +5,25 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const electronPath = require("electron");
+const { getLocalDevRuntime } = require("./dev-local-config.cjs");
 
-const HOST = "127.0.0.1";
-const PORT = 5173;
-const DEV_SERVER_URL = `http://${HOST}:${PORT}`;
 const ROOT_DIR = process.cwd();
+const localDevRuntime = getLocalDevRuntime(ROOT_DIR);
+const HOST = localDevRuntime.host;
+const PORT = localDevRuntime.devPort;
+const DEV_SERVER_URL = localDevRuntime.devServerUrl;
 const MAIN_ENTRY = path.join(ROOT_DIR, "dist-electron", "main", "main.js");
 const MAIN_OUTPUT_DIR = path.dirname(MAIN_ENTRY);
 const RENDERER_SCRIPT = path.join(ROOT_DIR, "src", "dev", "start-renderer.cjs");
 const TSC_BIN = path.join(path.dirname(require.resolve("typescript/package.json")), "bin", "tsc");
+const MAIN_OUTPUT_SETTLE_MS = 700;
 
 let shuttingDown = false;
 let launchInProgress = false;
 let pendingRestart = false;
+let mainWatchReady = false;
+let mainWatchOutputBuffer = "";
+let mainOutputLastChangedAt = Date.now();
 let rendererProcess = null;
 let mainWatchProcess = null;
 let electronProcess = null;
@@ -79,12 +85,29 @@ function wait(ms) {
 function spawnManaged(command, args, options = {}) {
   return spawn(command, args, {
     cwd: ROOT_DIR,
-    stdio: "inherit",
+    stdio: options.stdio ?? "inherit",
     env: {
       ...process.env,
+      INTEGRALNOTES_DEV_PORT: String(PORT),
       ...options.env
     }
   });
+}
+
+function stripAnsi(text) {
+  return text.replace(/\x1B\[[0-9;]*m/gu, "");
+}
+
+function handleMainWatchOutput(chunk, stream) {
+  stream.write(chunk);
+
+  const text = stripAnsi(chunk.toString("utf8"));
+  mainWatchOutputBuffer = `${mainWatchOutputBuffer}${text}`.slice(-8000);
+
+  if (/Found\s+0\s+errors?\.\s+Watching for file changes\./iu.test(mainWatchOutputBuffer)) {
+    mainWatchReady = true;
+    mainOutputLastChangedAt = Date.now();
+  }
 }
 
 function killProcessTree(child) {
@@ -146,6 +169,12 @@ function ensureMainOutputWatcher() {
       return;
     }
 
+    mainOutputLastChangedAt = Date.now();
+
+    if (!mainWatchReady) {
+      return;
+    }
+
     if (restartTimer) {
       clearTimeout(restartTimer);
     }
@@ -175,6 +204,10 @@ function ensureMainOutputWatcher() {
 
 async function isLaunchReady() {
   if (!exists(MAIN_ENTRY)) {
+    return false;
+  }
+
+  if (!mainWatchReady || Date.now() - mainOutputLastChangedAt < MAIN_OUTPUT_SETTLE_MS) {
     return false;
   }
 
@@ -274,13 +307,19 @@ async function main() {
   rendererProcess = spawnManaged(process.execPath, [RENDERER_SCRIPT]);
   monitorRendererProcess(rendererProcess);
 
+  ensureMainOutputWatcher();
+
   mainWatchProcess = spawnManaged(process.execPath, [
     TSC_BIN,
     "-p",
     "tsconfig.node.json",
     "--watch",
     "--preserveWatchOutput"
-  ]);
+  ], {
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  mainWatchProcess.stdout.on("data", (chunk) => handleMainWatchOutput(chunk, process.stdout));
+  mainWatchProcess.stderr.on("data", (chunk) => handleMainWatchOutput(chunk, process.stderr));
   monitorMainWatchProcess(mainWatchProcess);
 
   launchPollTimer = setInterval(() => {

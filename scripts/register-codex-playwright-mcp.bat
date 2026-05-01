@@ -33,6 +33,14 @@ if not exist "%ROOT%\node_modules\@modelcontextprotocol\sdk" (
   exit /b 1
 )
 
+call node "%ROOT%\src\dev\ensure-local-dev-config.cjs"
+if errorlevel 1 (
+  echo.
+  echo ERROR: failed to prepare local dev config.
+  exit /b 1
+)
+
+echo.
 echo Registering Codex MCP server:
 echo   name: %MCP_NAME%
 echo   root: %ROOT%
