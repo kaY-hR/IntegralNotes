@@ -37,7 +37,9 @@ import type {
   IntegralAssetCatalog,
   IntegralDatasetInspection,
   IntegralManagedDataTrackingIssue,
-  ResolveIntegralManagedDataTrackingIssueRequest
+  ResolveIntegralManagedDataTrackingIssueRequest,
+  UndoIntegralBlockRequest,
+  UndoIntegralBlockResult
 } from "./integral";
 
 export type WorkspaceEntryKind = "directory" | "file";
@@ -348,6 +350,7 @@ export interface IntegralNotesApi {
   executeIntegralBlock: (
     request: ExecuteIntegralBlockRequest
   ) => Promise<ExecuteIntegralBlockResult>;
+  undoIntegralBlock: (request: UndoIntegralBlockRequest) => Promise<UndoIntegralBlockResult>;
   executeIntegralAction: (
     request: ExecuteIntegralActionRequest
   ) => Promise<ExecuteIntegralActionResult>;

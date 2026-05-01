@@ -22,7 +22,9 @@ import type {
   IntegralRenderableFile,
   ResolveIntegralManagedDataTrackingIssueRequest,
   IntegralParamsSchema,
-  IntegralSlotDefinition
+  IntegralSlotDefinition,
+  UndoIntegralBlockRequest,
+  UndoIntegralBlockResult
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPathWithRandomSuffix,
@@ -39,6 +41,7 @@ import {
   type PluginViewerDataEncoding
 } from "../shared/plugins";
 import {
+  removeWorkspaceMarkdownReferences,
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
 } from "../shared/workspaceLinks";
@@ -53,6 +56,10 @@ import type {
 import type { AppSettingsService } from "./appSettingsService";
 import { PluginRegistry } from "./pluginRegistry";
 import { WorkspaceService, type WorkspaceMutation } from "./workspaceService";
+import {
+  serializeFrontmatterDocument,
+  splitFrontmatterBlock
+} from "./frontmatter";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,6 +115,15 @@ const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".store",
   ".turbo",
   ".vscode",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out"
+]);
+const REFERENCE_CLEANUP_EXCLUDED_DIRECTORY_NAMES = new Set([
+  ".git",
+  ".next",
+  ".turbo",
   "coverage",
   "dist",
   "node_modules",
@@ -681,6 +697,66 @@ export class IntegralWorkspaceService {
       definition,
       request.sourceNotePath ?? null
     );
+  }
+
+  async undoBlock(request: UndoIntegralBlockRequest): Promise<UndoIntegralBlockResult> {
+    await this.ensureIntegralWorkspaceReady();
+
+    const blockId = request.block.id?.trim() ?? "";
+
+    if (blockId.length === 0) {
+      throw new Error("Undo 対象の block ID が見つかりません。");
+    }
+
+    const metadataList = await this.readManagedDataMetadataList();
+    const outputReferenceIds = new Set(
+      Object.values(request.block.outputs)
+        .map((reference) => (typeof reference === "string" ? reference.trim() : ""))
+        .filter((reference) => reference.length > 0)
+    );
+    const outputMetadata = metadataList.filter((metadata) => {
+      if (metadata.createdByBlockId !== blockId) {
+        return false;
+      }
+
+      return outputReferenceIds.size === 0 || outputReferenceIds.has(metadata.id);
+    });
+
+    if (outputMetadata.length === 0) {
+      return {
+        deletedRelativePaths: [],
+        removedReferencePaths: [],
+        updatedReferenceFiles: []
+      };
+    }
+
+    const referencePaths = collectGeneratedOutputReferencePaths(outputMetadata);
+    const deletionTargets = await this.collectGeneratedOutputDeletionTargets(outputMetadata);
+    const deletedRelativePaths: string[] = [];
+
+    if (deletionTargets.length > 0) {
+      const deleteResult = await this.workspaceService.deleteEntries({
+        targetPaths: deletionTargets
+      });
+      deletedRelativePaths.push(...deleteResult.deletedRelativePaths);
+    }
+
+    for (const metadata of outputMetadata) {
+      if (await this.hasManagedDataMetadata(metadata)) {
+        await this.removeManagedDataMetadata(metadata, {
+          syncManagedDataNotes: false
+        });
+      }
+    }
+
+    await this.workspaceService.syncManagedDataNotes();
+    const updatedReferenceFiles = await this.removeGeneratedOutputReferences(referencePaths);
+
+    return {
+      deletedRelativePaths,
+      removedReferencePaths: referencePaths,
+      updatedReferenceFiles
+    };
   }
 
   private getRootPath(): string {
@@ -1331,6 +1407,70 @@ export class IntegralWorkspaceService {
       relativePath,
       appendMarkdownToNoteBody(note.content, markdownToAppend)
     );
+  }
+
+  private async collectGeneratedOutputDeletionTargets(
+    metadataList: readonly ManagedDataMetadata[]
+  ): Promise<string[]> {
+    const candidates = metadataList.map((metadata) =>
+      metadata.entityType === "dataset"
+        ? normalizeRelativePath(metadata.dataPath ?? metadata.path)
+        : normalizeRelativePath(metadata.path)
+    );
+    const existingCandidates: string[] = [];
+
+    for (const candidate of collapseNestedRelativePaths(candidates)) {
+      if (await pathExists(this.resolveWorkspacePath(candidate))) {
+        existingCandidates.push(candidate);
+      }
+    }
+
+    return existingCandidates;
+  }
+
+  private async hasManagedDataMetadata(metadata: ManagedDataMetadata): Promise<boolean> {
+    return metadata.entityType === "dataset"
+      ? (await this.readDatasetMetadata(metadata.datasetId)) !== null
+      : (await this.readManagedFileMetadata(metadata.id)) !== null;
+  }
+
+  private async removeGeneratedOutputReferences(
+    referencePaths: readonly string[]
+  ): Promise<string[]> {
+    if (referencePaths.length === 0) {
+      return [];
+    }
+
+    const rootPath = this.getRootPath();
+    const markdownPaths = await collectMarkdownRelativePathsForReferenceCleanup(rootPath);
+    const updatedReferenceFiles: string[] = [];
+
+    for (const relativePath of markdownPaths) {
+      const absolutePath = this.resolveWorkspacePath(relativePath);
+      const currentContent = await fs.readFile(absolutePath, "utf8").catch(() => null);
+
+      if (currentContent === null) {
+        continue;
+      }
+
+      const parsed = splitFrontmatterBlock(currentContent);
+      const currentBody = parsed.frontmatter === null ? currentContent : parsed.body;
+      const nextBody = removeWorkspaceMarkdownReferences(currentBody, referencePaths);
+
+      if (nextBody === currentBody) {
+        continue;
+      }
+
+      const nextContent =
+        parsed.frontmatter === null
+          ? nextBody
+          : serializeFrontmatterDocument(parsed.frontmatter, nextBody);
+
+      await fs.writeFile(absolutePath, nextContent, "utf8");
+      updatedReferenceFiles.push(relativePath);
+    }
+
+    return updatedReferenceFiles;
   }
 
   private async writeDatasetMetadata(datasetId: string, metadata: DatasetMetadata): Promise<void> {
@@ -4237,6 +4377,61 @@ function collectTrackingCandidateNames(
   }
 
   return candidateNames;
+}
+
+function collectGeneratedOutputReferencePaths(
+  metadataList: readonly ManagedDataMetadata[]
+): string[] {
+  const referencePaths = new Set<string>();
+
+  for (const metadata of metadataList) {
+    if (metadata.entityType === "dataset") {
+      const dataPath = normalizeRelativePath(metadata.dataPath ?? "");
+
+      if (dataPath.length > 0) {
+        referencePaths.add(dataPath);
+      }
+
+      referencePaths.add(normalizeRelativePath(metadata.path));
+      continue;
+    }
+
+    referencePaths.add(normalizeRelativePath(metadata.path));
+  }
+
+  return [...referencePaths]
+    .filter((relativePath) => relativePath.length > 0)
+    .sort((left, right) => left.localeCompare(right, "ja"));
+}
+
+async function collectMarkdownRelativePathsForReferenceCleanup(
+  rootPath: string,
+  currentPath: string = rootPath
+): Promise<string[]> {
+  const entries = await fs.readdir(currentPath, { withFileTypes: true }).catch(() => []);
+  const relativePaths: string[] = [];
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "ja"))) {
+    const absolutePath = path.join(currentPath, entry.name);
+    const relativePath = path.relative(rootPath, absolutePath).split(path.sep).join("/");
+
+    if (entry.isDirectory()) {
+      if (REFERENCE_CLEANUP_EXCLUDED_DIRECTORY_NAMES.has(entry.name)) {
+        continue;
+      }
+
+      relativePaths.push(
+        ...(await collectMarkdownRelativePathsForReferenceCleanup(rootPath, absolutePath))
+      );
+      continue;
+    }
+
+    if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".md") {
+      relativePaths.push(relativePath);
+    }
+  }
+
+  return relativePaths;
 }
 
 function doesEntryMatchRepresentation(

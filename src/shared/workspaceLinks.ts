@@ -119,6 +119,39 @@ export function rewriteWorkspaceMarkdownReferences(
   return result;
 }
 
+export function removeWorkspaceMarkdownReferences(
+  markdown: string,
+  targetPaths: readonly string[]
+): string {
+  if (targetPaths.length === 0 || markdown.length === 0) {
+    return markdown;
+  }
+
+  const normalizedTargets = normalizeReferenceTargetPaths(targetPaths);
+
+  if (normalizedTargets.length === 0) {
+    return markdown;
+  }
+
+  let result = "";
+  let previousIndex = 0;
+
+  for (const match of markdown.matchAll(FENCED_CODE_BLOCK_PATTERN)) {
+    const index = match.index ?? 0;
+    const block = match[0];
+    result += normalizeRemovedMarkdownReferenceWhitespace(
+      removeMarkdownReferencesFromSegment(markdown.slice(previousIndex, index), normalizedTargets)
+    );
+    result += block;
+    previousIndex = index + block.length;
+  }
+
+  result += normalizeRemovedMarkdownReferenceWhitespace(
+    removeMarkdownReferencesFromSegment(markdown.slice(previousIndex), normalizedTargets)
+  );
+  return result;
+}
+
 function rewriteMarkdownSegment(markdown: string, pathChanges: WorkspacePathChange[]): string {
   return markdown.replace(MARKDOWN_LINK_PATTERN, (fullMatch, label, target) => {
     const rewrittenTarget = rewriteWorkspaceTarget(target, pathChanges);
@@ -129,6 +162,51 @@ function rewriteMarkdownSegment(markdown: string, pathChanges: WorkspacePathChan
 
     return `${label}(${rewrittenTarget})`;
   });
+}
+
+function removeMarkdownReferencesFromSegment(
+  markdown: string,
+  targetPaths: readonly string[]
+): string {
+  return markdown.replace(MARKDOWN_LINK_PATTERN, (fullMatch, _label, target) => {
+    const resolvedPath = resolveWorkspaceMarkdownTarget(target);
+
+    if (!resolvedPath) {
+      return fullMatch;
+    }
+
+    return isRemovedWorkspaceReference(resolvedPath, targetPaths) ? "" : fullMatch;
+  });
+}
+
+function normalizeReferenceTargetPaths(targetPaths: readonly string[]): string[] {
+  return Array.from(
+    new Set(
+      targetPaths
+        .map((targetPath) => {
+          const resolvedPath = resolveWorkspaceMarkdownTarget(targetPath) ?? targetPath;
+          return normalizeWorkspaceRelativePath(resolvedPath);
+        })
+        .filter((targetPath): targetPath is string => targetPath !== null)
+    )
+  );
+}
+
+function isRemovedWorkspaceReference(
+  referencePath: string,
+  targetPaths: readonly string[]
+): boolean {
+  return targetPaths.some(
+    (targetPath) =>
+      referencePath === targetPath || referencePath.startsWith(`${targetPath}/`)
+  );
+}
+
+function normalizeRemovedMarkdownReferenceWhitespace(markdown: string): string {
+  return markdown
+    .replace(/[ \t]+$/gmu, "")
+    .replace(/^[ \t]*(?:[-*+]|\d+\.)[ \t]*$/gmu, "")
+    .replace(/\n{3,}/gu, "\n\n");
 }
 
 function rewriteWorkspaceTarget(target: string, pathChanges: WorkspacePathChange[]): string {
