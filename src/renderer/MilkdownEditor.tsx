@@ -17,7 +17,8 @@ import {
 import type {
   ExecuteIntegralBlockResult,
   IntegralAssetCatalog,
-  IntegralBlockTypeDefinition
+  IntegralBlockTypeDefinition,
+  UndoIntegralBlockResult
 } from "../shared/integral";
 import type {
   AiChatContextSummary,
@@ -37,6 +38,7 @@ import {
 } from "../shared/aiChatSkills";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
+  removeWorkspaceMarkdownReferences,
   resolveWorkspaceMarkdownTarget,
   toCanonicalWorkspaceTarget
 } from "../shared/workspaceLinks";
@@ -484,6 +486,34 @@ export function MilkdownEditor({
           });
           lastSyncedMarkdownRef.current = nextMarkdown;
           onChangeRef.current(nextMarkdown);
+        },
+        onUndoBlockResult: ({ nextBlockSource, previousBlockSource, result }) => {
+          const nextMarkdown = applyIntegralUndoResultToMarkdown(
+            editor.getMarkdown(),
+            previousBlockSource,
+            nextBlockSource,
+            result
+          );
+
+          if (nextMarkdown === null) {
+            onWorkspaceLinkErrorRef.current("Undo 結果を現在のノートへ反映できませんでした。");
+            return;
+          }
+
+          editor?.editor.action((ctx) => {
+            replaceAll(nextMarkdown)(ctx);
+          });
+          lastSyncedMarkdownRef.current = nextMarkdown;
+          onChangeRef.current(nextMarkdown);
+
+          void window.integralNotes
+            .syncWorkspace()
+            .then((snapshot) => {
+              if (snapshot) {
+                onWorkspaceSnapshotChangedRef.current(snapshot, "解析 block を Undo しました");
+              }
+            })
+            .catch(() => {});
         },
         sourceNotePath: relativePath
       });
@@ -2488,6 +2518,49 @@ function applyIntegralExecutionErrorToMarkdown(
   );
 
   return hasReplaced ? nextMarkdown : null;
+}
+
+function applyIntegralUndoResultToMarkdown(
+  markdown: string,
+  previousBlockSource: string,
+  nextBlockSource: string,
+  result: UndoIntegralBlockResult
+): string | null {
+  const normalizedPreviousBlockSource = normalizeMarkdownForComparison(previousBlockSource);
+  const previousBlockId =
+    parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, previousBlockSource)?.block.id?.trim() ?? "";
+  const nextBlockMarkdown = toIntegralCodeBlock(nextBlockSource);
+  let hasReplaced = false;
+
+  const replacedMarkdown = markdown.replace(
+    INTEGRAL_BLOCK_WITH_OPTIONAL_ERROR_PATTERN,
+    (fullMatch, _blockMarkdown, blockSource) => {
+      if (hasReplaced) {
+        return fullMatch;
+      }
+
+      const rawBlockSource = typeof blockSource === "string" ? blockSource : "";
+      const parsed = parseIntegralBlockSource(INTEGRAL_BLOCK_LANGUAGE, rawBlockSource);
+      const parsedBlockId = parsed?.block.id?.trim() ?? "";
+      const matchesById =
+        previousBlockId.length > 0 && parsedBlockId.length > 0 && parsedBlockId === previousBlockId;
+      const matchesBySource =
+        normalizeMarkdownForComparison(rawBlockSource) === normalizedPreviousBlockSource;
+
+      if (!matchesById && !matchesBySource) {
+        return fullMatch;
+      }
+
+      hasReplaced = true;
+      return nextBlockMarkdown;
+    }
+  );
+
+  if (!hasReplaced) {
+    return null;
+  }
+
+  return removeWorkspaceMarkdownReferences(replacedMarkdown, result.removedReferencePaths);
 }
 
 function normalizeMarkdownForComparison(value: string): string {

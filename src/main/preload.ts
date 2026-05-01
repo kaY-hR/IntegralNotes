@@ -98,6 +98,7 @@ const api: IntegralNotesApi = {
   openWorkspaceInVSCode: () => ipcRenderer.invoke("workspace:openWorkspaceInVSCode"),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("plugins:uninstall", pluginId),
   executeIntegralBlock: (request) => ipcRenderer.invoke("integral:executeBlock", request),
+  undoIntegralBlock: (request) => ipcRenderer.invoke("integral:undoBlock", request),
   executeIntegralAction: (request) => ipcRenderer.invoke("integral:executeAction", request),
   getAiChatStatus: () => ipcRenderer.invoke("ai-chat:getStatus"),
   saveAiChatSettings: (request) => ipcRenderer.invoke("ai-chat:saveSettings", request),

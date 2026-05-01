@@ -192,6 +192,16 @@ export interface ExecuteIntegralBlockResult {
   workNoteMarkdownToAppend: string | null;
 }
 
+export interface UndoIntegralBlockRequest {
+  block: IntegralBlockDocument;
+}
+
+export interface UndoIntegralBlockResult {
+  deletedRelativePaths: string[];
+  removedReferencePaths: string[];
+  updatedReferenceFiles: string[];
+}
+
 const DEFAULT_OUTPUT_DIRECTORY = "/Data";
 const OUTPUT_PATH_SUFFIX_BASE = 36 ** 3;
 

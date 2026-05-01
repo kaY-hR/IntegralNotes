@@ -23,7 +23,8 @@ import type {
   CreateDatasetFromFileDialogRequest,
   CreateDatasetFromWorkspaceEntriesRequest,
   ExecuteIntegralBlockRequest,
-  ResolveIntegralManagedDataTrackingIssueRequest
+  ResolveIntegralManagedDataTrackingIssueRequest,
+  UndoIntegralBlockRequest
 } from "../shared/integral";
 import { normalizeIntegralSlotExtensions } from "../shared/integral";
 import type {
@@ -692,6 +693,9 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("integral:executeBlock", async (_event, request: ExecuteIntegralBlockRequest) =>
     getIntegralWorkspaceService().executeBlock(request)
+  );
+  ipcMain.handle("integral:undoBlock", async (_event, request: UndoIntegralBlockRequest) =>
+    getIntegralWorkspaceService().undoBlock(request)
   );
   ipcMain.handle("plugins:getInstallRootPath", async () => getPluginRegistry().getInstallRootPath());
   ipcMain.handle("plugins:listInstalled", async () => getPluginRegistry().listInstalledPlugins());

@@ -29,7 +29,8 @@ import type {
   IntegralParamSchemaProperty,
   IntegralParamsSchema,
   IntegralParamValue,
-  IntegralSlotDefinition
+  IntegralSlotDefinition,
+  UndoIntegralBlockResult
 } from "../shared/integral";
 import {
   createDefaultIntegralOutputPath,
@@ -54,6 +55,7 @@ import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
+  createInitialIntegralBlock,
   getIntegralBlockDefinition,
   normalizeIntegralBlockInputReferencesWithCatalog,
   parseIntegralBlockSource,
@@ -72,6 +74,11 @@ interface IntegralCodeBlockFeatureOptions {
   onExecuteBlockResult?: (payload: {
     previousBlockSource: string;
     result: ExecuteIntegralBlockResult;
+  }) => void;
+  onUndoBlockResult?: (payload: {
+    nextBlockSource: string;
+    previousBlockSource: string;
+    result: UndoIntegralBlockResult;
   }) => void;
   sourceNotePath?: string | null;
 }
@@ -374,6 +381,9 @@ class IntegralNotesBlockView implements NodeView {
         onRun={() => {
           void this.handleRun();
         }}
+        onUndo={() => {
+          void this.handleUndo();
+        }}
         parsed={parsed}
         runState={this.runState}
         selected={this.selected}
@@ -495,6 +505,79 @@ class IntegralNotesBlockView implements NodeView {
       this.render();
     }
   }
+
+  private async handleUndo(): Promise<void> {
+    if (this.runState.status === "running") {
+      return;
+    }
+
+    const rawText = readIntegralNodeValue(this.node);
+    const parsed = parseIntegralDraft(rawText);
+
+    if (!parsed.block) {
+      this.runState = createErrorRunState(parsed.error);
+      this.render();
+      return;
+    }
+
+    const blockDefinition = getIntegralBlockDefinition(
+      parsed.block.plugin,
+      parsed.block["block-type"]
+    );
+
+    if (!blockDefinition) {
+      this.runState = createErrorRunState("block 定義が見つかりません。");
+      this.render();
+      return;
+    }
+
+    this.runState = {
+      finishedAt: null,
+      logLines: [],
+      startedAt: new Date().toISOString(),
+      status: "running",
+      summary: "Undo 中..."
+    };
+    this.render();
+
+    try {
+      const result = await window.integralNotes.undoIntegralBlock({
+        block: parsed.block
+      });
+
+      if (this.destroyed) {
+        return;
+      }
+
+      const nextBlockSource = serializeIntegralBlockContent(
+        createInitialIntegralBlock(blockDefinition, {
+          outputRoot: this.options.getAnalysisResultDirectory?.() ?? null
+        })
+      );
+
+      this.runState = createIdleRunState();
+
+      if (this.options.onUndoBlockResult) {
+        this.options.onUndoBlockResult({
+          nextBlockSource,
+          previousBlockSource: rawText,
+          result
+        });
+      } else {
+        this.applyTextChange(nextBlockSource);
+      }
+    } catch (error) {
+      if (this.destroyed) {
+        return;
+      }
+
+      this.runState = createErrorRunState(formatErrorMessage(error));
+    }
+
+    if (!this.destroyed) {
+      this.render();
+    }
+  }
 }
 
 function IntegralBlockPanel({
@@ -505,6 +588,7 @@ function IntegralBlockPanel({
   onReplaceInputReferences,
   onUpdateParams,
   onRun,
+  onUndo,
   parsed,
   runState,
   selected
@@ -516,6 +600,7 @@ function IntegralBlockPanel({
   onReplaceInputReferences: (inputReferences: Record<string, string | null>) => void;
   onUpdateParams: (nextParams: Record<string, unknown>) => void;
   onRun: () => void;
+  onUndo: () => void;
   parsed: ParsedIntegralDraft;
   runState: RunState;
   selected: boolean;
@@ -790,6 +875,56 @@ function IntegralBlockPanel({
     });
   };
 
+  const resolveInputReferenceFromFieldQuery = (
+    picker: SlotFieldPickerState,
+    query: string
+  ): string | null | undefined => {
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery.length === 0) {
+      return null;
+    }
+
+    if (picker.kind === "input-dataset") {
+      const dataset = resolveDataset(trimmedQuery);
+      return dataset ? toStoredDatasetReference(dataset.datasetId) : undefined;
+    }
+
+    const managedFile = resolveManagedFile(trimmedQuery);
+    return managedFile ? managedFile.id : undefined;
+  };
+
+  const commitSlotFieldPickerQuery = (fieldKey: string): void => {
+    const picker = slotFieldPicker;
+
+    if (!picker || picker.fieldKey !== fieldKey) {
+      return;
+    }
+
+    const nextReference = resolveInputReferenceFromFieldQuery(picker, picker.query);
+
+    if (nextReference === undefined) {
+      return;
+    }
+
+    setInlineError(null);
+    onAssignInputReference(picker.slotName, nextReference);
+  };
+
+  const clearInputReference = (slotName: string, fieldKey: string): void => {
+    setInlineError(null);
+    onAssignInputReference(slotName, null);
+    setSlotFieldPicker((current) =>
+      current?.fieldKey === fieldKey
+        ? {
+            ...current,
+            query: "",
+            selectedIndex: 0
+          }
+        : current
+    );
+  };
+
   const chooseOutputDirectory = async (
     slotName: string,
     outputReference: string | null
@@ -811,6 +946,7 @@ function IntegralBlockPanel({
 
   const handleSlotFieldBlur = (fieldKey: string): void => {
     window.setTimeout(() => {
+      commitSlotFieldPickerQuery(fieldKey);
       closeSlotFieldPicker(fieldKey);
     }, 0);
   };
@@ -1104,55 +1240,78 @@ function IntegralBlockPanel({
 
                     {blockDefinition.executionMode === "manual" && !isExecutedBlock ? (
                       <div className="integral-slot-row__field">
-                        <input
-                          aria-autocomplete="list"
-                          aria-controls={isPickerOpen ? slotFieldPopupId : undefined}
-                          aria-expanded={isPickerOpen}
-                          className="integral-slot-row__field-input"
-                          data-integral-focus-target={index === 0 ? "primary" : undefined}
-                          onBlur={() => {
-                            handleSlotFieldBlur(fieldKey);
-                          }}
-                          onChange={(event) => {
-                            updateSlotFieldPickerQuery(fieldKey, event.target.value);
-                          }}
-                          onFocus={(event) => {
-                            openSlotFieldPicker(
-                              isBundleInput
-                                ? {
-                                    datatype: slot.datatype,
-                                    extensions: normalizeIntegralSlotExtensions([
-                                      slot.extension ?? "",
-                                      ...(slot.extensions ?? [])
-                                    ]),
-                                    fieldKey,
-                                    kind: "input-dataset",
-                                    query: toWorkspaceReferenceFieldValue(assignedReference),
-                                    slotName: slot.name
-                                  }
-                                : {
-                                    datatype: slot.datatype,
-                                    extensions: normalizeIntegralSlotExtensions([
-                                      slot.extension ?? "",
-                                      ...(slot.extensions ?? [])
-                                    ]),
-                                    fieldKey,
-                                    kind: "input-file",
-                                    query: toWorkspaceReferenceFieldValue(assignedReference),
-                                    slotName: slot.name
-                                  }
-                            );
-                            event.currentTarget.select();
-                          }}
-                          onKeyDown={(event) => {
-                            handleSlotFieldKeyDown(event, fieldKey);
-                          }}
-                          placeholder={placeholder}
-                          ref={registerSlotFieldRef(fieldKey)}
-                          spellCheck={false}
-                          type="text"
-                          value={fieldValue}
-                        />
+                        <div className="integral-slot-row__input-wrap">
+                          <input
+                            aria-autocomplete="list"
+                            aria-controls={isPickerOpen ? slotFieldPopupId : undefined}
+                            aria-expanded={isPickerOpen}
+                            className="integral-slot-row__field-input"
+                            data-integral-focus-target={index === 0 ? "primary" : undefined}
+                            onBlur={() => {
+                              handleSlotFieldBlur(fieldKey);
+                            }}
+                            onChange={(event) => {
+                              const nextQuery = event.target.value;
+                              updateSlotFieldPickerQuery(fieldKey, nextQuery);
+
+                              if (nextQuery.trim().length === 0 && assignedReference) {
+                                clearInputReference(slot.name, fieldKey);
+                              }
+                            }}
+                            onFocus={(event) => {
+                              openSlotFieldPicker(
+                                isBundleInput
+                                  ? {
+                                      datatype: slot.datatype,
+                                      extensions: normalizeIntegralSlotExtensions([
+                                        slot.extension ?? "",
+                                        ...(slot.extensions ?? [])
+                                      ]),
+                                      fieldKey,
+                                      kind: "input-dataset",
+                                      query: toWorkspaceReferenceFieldValue(assignedReference),
+                                      slotName: slot.name
+                                    }
+                                  : {
+                                      datatype: slot.datatype,
+                                      extensions: normalizeIntegralSlotExtensions([
+                                        slot.extension ?? "",
+                                        ...(slot.extensions ?? [])
+                                      ]),
+                                      fieldKey,
+                                      kind: "input-file",
+                                      query: toWorkspaceReferenceFieldValue(assignedReference),
+                                      slotName: slot.name
+                                    }
+                              );
+                              event.currentTarget.select();
+                            }}
+                            onKeyDown={(event) => {
+                              handleSlotFieldKeyDown(event, fieldKey);
+                            }}
+                            placeholder={placeholder}
+                            ref={registerSlotFieldRef(fieldKey)}
+                            spellCheck={false}
+                            type="text"
+                            value={fieldValue}
+                          />
+                          {assignedReference ? (
+                            <button
+                              aria-label={`${slot.name} input をクリア`}
+                              className="integral-slot-row__clear"
+                              onClick={() => {
+                                clearInputReference(slot.name, fieldKey);
+                              }}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                              }}
+                              title="入力をクリア"
+                              type="button"
+                            >
+                              x
+                            </button>
+                          ) : null}
+                        </div>
                         <span
                           className={
                             assignedReference
@@ -1419,13 +1578,24 @@ function IntegralBlockPanel({
         {blockDefinition.executionMode === "manual" && !hasCustomRenderer ? (
           <div className="integral-code-block__runbar">
             {isExecutedBlock ? (
-              <button
-                className="integral-code-block__button integral-code-block__button--ghost"
-                onClick={onDeleteBlock}
-                type="button"
-              >
-                Delete
-              </button>
+              <div className="integral-code-block__runbar-actions">
+                <button
+                  className="integral-code-block__button integral-code-block__button--ghost"
+                  disabled={runState.status === "running"}
+                  onClick={onUndo}
+                  type="button"
+                >
+                  {runState.status === "running" ? "Undo 中..." : "Undo"}
+                </button>
+                <button
+                  className="integral-code-block__button integral-code-block__button--ghost"
+                  disabled={runState.status === "running"}
+                  onClick={onDeleteBlock}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
             ) : (
               <button
                 className="integral-code-block__button integral-code-block__button--primary"
