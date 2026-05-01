@@ -1,8 +1,9 @@
 import { Crepe } from "@milkdown/crepe";
-import { editorViewCtx } from "@milkdown/kit/core";
+import { editorViewCtx, parserCtx } from "@milkdown/kit/core";
 import { imageSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
+import { Slice } from "@milkdown/kit/prose/model";
 import type { Selection } from "@milkdown/kit/prose/state";
-import { TextSelection } from "@milkdown/kit/prose/state";
+import { Selection as ProseSelection, TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
 import {
@@ -1352,28 +1353,37 @@ export function MilkdownEditor({
 
     editor.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
-      let nextPosition = Math.max(0, Math.min(position, view.state.doc.content.size));
+      const parsedDocument = ctx.get(parserCtx)(markdown);
+
+      if (!parsedDocument) {
+        return;
+      }
+
+      const from = Math.max(0, Math.min(position, view.state.doc.content.size));
+      let to = from;
+
       if (triggerCleanup && !triggerCleanup.originalAfterText.startsWith(triggerCleanup.marker)) {
         const markerTo = Math.min(
-          nextPosition + triggerCleanup.marker.length,
+          from + triggerCleanup.marker.length,
           view.state.doc.content.size
         );
-        const markerAtPosition = view.state.doc.textBetween(nextPosition, markerTo, "\n", "\0");
+        const markerAtPosition = view.state.doc.textBetween(from, markerTo, "\n", "\0");
 
         if (markerAtPosition === triggerCleanup.marker) {
-          const transaction = view.state.tr.delete(nextPosition, markerTo);
-          transaction.setSelection(TextSelection.create(transaction.doc, nextPosition));
-          view.dispatch(transaction.scrollIntoView());
-          nextPosition = Math.max(0, Math.min(nextPosition, view.state.doc.content.size));
+          to = markerTo;
         }
       }
 
-      view.dispatch(
-        view.state.tr
-          .setSelection(TextSelection.create(view.state.doc, nextPosition))
-          .scrollIntoView()
+      const insertedSlice = new Slice(parsedDocument.content, 0, 0);
+      const transaction = view.state.tr.replaceRange(from, to, insertedSlice);
+      const nextSelectionPosition = Math.min(
+        from + insertedSlice.size,
+        transaction.doc.content.size
       );
-      insert(markdown)(ctx);
+      transaction.setSelection(
+        ProseSelection.near(transaction.doc.resolve(nextSelectionPosition), -1)
+      );
+      view.dispatch(transaction.scrollIntoView());
       view.focus();
     });
   };
