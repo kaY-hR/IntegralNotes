@@ -4462,6 +4462,10 @@ pre.editor-ai-popup__message-text--plain {
   gap: 12px;
 }
 
+.dialog-card--ai-chat-settings .ai-chat-panel__settings-grid {
+  grid-template-columns: 1fr;
+}
+
 .ai-chat-panel__settings-field--wide {
   min-width: 0;
 }

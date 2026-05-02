@@ -91,11 +91,7 @@ export function AIChatSettingsDialog({
   }, [status]);
 
   const systemPromptInputsAreValid = useMemo(
-    () =>
-      systemPromptInputs.chatPanel.trim().length > 0 &&
-      systemPromptInputs.inlineInsertion.trim().length > 0 &&
-      systemPromptInputs.inlinePythonBlock.trim().length > 0 &&
-      systemPromptInputs.promptlessContinuation.trim().length > 0,
+    () => systemPromptInputs.chatPanel.trim().length > 0,
     [systemPromptInputs]
   );
 
@@ -173,7 +169,7 @@ export function AIChatSettingsDialog({
         <div className="dialog-card__header">
           <p className="dialog-card__eyebrow">AI Chat</p>
           <h2>AI Chat Settings</h2>
-          <p>model、認証、AI Chat のsystem promptを設定します。Inline Action は専用UIで編集します。</p>
+          <p>model、認証、AI Chat panel の system prompt を設定します。Inline Action は専用UIで編集します。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--ai-chat-settings">
@@ -265,9 +261,9 @@ export function AIChatSettingsDialog({
             <div className="ai-chat-panel__settings-header">
               <div>
                 <span className="ai-chat-panel__context-label">Prompts</span>
-                <h3 className="ai-chat-panel__section-title">System Prompts</h3>
+                <h3 className="ai-chat-panel__section-title">Chat Panel System Prompt</h3>
                 <p className="ai-chat-panel__description">
-                  保存すると、通常chat、??のAI挿入、&gt;&gt;のPython block生成、@@の続きを生成に反映されます。
+                  AI Chat パネル本体で使う system prompt だけを編集します。Inline Action の prompt は専用UIで管理します。
                 </p>
               </div>
 
@@ -275,11 +271,15 @@ export function AIChatSettingsDialog({
                 className="button button--ghost"
                 disabled={isSavingSettings}
                 onClick={() => {
-                  setSystemPromptInputs(status?.defaultSystemPrompts ?? DEFAULT_AI_CHAT_SYSTEM_PROMPTS);
+                  setSystemPromptInputs((current) => ({
+                    ...current,
+                    chatPanel:
+                      status?.defaultSystemPrompts.chatPanel ?? DEFAULT_AI_CHAT_SYSTEM_PROMPTS.chatPanel
+                  }));
                 }}
                 type="button"
               >
-                Reset Prompts
+                Reset Prompt
               </button>
             </div>
 
@@ -296,45 +296,9 @@ export function AIChatSettingsDialog({
                 />
               </label>
 
-              <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
-                <span className="ai-chat-panel__context-label">?? AI insertion</span>
-                <textarea
-                  className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
-                  onChange={(event) => {
-                    updateSystemPromptInput("inlineInsertion", event.target.value);
-                  }}
-                  rows={8}
-                  value={systemPromptInputs.inlineInsertion}
-                />
-              </label>
-
-              <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
-                <span className="ai-chat-panel__context-label">&gt;&gt; Python block implementation</span>
-                <textarea
-                  className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
-                  onChange={(event) => {
-                    updateSystemPromptInput("inlinePythonBlock", event.target.value);
-                  }}
-                  rows={9}
-                  value={systemPromptInputs.inlinePythonBlock}
-                />
-              </label>
-
-              <label className="ai-chat-panel__settings-field ai-chat-panel__settings-field--wide">
-                <span className="ai-chat-panel__context-label">@@ Promptless continuation</span>
-                <textarea
-                  className="ai-chat-panel__settings-input ai-chat-panel__settings-textarea"
-                  onChange={(event) => {
-                    updateSystemPromptInput("promptlessContinuation", event.target.value);
-                  }}
-                  rows={9}
-                  value={systemPromptInputs.promptlessContinuation}
-                />
-              </label>
-
               {!systemPromptInputsAreValid ? (
                 <p className="ai-chat-panel__note">
-                  system prompt は4種類とも空にできません。既定値に戻す場合は Reset Prompts を使ってください。
+                  system prompt は空にできません。既定値に戻す場合は Reset Prompt を使ってください。
                 </p>
               ) : null}
             </div>
