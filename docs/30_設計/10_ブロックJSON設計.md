@@ -167,7 +167,8 @@ app 内部では次の JSON object に正規化する。
 ### `out`
 
 - 実行前は workspace path を保持する
-- `.idts` path が書かれている場合は、visible manifest path として扱う
+- `.idts` output slot の場合、実行前 `out:` は `.idts` file path ではなく output folder path として扱う
+- app は実行成功後に output folder 内へ `{folder名}.idts` manifest を作る
 - 実行成功後、app は生成された managed file / dataset ID を書き戻す
 - 実行後の `out:` に path は残さない
 - `auto`、`dir`、`name`、`latest`、`outputConfigs` は canonical には含めない

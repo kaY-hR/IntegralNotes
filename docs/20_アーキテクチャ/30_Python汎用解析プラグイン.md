@@ -112,11 +112,11 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 {
   "inputs": {
     "samples": "C:\\Workspace\\Data\\samples.csv",
-    "source": "C:\\Workspace\\.store\\objects\\MF-1A2B3C4D"
+    "source": "C:\\Workspace\\.store\\.integral\\runtime\\materialized-datasets\\DTS-1A2B3C4D"
   },
   "outputs": {
     "score": "C:\\Workspace\\Results\\score.csv",
-    "bundle": "C:\\Workspace\\.store\\objects\\MF-9X4Q2M1A"
+    "bundle": "C:\\Workspace\\analysis-result\\PCA_202604301530_A1B"
   },
   "params": {
     "n_components": 2
@@ -130,10 +130,10 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 - `outputs` は絶対 path または `null`
 - note source 上の `in:` は managed data ID を正とし、実行時に current path へ解決する
 - 非 `.idts` input は ID から解決した current file path を渡す
-- `.idts` input は dataset ID から hidden bundle directory path に resolve して渡す
+- `.idts` input は dataset ID から readable directory path に resolve して渡す。source dataset は必要に応じて staging directory へ materialize してよい
 - note source 上の `out:` は実行前 target path、実行後 output managed data ID とする
 - 非 `.idts` output は実行前 `out:` の target file path をそのまま渡す
-- `.idts` output は hidden bundle directory path を渡す
+- `.idts` output は実行前 `out:` の output folder path を渡し、実行成功後に app がその folder 内へ `{folder名}.idts` manifest を作る
 - `params` は decorator schema に沿って正規化した note source の object を渡す
 - decorator schema に無い param、未対応型 param、schema 外 key は実行 payload から削除する
 - runner が `analysis-args.json` を読んだ上で target callable を `inputs`, `outputs`, `params` 引数で呼び出す

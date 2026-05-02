@@ -139,20 +139,20 @@ outputs=[
 ## `.idts` の扱い
 
 `.idts` は見た目は普通の workspace file にする。  
-ただし runtime では hidden bundle directory に resolve する。
+ただし workspace file として開いたときは manifest viewer ではなく dataset の data-note を開く。runtime では dataset ID から readable directory path に resolve する。
 
 ### input
 
 - ユーザーが指定するのは `/Data/samples.idts`
 - 保存時または実行前に dataset ID へ解決する
-- Python に渡すのは `.store/objects/<id>/` または staging directory
+- Python に渡すのは readable directory path
+- source dataset は必要に応じて `.store/.integral/runtime/` 配下の staging directory へ materialize してよい
 
 ### output
 
-- ユーザーが指定するのは `/Results/output.idts`
-- app は hidden bundle directory を確保する
-- Python に hidden bundle directory path を渡す
-- 実行後、visible `.idts` manifest を保存する
+- ユーザーが指定するのは `/analysis-result/Report_yyyyMMddHHmm_A1B` のような output folder path
+- app は output folder を確保し、Python にその folder path を渡す
+- 実行後、output folder 内に `{folder名}.idts` manifest を保存する
 - block source の `out:` には生成 dataset ID を書き戻す
 
 ## Link / Embed rewrite

@@ -125,7 +125,9 @@ note へは反映しない。
 
 Inline Action は workspace root 配下の `.inline-action/*.md` で定義する。
 
-`.inline-action` は hidden/system 的な設定フォルダとして扱い、通常の file tree には表示しない。編集は専用の Inline Action 管理 UI から行う。
+`.inline-action` は hidden/system 的な設定フォルダとして扱う。Explorer の hidden 表示が OFF の通常状態では file tree に表示しないが、hidden 表示を ON にした場合は workspace 上の folder として見えてよい。
+
+編集の主導線は専用の Inline Action 管理 UI とする。`.inline-action` は search、managed data auto-register、AI workspace snapshot の対象からは除外する。
 
 MVP では workspace template 機構により、標準 action 定義も `.inline-action/*.md` として展開される。
 

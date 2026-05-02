@@ -89,7 +89,7 @@ main process は block 実行時に次を行う。
 3. input ID を current filesystem path に解決する
 4. input が `.idts` dataset ID なら executable directory path に解決する
 5. 非 `.idts` output は `out:` の target file path をそのまま使う
-6. `.idts` output は visible manifest path と hidden bundle directory を確保する
+6. `.idts` output は visible output folder path を確保し、Python にはその folder path を渡す
 7. `.store/.integral/runtime/BLK-.../analysis-args.json` を書く
 8. 実行成功後は output slot ごとの生成 managed data ID を block source の `out:` に反映する
 9. 実行済み block は provenance として read-only 表示にする

@@ -76,6 +76,9 @@ Main Process
 
 - header には runtime mode / provider label / MCP status pill を出す
 - 設定は inline section ではなく `Settings` dialog に分離する
+- `Settings` dialog で編集できる prompt は AI Chat panel 本体の system prompt のみにする
+- Inline Action の prompt / read scope / tool permission は `Inline Actions` 専用 UI で `.inline-action/*.md` として管理する
+- `Reset Prompt` は AI Chat panel prompt だけを既定値へ戻し、Inline Action 定義には触れない
 - current workspace context は `Context` dialog に分離する
 - 本文領域は message list を優先し、composer を panel 下部に固定する
 - assistant 応答中は pending assistant message を出し、text delta を live 追記する
