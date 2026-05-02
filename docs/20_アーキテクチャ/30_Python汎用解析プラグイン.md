@@ -141,13 +141,13 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 ## decorator の所在
 
-`from integral import integral_block` の decorator は、repo 内の Python SDK として定義する。
+`from integral import integral_block` の decorator は、workspace template に含まれる Python SDK として定義する。
 
 定義場所:
 
 - `scripts/integral/__init__.py`
 
-app は必要に応じてこの package を workspace の `scripts/integral/` へ同期し、runner は `scripts/` を `sys.path` の先頭へ追加して import を成立させる。
+app は必要に応じて workspace template 内のこの package を workspace の `scripts/integral/` へ同期し、runner は `scripts/` を `sys.path` の先頭へ追加して import を成立させる。
 
 ## 成功判定
 

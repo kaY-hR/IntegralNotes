@@ -155,10 +155,10 @@ app / runner は workspace の import root を次で解決する。
 
 ### packaged app
 
-packaging 時に `scripts/integral` を app resource へ同梱する。  
-app はこれを template source として使い、workspace の `scripts/integral/` へ同期する。
+packaging 時に `Notes/` の中身を app resource の workspace template として同梱する。  
+app はその中の `scripts/integral` を template source として使い、workspace の `scripts/integral/` へ同期する。
 
-- `process.resourcesPath/python-sdk/integral`
+- `process.resourcesPath/workspace-template/scripts/integral`
 
 runner 自体は同期後の workspace `scripts/` を `sys.path` へ追加する。
 

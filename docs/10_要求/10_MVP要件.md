@@ -22,6 +22,21 @@
   - `path same + hash changed`: 内容更新
   - `path changed + hash changed`: 候補が一意なら追跡し、曖昧なら confirm
 
+## 1.1 Workspace Template
+
+- app は workspace 初期化用 template を同梱する
+- 開発時の template source は source tree の `Notes/` とする
+- packaged app の template source は `process.resourcesPath/workspace-template/` とする
+- `cwd` を開いたとき、visible な通常 file / directory が無い場合は template を自動展開する
+- `.git`、`.` で始まる entry、Windows hidden 属性の entry だけがある `cwd` は空扱いする
+- visible な通常 file / directory がある `cwd` には自動展開しない
+- workspace を開いた状態で、ユーザーが明示的に `初期化/更新` を実行できる
+- 明示実行では template の同じ相対 path にある file を強制上書きする
+- 同じ相対 path の directory は再帰 copy する
+- MVP では削除同期、merge、user edit 検知、conflict file 生成、version 管理は行わない
+- template 展開後は workspace sync 相当を走らせ、file tree / metadata を更新する
+- 展開先は現在開いている workspace root 配下に限定する
+
 ## 2. Data Note
 
 - `.md` を除く managed file と dataset に data-note を持たせる
