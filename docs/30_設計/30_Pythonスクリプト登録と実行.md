@@ -144,7 +144,8 @@ slot が `.idts` を要求する場合、authoring 時の `in:` には `.idts` m
 - output slot には保存先 path を編集できる UI を表示する
 - `.idts` output の場合は output folder path を編集する。app は実行成功後、その folder 内に `{folder名}.idts` manifest を作る
 - 実行成功後は output slot ごとの生成 managed file / dataset ID を note source の `out:` へ書き戻す
-- 実行済み block は provenance として read-only 表示し、削除だけ可能にする
+- 実行済み block は provenance として read-only 表示し、Delete と Undo だけ可能にする
+- Undo は生成済み output とその参照を整理し、同じ block 定義から新しい draft を作り直す
 - output slot は追加で次を持てる
   - `auto_insert_to_work_note`
   - `share_note_with_input`
@@ -220,6 +221,7 @@ app は実行前に次を行う。
 - 実行失敗時は対象 `itg-notes` block 直下へ `integral-error` fenced code block として error text を反映してよい
 - 実行成功後、app は output slot ごとの生成 managed data ID を block source の `out:` に反映する
 - 実行元 note が分かる場合、app は provenance 用に `note-path#BLK-...` の deep link を生成して data-note へ追記してよい
+- 実行済み block の Undo では、生成済み output と Markdown link / embed 参照を整理したうえで、同じ callable 定義から新しい未実行 block source を作り直してよい
 
 ## 9. decorator の import 契約
 

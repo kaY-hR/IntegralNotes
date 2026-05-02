@@ -92,7 +92,8 @@ main process は block 実行時に次を行う。
 6. `.idts` output は visible output folder path を確保し、Python にはその folder path を渡す
 7. `.store/.integral/runtime/BLK-.../analysis-args.json` を書く
 8. 実行成功後は output slot ごとの生成 managed data ID を block source の `out:` に反映する
-9. 実行済み block は provenance として read-only 表示にする
+9. 実行済み block は provenance として read-only 表示にし、Delete / Undo だけを操作として許す
+10. Undo では生成済み output と参照を整理し、同じ callable 定義から新しい未実行 block source を作り直す
 
 `analysis-args.json` の責務は、Python callable へ渡す filesystem-oriented payload を固定形で表現することにある。
 

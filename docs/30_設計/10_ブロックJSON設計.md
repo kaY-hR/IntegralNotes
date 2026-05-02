@@ -180,8 +180,9 @@ app 内部では次の JSON object に正規化する。
 - 実行前 output は希望保存先 path として保存する
 - 実行後 output は生成物 ID として保存する
 - 実行済み block は provenance として扱い、UI は read-only 表示にする
-- 実行済み block は削除のみ可能にし、再実行 button は出さない
-- 再実行したい場合は、ユーザーまたは LLM が新しい block を作る
+- 実行済み block は Delete と Undo だけ可能にし、再実行 button は出さない
+- Undo は生成済み managed output の file / dataset folder、metadata、data-note、Markdown link / embed 参照を整理し、同じ block 定義から新しい block ID / 初期 input / 初期 params / 新しい output path を持つ draft を作り直す
+- 再実行したい場合は、Undo で新しい draft に戻すか、ユーザーまたは LLM が新しい block を作る
 - run status と log 要約は hidden metadata ではなく UI state / runtime log で扱う
 
 ## 5.5. note projection metadata
@@ -223,6 +224,7 @@ block card では次を表示してよい。
 - param 要約
 - 実行前 block の run action
 - 実行済み block の read-only provenance 表示
+- 実行済み block の Delete / Undo action
 - data-note open action
 
 ## 7. 非対応

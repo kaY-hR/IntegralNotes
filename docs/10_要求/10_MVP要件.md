@@ -40,8 +40,8 @@
 ## 2. Data Note
 
 - `.md` を除く managed file と dataset に data-note を持たせる
-- data-note は `.store/.integral/data-notes/{id}.md` に置く system-managed Markdown とする
-- app は data-note を file path ではなく target ID で開く
+- data-note は `.store/.integral/data-notes/{noteTargetId}.md` に置く system-managed Markdown とする
+- app は data-note を file path ではなく `noteTargetId` で開く
 - ユーザーは data-note の本文だけを編集できる
 - data-note 対象の managed data を管理対象から外したときは、対応する metadata と data-note も削除する
 - dataset の data-note 初期本文は、構成 file / folder への Markdown link 箇条書きを持つ
@@ -90,7 +90,7 @@
 - `inputs` には authoring 時に workspace relative path を書いてよいが、保存または実行前に ID へ正規化する
 - `outputs` の保存値は、実行前は workspace relative path または `null`、実行後は生成された managed file / dataset ID とする
 - 実行済み block は provenance として扱い、基本的に read-only 表示にする
-- 再実行したい場合は、既存 block を編集して再実行するのではなく、新しい block を作る
+- 再実行したい場合は、既存 block を編集して再実行するのではなく、Undo で生成済み output と参照を整理して新しい draft に戻すか、新しい block を作る
 - user-facing な `itg-notes` block source は YAML のみを受け付ける
 - `itg-notes` block では `use:` または `run:` の簡易記法を canonical form とする
 - `run: relative/path.py:function` は内部で `plugin = "general-analysis"` とその callable block-type へ正規化する
@@ -235,7 +235,8 @@
 - 実行失敗時の詳細 error text は選択・コピー可能な表示にする
 - 実行失敗時は、対象 `itg-notes` block 直下へ `integral-error` fenced code block として error text を反映してよい
 - 実行成功後は `out:` の値を生成された managed file / dataset ID へ書き換える
-- 実行済み block の UI は read-only とし、削除だけ可能にする
+- 実行済み block の UI は read-only とし、Delete と Undo を可能にする
+- Undo は生成済み managed output の file / dataset folder、metadata、data-note、Markdown link / embed 参照を整理し、同じ block 定義から新しい block ID / 初期 input / 初期 params / 新しい output path を持つ draft を作り直す
 - output slot が `auto_insert_to_work_note = true` を持つ場合、app はその output を block 直下へ `![]()` として追記してよい
 - output slot が `share_note_with_input` を持つ場合、app は output の note target を指定 input の note target に合わせる
 - output slot が `embed_to_shared_note = true` を持つ場合、app は共有先 data-note へ provenance link と `![]()` を追記してよい
