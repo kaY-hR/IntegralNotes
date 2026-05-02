@@ -171,10 +171,6 @@ interface InlineAiTriggerState {
   y: number;
 }
 
-const INLINE_AI_INSERTION_PREVIEW_FRAME_MS = 24;
-const INLINE_AI_INSERTION_PREVIEW_TARGET_FRAMES = 64;
-const INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE = 2;
-const INLINE_AI_INSERTION_PREVIEW_MAX_CHARS = 12_000;
 const INLINE_AI_POPUP_WIDTH = 520;
 const INLINE_AI_STREAM_UPDATE_INTERVAL_MS = 80;
 const INLINE_AI_STREAMING_TEXT_MAX_CHARS = 12_000;
@@ -1400,56 +1396,11 @@ export function MilkdownEditor({
     streamId: string,
     markdown: string
   ): Promise<boolean> => {
-    const startedAt = performance.now();
-    const previewText = toInlineAiInsertionPreviewText(markdown);
-    logInlineAiDebugEvent("preview-start", {
+    logInlineAiDebugEvent("preview-skipped", {
       markdownLength: markdown.length,
-      previewLength: previewText.length,
-      streamId,
-      truncated: previewText.length !== markdown.trim().length
+      reason: "stability",
+      streamId
     });
-
-    if (previewText.length === 0) {
-      logInlineAiDebugEvent("preview-empty", {
-        streamId
-      });
-      return true;
-    }
-
-    const chunkSize = Math.max(
-      INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE,
-      Math.ceil(previewText.length / INLINE_AI_INSERTION_PREVIEW_TARGET_FRAMES)
-    );
-
-    for (
-      let visibleLength = chunkSize;
-      visibleLength < previewText.length;
-      visibleLength += chunkSize
-    ) {
-      const current = inlineAiPromptRef.current;
-
-      if (
-        !current ||
-        current.streamId !== streamId ||
-        activeInlineAiStreamIdRef.current !== streamId
-      ) {
-        logInlineAiDebugEvent("preview-cancelled", {
-          streamId,
-          visibleLength
-        });
-        return false;
-      }
-
-      const next = {
-        ...current,
-        streamingText: previewText.slice(0, visibleLength)
-      };
-
-      inlineAiPromptRef.current = next;
-      setInlineAiPrompt(next);
-
-      await waitInlineAiInsertionPreviewFrame();
-    }
 
     const current = inlineAiPromptRef.current;
 
@@ -1458,27 +1409,9 @@ export function MilkdownEditor({
       current.streamId !== streamId ||
       activeInlineAiStreamIdRef.current !== streamId
     ) {
-      logInlineAiDebugEvent("preview-cancelled", {
-        streamId,
-        visibleLength: previewText.length
-      });
+      logInlineAiDebugEvent("preview-skipped-cancelled", { streamId });
       return false;
     }
-
-    const next = {
-      ...current,
-      streamingText: previewText
-    };
-
-    inlineAiPromptRef.current = next;
-    setInlineAiPrompt(next);
-    await waitInlineAiInsertionPreviewFrame();
-
-    logInlineAiDebugEvent("preview-finished", {
-      durationMs: Math.round(performance.now() - startedAt),
-      previewLength: previewText.length,
-      streamId
-    });
 
     return true;
   };
@@ -2040,11 +1973,9 @@ export function MilkdownEditor({
                     {inlineAiPrompt.streamingText.length > 0 ? "Assistant streaming" : "Assistant"}
                   </span>
                   {inlineAiPrompt.streamingText.length > 0 ? (
-                    <AiMarkdown
-                      className="editor-ai-popup__message-text"
-                      compact
-                      text={inlineAiPrompt.streamingText}
-                    />
+                    <pre className="editor-ai-popup__message-text editor-ai-popup__message-text--plain">
+                      {inlineAiPrompt.streamingText}
+                    </pre>
                   ) : (
                     <div className="editor-ai-popup__thinking">
                       <span />
@@ -2424,12 +2355,6 @@ function createInlineAiStreamId(): string {
   return `inline-ai-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function waitInlineAiInsertionPreviewFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, INLINE_AI_INSERTION_PREVIEW_FRAME_MS);
-  });
-}
-
 function logInlineAiDebugEvent(
   event: string,
   details: Record<string, boolean | null | number | string | undefined> = {}
@@ -2763,20 +2688,6 @@ function toMarkdownCodeFence(content: string, language = ""): string {
   const fenceHeader = normalizedLanguage.length > 0 ? `${fence}${normalizedLanguage}` : fence;
 
   return `${fenceHeader}\n${content}\n${fence}`;
-}
-
-function toInlineAiInsertionPreviewText(markdown: string): string {
-  const trimmedMarkdown = markdown.trim();
-
-  if (trimmedMarkdown.length <= INLINE_AI_INSERTION_PREVIEW_MAX_CHARS) {
-    return trimmedMarkdown;
-  }
-
-  return [
-    trimmedMarkdown.slice(0, INLINE_AI_INSERTION_PREVIEW_MAX_CHARS),
-    "",
-    `[preview truncated: full ${trimmedMarkdown.length} chars will be inserted]`
-  ].join("\n");
 }
 
 function toInlineAiStreamingPreviewText(markdown: string): string {
