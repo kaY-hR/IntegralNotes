@@ -704,7 +704,7 @@ function IntegralBlockPanel({
       return null;
     }
 
-    return datasetMap.get(reference) ?? managedFileMap.get(reference) ?? null;
+    return resolveDataset(reference) ?? resolveManagedFile(reference);
   };
 
   const isExecutedOutputReference = (
@@ -1116,7 +1116,7 @@ function IntegralBlockPanel({
   const isExecutedBlock =
     blockDefinition?.executionMode === "manual" &&
     blockDefinition.outputSlots.length > 0 &&
-    blockDefinition.outputSlots.every((slot) =>
+    blockDefinition.outputSlots.some((slot) =>
       isExecutedOutputReference(parsed.block.outputs[slot.name] ?? null, parsed.block.id)
     );
   const paramsForm = blockDefinition?.paramsSchema ? (

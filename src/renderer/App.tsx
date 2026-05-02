@@ -2468,12 +2468,14 @@ export function App(): JSX.Element {
     });
   };
 
-  const saveNote = async (relativePath: string): Promise<void> => {
-    const tab = openTabs[relativePath];
+  const saveNote = async (relativePath: string, contentOverride?: string): Promise<void> => {
+    const tab = openTabsRef.current[relativePath];
 
     if (!isMarkdownTab(tab)) {
       return;
     }
+
+    const contentToSave = contentOverride ?? tab.content;
 
     setOpenTabs((currentTabs) => {
       const currentTab = currentTabs[relativePath];
@@ -2493,10 +2495,11 @@ export function App(): JSX.Element {
 
     try {
       const normalizedContent = normalizeIntegralBlockInputReferencesInMarkdown(
-        tab.content,
+        contentToSave,
         assetCatalog
       );
       const savedNote = await window.integralNotes.saveNote(relativePath, normalizedContent);
+      let isStillDirty = false;
 
       setOpenTabs((currentTabs) => {
         const currentTab = currentTabs[relativePath];
@@ -2505,20 +2508,25 @@ export function App(): JSX.Element {
           return currentTabs;
         }
 
+        const hasNewerContent =
+          currentTab.content !== contentToSave && currentTab.content !== savedNote.content;
+        const nextTab: OpenMarkdownTab = {
+          ...currentTab,
+          content: hasNewerContent ? currentTab.content : savedNote.content,
+          isSaving: false,
+          modifiedAt: savedNote.modifiedAt,
+          name: savedNote.name,
+          savedContent: savedNote.content
+        };
+        isStillDirty = isDirty(nextTab);
+
         return {
           ...currentTabs,
-          [relativePath]: {
-            ...currentTab,
-            content: savedNote.content,
-            isSaving: false,
-            modifiedAt: savedNote.modifiedAt,
-            name: savedNote.name,
-            savedContent: savedNote.content
-          }
+          [relativePath]: nextTab
         };
       });
 
-      syncTabLabel(relativePath, savedNote.name, false);
+      syncTabLabel(relativePath, savedNote.name, isStillDirty);
       setStatusMessage(`${savedNote.name} を保存しました`);
       await refreshWorkspace();
     } catch (error) {
@@ -3594,6 +3602,7 @@ export function App(): JSX.Element {
               openUnsupportedExternally: true
             });
           }}
+          onRequestSave={(markdown) => saveNote(relativePath, markdown)}
           onWorkspaceSnapshotChanged={(snapshot, statusMessage) => {
             applyWorkspaceSnapshot(snapshot, {
               statusMessage: statusMessage ?? "画像を workspace に保存しました"

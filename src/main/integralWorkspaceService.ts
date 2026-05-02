@@ -710,17 +710,15 @@ export class IntegralWorkspaceService {
     }
 
     const metadataList = await this.readManagedDataMetadataList();
-    const outputReferenceIds = new Set(
+    const outputReferenceKeys = collectGeneratedOutputReferenceMatchKeys(
       Object.values(request.block.outputs)
-        .map((reference) => (typeof reference === "string" ? reference.trim() : ""))
-        .filter((reference) => reference.length > 0)
     );
     const outputMetadata = metadataList.filter((metadata) => {
       if (metadata.createdByBlockId !== blockId) {
         return false;
       }
 
-      return outputReferenceIds.size === 0 || outputReferenceIds.has(metadata.id);
+      return doesGeneratedOutputReferenceMatchMetadata(metadata, outputReferenceKeys);
     });
 
     if (outputMetadata.length === 0) {
@@ -2514,6 +2512,7 @@ export class IntegralWorkspaceService {
     options: { allowMissingOutputs?: boolean } = {}
   ): Promise<Map<string, IntegralManagedFileSummary>> {
     const createdManagedFiles = new Map<string, IntegralManagedFileSummary>();
+    const missingOutputPaths: string[] = [];
 
     for (const [slotName, plan] of outputManagedFilePlanMap) {
       const existingPath = await this.resolveIfExists(plan.relativePath);
@@ -2523,7 +2522,8 @@ export class IntegralWorkspaceService {
           continue;
         }
 
-        throw new Error(`output path が作成されませんでした: ${plan.relativePath}`);
+        missingOutputPaths.push(plan.relativePath);
+        continue;
       }
 
       const stats = await fs.stat(existingPath);
@@ -2549,6 +2549,10 @@ export class IntegralWorkspaceService {
 
       await this.writeManagedFileMetadata(nextMetadata.id, nextMetadata);
       createdManagedFiles.set(slotName, this.toManagedFileSummary(nextMetadata));
+    }
+
+    if (missingOutputPaths.length > 0) {
+      throw new Error(`output path が作成されませんでした: ${missingOutputPaths.join(", ")}`);
     }
 
     return createdManagedFiles;
@@ -4403,6 +4407,66 @@ function collectGeneratedOutputReferencePaths(
   return [...referencePaths]
     .filter((relativePath) => relativePath.length > 0)
     .sort((left, right) => left.localeCompare(right, "ja"));
+}
+
+function collectGeneratedOutputReferenceMatchKeys(
+  references: readonly (string | null)[]
+): Set<string> {
+  const keys = new Set<string>();
+
+  for (const reference of references) {
+    if (typeof reference !== "string") {
+      continue;
+    }
+
+    const trimmed = reference.trim();
+
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    keys.add(trimmed);
+    const resolvedPath = resolveWorkspaceMarkdownTarget(trimmed) ?? trimmed;
+    const normalizedPath = normalizeRelativePath(resolvedPath);
+
+    if (normalizedPath.length > 0) {
+      keys.add(normalizedPath);
+      keys.add(toCanonicalWorkspaceTarget(normalizedPath));
+    }
+  }
+
+  return keys;
+}
+
+function doesGeneratedOutputReferenceMatchMetadata(
+  metadata: ManagedDataMetadata,
+  outputReferenceKeys: ReadonlySet<string>
+): boolean {
+  if (outputReferenceKeys.size === 0) {
+    return true;
+  }
+
+  const candidateKeys = [
+    metadata.id,
+    metadata.path,
+    toCanonicalWorkspaceTarget(metadata.path),
+    metadata.entityType === "dataset" ? metadata.datasetId : null,
+    metadata.entityType === "dataset" ? metadata.dataPath ?? null : null,
+    metadata.entityType === "dataset" && metadata.dataPath
+      ? toCanonicalWorkspaceTarget(metadata.dataPath)
+      : null
+  ];
+
+  return candidateKeys.some((candidate) => {
+    if (!candidate) {
+      return false;
+    }
+
+    return (
+      outputReferenceKeys.has(candidate) ||
+      outputReferenceKeys.has(normalizeRelativePath(candidate))
+    );
+  });
 }
 
 async function collectMarkdownRelativePathsForReferenceCleanup(

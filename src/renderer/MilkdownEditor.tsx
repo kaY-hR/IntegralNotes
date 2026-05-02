@@ -68,6 +68,7 @@ interface MilkdownEditorProps {
   onFocusedBlockHandled?: () => void;
   onIntegralAssetCatalogChanged: (catalog: IntegralAssetCatalog) => void;
   onOpenWorkspaceFile: (target: string) => void;
+  onRequestSave?: (markdown: string, reason?: string) => Promise<void> | void;
   onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot, statusMessage?: string) => void;
   onWorkspaceLinkError: (message: string) => void;
   relativePath: string;
@@ -188,6 +189,7 @@ export function MilkdownEditor({
   onFocusedBlockHandled,
   onIntegralAssetCatalogChanged,
   onOpenWorkspaceFile,
+  onRequestSave,
   onWorkspaceSnapshotChanged,
   onWorkspaceLinkError,
   relativePath,
@@ -205,8 +207,10 @@ export function MilkdownEditor({
   const onFocusedBlockHandledRef = useRef(onFocusedBlockHandled);
   const onIntegralAssetCatalogChangedRef = useRef(onIntegralAssetCatalogChanged);
   const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
+  const onRequestSaveRef = useRef(onRequestSave);
   const onWorkspaceSnapshotChangedRef = useRef(onWorkspaceSnapshotChanged);
   const onWorkspaceLinkErrorRef = useRef(onWorkspaceLinkError);
+  const autoSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isActiveRef = useRef(isActive);
   const lastSyncedMarkdownRef = useRef(initialValue);
   const focusedBlockIdRef = useRef(focusedBlockId ?? null);
@@ -254,6 +258,10 @@ export function MilkdownEditor({
   useEffect(() => {
     onOpenWorkspaceFileRef.current = onOpenWorkspaceFile;
   }, [onOpenWorkspaceFile]);
+
+  useEffect(() => {
+    onRequestSaveRef.current = onRequestSave;
+  }, [onRequestSave]);
 
   useEffect(() => {
     onWorkspaceSnapshotChangedRef.current = onWorkspaceSnapshotChanged;
@@ -628,6 +636,7 @@ export function MilkdownEditor({
           });
           lastSyncedMarkdownRef.current = nextMarkdown;
           onChangeRef.current(nextMarkdown);
+          queueMarkdownAutoSave(nextMarkdown, "integral-block-run");
         },
         onUndoBlockResult: ({ nextBlockSource, previousBlockSource, result }) => {
           const nextMarkdown = applyIntegralUndoResultToMarkdown(
@@ -1151,6 +1160,9 @@ export function MilkdownEditor({
       anchorPos: trigger.replaceFrom,
       documentSize: transaction.doc.content.size
     });
+    if (trigger.marker === "@@") {
+      queueCurrentMarkdownAutoSave("inline-ai-start");
+    }
 
     if (!action.promptRequired) {
       void submitInlineAiPrompt();
@@ -1587,6 +1599,7 @@ export function MilkdownEditor({
         current.anchorPos,
         prependInlineAiTranscript(result.insertion.text, buildInlineAiTranscript(nextMessages)),
         {
+          autoSaveReason: current.triggerText.startsWith("@@") ? "inline-ai-finish" : undefined,
           marker: current.triggerText,
           originalAfterText: current.afterText
         }
@@ -1631,7 +1644,7 @@ export function MilkdownEditor({
   const insertMarkdownAtPosition = (
     position: number,
     markdown: string,
-    triggerCleanup?: { marker: string; originalAfterText: string }
+    triggerCleanup?: { autoSaveReason?: string; marker: string; originalAfterText: string }
   ): void => {
     const editor = editorRef.current;
 
@@ -1703,6 +1716,10 @@ export function MilkdownEditor({
           totalDurationMs: Math.round(performance.now() - startedAt)
         });
       });
+
+      if (triggerCleanup?.autoSaveReason) {
+        queueCurrentMarkdownAutoSave(triggerCleanup.autoSaveReason);
+      }
     } catch (error) {
       logInlineAiDebugEvent("insert-error", {
         markdownLength: markdown.length,
@@ -1711,6 +1728,28 @@ export function MilkdownEditor({
       });
       throw error;
     }
+  };
+
+  const queueCurrentMarkdownAutoSave = (reason: string): void => {
+    const editor = editorRef.current;
+    const markdown = editor?.getMarkdown() ?? lastSyncedMarkdownRef.current;
+    lastSyncedMarkdownRef.current = markdown;
+    queueMarkdownAutoSave(markdown, reason);
+  };
+
+  const queueMarkdownAutoSave = (markdown: string, reason: string): void => {
+    const requestSave = onRequestSaveRef.current;
+
+    if (!requestSave) {
+      return;
+    }
+
+    autoSaveQueueRef.current = autoSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => Promise.resolve(requestSave(markdown, reason)))
+      .catch((error) => {
+        onWorkspaceLinkErrorRef.current(toErrorMessage(error));
+      });
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
