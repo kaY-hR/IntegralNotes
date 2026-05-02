@@ -16,15 +16,19 @@ import type {
   AiChatStreamEvent,
   SaveAiChatSettingsRequest,
   SaveAiChatSessionRequest,
+  SaveInlineActionRequest,
   AiChatStatus,
   SubmitAiChatRequest,
   SubmitAiChatResult,
+  SubmitInlineActionRequest,
+  SubmitInlineActionResult,
   SubmitInlineAiInsertionRequest,
   SubmitInlineAiInsertionResult,
   SubmitPromptlessContinuationRequest,
   SubmitPromptlessContinuationResult,
   SubmitInlinePythonBlockRequest,
-  SubmitInlinePythonBlockResult
+  SubmitInlinePythonBlockResult,
+  InlineActionDefinition
 } from "./aiChat";
 import type {
   CreateDatasetRequest,
@@ -373,7 +377,11 @@ export interface IntegralNotesApi {
   saveAiChatSession: (request: SaveAiChatSessionRequest) => Promise<AiChatHistorySnapshot>;
   switchAiChatSession: (sessionId: string) => Promise<AiChatHistorySnapshot>;
   deleteAiChatSession: (sessionId: string) => Promise<AiChatHistorySnapshot>;
+  listInlineActions: () => Promise<InlineActionDefinition[]>;
+  saveInlineAction: (request: SaveInlineActionRequest) => Promise<InlineActionDefinition>;
+  deleteInlineAction: (name: string) => Promise<InlineActionDefinition[]>;
   submitAiChat: (request: SubmitAiChatRequest) => Promise<SubmitAiChatResult>;
+  submitInlineAction: (request: SubmitInlineActionRequest) => Promise<SubmitInlineActionResult>;
   submitInlineAiInsertion: (
     request: SubmitInlineAiInsertionRequest
   ) => Promise<SubmitInlineAiInsertionResult>;

@@ -173,7 +173,7 @@ export function AIChatSettingsDialog({
         <div className="dialog-card__header">
           <p className="dialog-card__eyebrow">AI Chat</p>
           <h2>AI Chat Settings</h2>
-          <p>model、認証、chat / ?? / &gt;&gt; / @@ のsystem promptを設定します。</p>
+          <p>model、認証、AI Chat のsystem promptを設定します。Inline Action は専用UIで編集します。</p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--ai-chat-settings">

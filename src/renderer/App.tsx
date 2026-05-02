@@ -71,6 +71,7 @@ import {
 } from "./workspaceOpenEvents";
 import { AIChatSettingsDialog } from "./AIChatSettingsDialog";
 import { AppSettingsDialog } from "./AppSettingsDialog";
+import { InlineActionSettingsDialog } from "./InlineActionSettingsDialog";
 
 type ReadonlyWorkspaceFileKind = Exclude<WorkspaceFileViewKind, "markdown">;
 type MarkdownEditorMode = "wysiwyg" | "text";
@@ -1064,6 +1065,7 @@ export function App(): JSX.Element {
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
   const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const [aiSettingsDialogOpen, setAiSettingsDialogOpen] = useState(false);
+  const [inlineActionSettingsDialogOpen, setInlineActionSettingsDialogOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [appSettingsPending, setAppSettingsPending] = useState(false);
   const [hostCommandDialog, setHostCommandDialog] = useState<HostCommandDialogState | null>(null);
@@ -1094,6 +1096,7 @@ export function App(): JSX.Element {
     dataRegistrationDialogOpen ||
     appSettingsDialogOpen ||
     aiSettingsDialogOpen ||
+    inlineActionSettingsDialogOpen ||
     hostCommandDialog !== null;
 
   useEffect(() => {
@@ -1828,6 +1831,10 @@ export function App(): JSX.Element {
   const openAppSettingsDialog = (): void => {
     setAppSettingsDialogOpen(true);
     void loadAppSettings();
+  };
+
+  const openInlineActionSettingsDialog = (): void => {
+    setInlineActionSettingsDialogOpen(true);
   };
 
   const saveAppSettings = async (request: SaveAppSettingsRequest): Promise<void> => {
@@ -4019,6 +4026,15 @@ export function App(): JSX.Element {
         </button>
         <button
           className="button button--ghost button--menu"
+          disabled={!workspace}
+          onClick={openInlineActionSettingsDialog}
+          title={workspace ? ".inline-action を編集します" : "ワークスペースフォルダを開いてください"}
+          type="button"
+        >
+          Inline Actions
+        </button>
+        <button
+          className="button button--ghost button--menu"
           onClick={openPluginManager}
           type="button"
         >
@@ -4479,6 +4495,19 @@ export function App(): JSX.Element {
         <AIChatSettingsDialog
           onClose={() => {
             setAiSettingsDialogOpen(false);
+          }}
+          onError={setStatusMessage}
+        />
+      ) : null}
+
+      {inlineActionSettingsDialogOpen ? (
+        <InlineActionSettingsDialog
+          onChanged={() => {
+            window.dispatchEvent(new Event("integral-inline-actions-changed"));
+            setStatusMessage("Inline Action を保存しました。");
+          }}
+          onClose={() => {
+            setInlineActionSettingsDialogOpen(false);
           }}
           onError={setStatusMessage}
         />

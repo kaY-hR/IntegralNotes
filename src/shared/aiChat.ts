@@ -71,6 +71,43 @@ export interface AiChatSystemPrompts {
   promptlessContinuation: string;
 }
 
+export type InlineActionReadScope =
+  | "current-document-only"
+  | "current-document-and-selected-files"
+  | "selected-files"
+  | "same-folder"
+  | "specific-dirs"
+  | "entire-workspace";
+
+export interface InlineActionDefinition {
+  canAnswerOnly: boolean;
+  canCreatePythonBlockDraft: boolean;
+  canEditWorkspaceFiles: boolean;
+  canInsertMarkdown: boolean;
+  canRunShellCommand: boolean;
+  description: string;
+  name: string;
+  promptRequired: boolean;
+  readDirs: string[];
+  readScope: InlineActionReadScope;
+  relativePath: string;
+  systemPrompt: string;
+}
+
+export interface SaveInlineActionRequest {
+  canAnswerOnly: boolean;
+  canCreatePythonBlockDraft: boolean;
+  canEditWorkspaceFiles: boolean;
+  canInsertMarkdown: boolean;
+  canRunShellCommand: boolean;
+  description: string;
+  name: string;
+  promptRequired: boolean;
+  readDirs?: string[];
+  readScope: InlineActionReadScope;
+  systemPrompt: string;
+}
+
 export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
   chatPanel: [
     "You are the AI Chat inside IntegralNotes.",
@@ -243,6 +280,30 @@ export interface InlineAiTextInsertion {
 }
 
 export interface SubmitInlineAiInsertionResult {
+  insertion: InlineAiTextInsertion | null;
+  messages: AiChatMessage[];
+  sessionId: string;
+  text?: string;
+  userMessage: AiChatMessage;
+}
+
+export interface SubmitInlineActionRequest {
+  actionName: string;
+  afterText: string;
+  beforeText: string;
+  context: AiChatContextSummary;
+  documentMarkdown: string;
+  history: AiChatMessage[];
+  insertionPosition: number;
+  prompt: string;
+  requestedSkills?: AiChatSkillInvocation[];
+  sessionId?: string | null;
+  sourceNotePath: string;
+  streamId?: string | null;
+}
+
+export interface SubmitInlineActionResult {
+  action: InlineActionDefinition;
   insertion: InlineAiTextInsertion | null;
   messages: AiChatMessage[];
   sessionId: string;

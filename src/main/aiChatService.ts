@@ -22,13 +22,18 @@ import {
   type AiChatStreamEvent,
   type AiChatSystemPrompts,
   type AiChatToolTraceEntry,
+  type InlineActionDefinition,
+  type InlineActionReadScope,
   type InlinePythonBlockInsertion,
   type PromptlessContinuationInsertion,
   type CreateAiChatSessionRequest,
   type SaveAiChatSettingsRequest,
+  type SaveInlineActionRequest,
   type SaveAiChatSessionRequest,
   type SubmitAiChatRequest,
   type SubmitAiChatResult,
+  type SubmitInlineActionRequest,
+  type SubmitInlineActionResult,
   type SubmitInlineAiInsertionRequest,
   type SubmitInlineAiInsertionResult,
   type SubmitPromptlessContinuationRequest,
@@ -39,10 +44,19 @@ import {
 import { findExplicitAiSkillMentions, normalizeAiSkillNameKey, toAiSkillInvocation } from "../shared/aiChatSkills";
 import {
   AiAgentService,
+  type AiAgentWorkspaceToolPolicy,
   type AiAgentExecutionRuntime,
   type AiAgentStreamCallbacks
 } from "./aiAgentService";
+import {
+  createDefaultIntegralOutputPathWithRandomSuffix,
+  createDefaultIntegralParams,
+  type IntegralAssetCatalog,
+  type IntegralBlockDocument,
+  type IntegralBlockTypeDefinition
+} from "../shared/integral";
 import type { AppSettingsService } from "./appSettingsService";
+import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { WorkspaceService } from "./workspaceService";
 
 interface PersistedAiChatSettings {
@@ -126,6 +140,10 @@ const MAX_PERSISTED_CHAT_SESSIONS = 50;
 const MAX_IMAGE_ATTACHMENT_FILE_BYTES = 8_000_000;
 const MAX_INLINE_AI_CONTEXT_CHARS = 6_000;
 const MAX_INLINE_AI_DOCUMENT_CHARS = 30_000;
+const INLINE_ACTION_DIRECTORY = ".inline-action";
+const INLINE_ACTION_NAME_PATTERN = /^[A-Za-z0-9_-]+$/u;
+const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
+const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
 const TOOL_LOOP_INLINE_INSERTION_MAX_STEPS = 8;
 const TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS = 8;
 const TOOL_LOOP_PROMPTLESS_CONTINUATION_MAX_STEPS = 10;
@@ -180,7 +198,8 @@ export class AiChatService {
     private readonly workspaceService: WorkspaceService,
     private readonly appSettingsService: AppSettingsService,
     private readonly settingsFilePath: string,
-    private readonly historyFilePath: string
+    private readonly historyFilePath: string,
+    private readonly getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
   ) {}
 
   async getStatus(): Promise<AiChatStatus> {
@@ -442,6 +461,147 @@ export class AiChatService {
     return response;
   }
 
+  async listInlineActions(): Promise<InlineActionDefinition[]> {
+    return this.readInlineActions();
+  }
+
+  async saveInlineAction(request: SaveInlineActionRequest): Promise<InlineActionDefinition> {
+    const workspaceRootPath = this.workspaceService.currentRootPath;
+
+    if (!workspaceRootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const action = normalizeInlineActionSaveRequest(request);
+    const actionDirectoryPath = path.join(workspaceRootPath, INLINE_ACTION_DIRECTORY);
+    const actionPath = path.join(actionDirectoryPath, `${action.name}.md`);
+
+    await fs.mkdir(actionDirectoryPath, { recursive: true });
+    await fs.writeFile(actionPath, serializeInlineActionDefinition(action), "utf8");
+
+    return {
+      ...action,
+      relativePath: normalizeWorkspaceDisplayPath(path.join(INLINE_ACTION_DIRECTORY, `${action.name}.md`))
+    };
+  }
+
+  async deleteInlineAction(name: string): Promise<InlineActionDefinition[]> {
+    const workspaceRootPath = this.workspaceService.currentRootPath;
+
+    if (!workspaceRootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const normalizedName = normalizeInlineActionName(name);
+    const actionPath = path.join(workspaceRootPath, INLINE_ACTION_DIRECTORY, `${normalizedName}.md`);
+
+    await fs.unlink(actionPath).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    });
+
+    return this.readInlineActions();
+  }
+
+  async submitInlineAction(
+    request: SubmitInlineActionRequest,
+    options: AiChatExecutionOptions = {}
+  ): Promise<SubmitInlineActionResult> {
+    const action = await this.resolveInlineAction(request.actionName);
+    const prompt = request.prompt.trim();
+    const workspaceRootPath = this.workspaceService.currentRootPath ?? null;
+
+    if (action.promptRequired && prompt.length === 0) {
+      throw new Error("プロンプトが空です。");
+    }
+
+    const [{ runtimeSelection, status }, settings, appSettings] = await Promise.all([
+      this.resolveCurrentRuntimeSelection(),
+      this.readPersistedSettings(),
+      this.appSettingsService.getSettings()
+    ]);
+    const requestedSkills = resolveExplicitAiSkillInvocations(
+      prompt,
+      request.requestedSkills ?? [],
+      status.availableSkills
+    );
+
+    if (runtimeSelection.mode === "stub") {
+      throw new Error(buildInlineRuntimeNotConfiguredMessage(status));
+    }
+
+    const normalizedPriorMessages = request.history
+      .map(normalizeAiChatMessageForPersistence)
+      .filter(isDefined);
+    const userMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      id: createChatMessageId("user"),
+      role: "user",
+      skillInvocations: requestedSkills.length > 0 ? requestedSkills : undefined,
+      text: prompt.length > 0 ? prompt : `@@${action.name} inline action`
+    };
+    const conversationalMessages = [...normalizedPriorMessages, userMessage];
+    const skillPrompt =
+      action.canCreatePythonBlockDraft && workspaceRootPath
+        ? await readImplementIntegralBlockSkillPrompt(workspaceRootPath)
+        : "";
+    const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
+    const result = await this.generateTaskWithAgentRuntime({
+      context: request.context,
+      extraTools: createInlineActionTools({
+        action,
+        createPythonBlockDraft: (scriptPath, functionName) =>
+          this.createPythonBlockDraft(scriptPath, functionName)
+      }),
+      hostCommand: {
+        shellExecutablePath: settings.shellExecutablePath ?? null
+      },
+      instructions: appendExplicitSkillInstructions(
+        buildInlineActionInstructions(action, skillPrompt, appSettings.userId),
+        requestedSkills
+      ),
+      maxSteps: getInlineActionMaxSteps(action),
+      prompt: buildInlineActionPrompt(request, conversationalMessages, action),
+      runtimeSelection,
+      stream,
+      terminalToolNames: getInlineActionTerminalToolNames(action),
+      useWorkspaceTools: true,
+      workspaceToolPolicy: toWorkspaceToolPolicy(action)
+    });
+    const insertion = action.canInsertMarkdown
+      ? parseInlineMarkdownInsertion(result.diagnostics.toolTrace)
+      : null;
+    const assistantMessage: AiChatMessage = {
+      createdAt: new Date().toISOString(),
+      diagnostics: result.diagnostics,
+      id: createChatMessageId("assistant"),
+      role: "assistant",
+      text: result.text
+    };
+    const toolMessages = buildToolMessages(assistantMessage);
+    const responseMessages = [...toolMessages, assistantMessage];
+    const sessionId = await this.persistInlineAiSession({
+      context: request.context,
+      messages: [...conversationalMessages, ...responseMessages],
+      sessionId: request.sessionId ?? null,
+      workspaceRootPath
+    });
+
+    emitAiChatStreamEvent(request.streamId ?? null, options, {
+      type: "finished"
+    });
+
+    return {
+      action,
+      insertion,
+      messages: responseMessages,
+      sessionId,
+      ...(insertion ? { text: insertion.text } : {}),
+      userMessage
+    };
+  }
+
   async submitInlineInsertion(
     request: SubmitInlineAiInsertionRequest,
     options: AiChatExecutionOptions = {}
@@ -493,6 +653,7 @@ export class AiChatService {
       prompt: buildInlineInsertionPrompt(request, conversationalMessages),
       runtimeSelection,
       stream,
+      terminalToolNames: ["insertMarkdownAtCursor"],
       useWorkspaceTools: true
     });
     const insertion = parseInlineMarkdownInsertion(result.diagnostics.toolTrace);
@@ -589,6 +750,7 @@ export class AiChatService {
       prompt: buildInlinePythonBlockPrompt(request, conversationalMessages),
       runtimeSelection,
       stream,
+      terminalToolNames: ["insertPythonBlock"],
       useWorkspaceTools: true
     });
     const insertion = parseInlinePythonBlockInsertion(result.diagnostics.toolTrace);
@@ -682,6 +844,7 @@ export class AiChatService {
       prompt: buildPromptlessContinuationPrompt(request, conversationalMessages),
       runtimeSelection,
       stream,
+      terminalToolNames: ["insertMarkdownAtCursor", "insertPythonBlock"],
       useWorkspaceTools: true
     });
     const insertion = parsePromptlessContinuationInsertion(result.diagnostics.toolTrace);
@@ -738,6 +901,80 @@ export class AiChatService {
         `${insertion.scriptPath} に @integral_block 直下の def ${insertion.functionName}(...) が見つかりません。`
       );
     }
+  }
+
+  private async readInlineActions(): Promise<InlineActionDefinition[]> {
+    const workspaceRootPath = this.workspaceService.currentRootPath;
+
+    if (!workspaceRootPath) {
+      return getFallbackInlineActions();
+    }
+
+    const actionDirectoryPath = path.join(workspaceRootPath, INLINE_ACTION_DIRECTORY);
+    const entries = await fs.readdir(actionDirectoryPath, { withFileTypes: true }).catch(() => []);
+    const actions: InlineActionDefinition[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".md") {
+        continue;
+      }
+
+      const relativePath = normalizeWorkspaceDisplayPath(path.join(INLINE_ACTION_DIRECTORY, entry.name));
+      const absolutePath = path.join(actionDirectoryPath, entry.name);
+      const content = await fs.readFile(absolutePath, "utf8").catch(() => null);
+
+      if (content === null) {
+        continue;
+      }
+
+      actions.push(parseInlineActionDefinition(content, relativePath, path.basename(entry.name, ".md")));
+    }
+
+    return mergeFallbackInlineActions(actions).sort((left, right) =>
+      left.name.localeCompare(right.name, "ja")
+    );
+  }
+
+  private async resolveInlineAction(name: string): Promise<InlineActionDefinition> {
+    const normalizedName = normalizeInlineActionName(name);
+    const action = (await this.readInlineActions()).find((candidate) => candidate.name === normalizedName);
+
+    if (!action) {
+      throw new Error(`Inline Action が見つかりません: ${name}`);
+    }
+
+    return action;
+  }
+
+  private async createPythonBlockDraft(
+    scriptPath: string,
+    functionName: string
+  ): Promise<{
+    blockType: string;
+    markdown: string;
+  }> {
+    const integralWorkspaceService = this.getIntegralWorkspaceService?.() ?? null;
+
+    if (!integralWorkspaceService) {
+      throw new Error("Integral workspace service is not ready.");
+    }
+
+    await this.workspaceService.syncWorkspace();
+
+    const [catalog, appSettings] = await Promise.all([
+      integralWorkspaceService.listAssetCatalog(),
+      this.appSettingsService.getSettings()
+    ]);
+    const normalizedScriptPath = normalizeGeneratedScriptPath(scriptPath);
+    const normalizedFunctionName = normalizeGeneratedFunctionName(functionName);
+    const blockType = `${normalizedScriptPath}:${normalizedFunctionName}`;
+
+    return {
+      blockType,
+      markdown: createPythonBlockDraftMarkdown(catalog, blockType, {
+        outputRoot: appSettings.analysisResultDirectory
+      })
+    };
   }
 
   private async getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
@@ -1020,7 +1257,9 @@ export class AiChatService {
     prompt,
     runtimeSelection,
     stream,
-    useWorkspaceTools
+    terminalToolNames,
+    useWorkspaceTools,
+    workspaceToolPolicy
   }: {
     context: AiChatContextSummary;
     extraTools?: ToolSet;
@@ -1032,7 +1271,9 @@ export class AiChatService {
     prompt: string;
     runtimeSelection: Extract<ResolvedAiRuntime, { mode: "direct" | "gateway" }>;
     stream?: AiAgentStreamCallbacks;
+    terminalToolNames?: readonly string[];
     useWorkspaceTools: boolean;
+    workspaceToolPolicy?: AiAgentWorkspaceToolPolicy;
   }): Promise<{
     diagnostics: AiChatMessageDiagnostics;
     text: string;
@@ -1047,7 +1288,9 @@ export class AiChatService {
         prompt,
         runtime: runtimeSelection.runtime,
         stream,
-        useWorkspaceTools
+        terminalToolNames,
+        useWorkspaceTools,
+        workspaceToolPolicy
       });
 
       return {
@@ -1243,6 +1486,92 @@ function buildInlineInsertionPrompt(
   ].join("\n");
 }
 
+function buildInlineActionInstructions(
+  action: InlineActionDefinition,
+  skillPrompt: string,
+  userId: string
+): string {
+  const lines = [
+    action.systemPrompt.trim(),
+    "",
+    `Inline Action: @@${action.name}`,
+    action.description.trim().length > 0 ? `Description: ${action.description.trim()}` : "",
+    `Prompt required: ${action.promptRequired ? "yes" : "no"}`,
+    `Read scope: ${action.readScope}`,
+    "",
+    "Commit contract:",
+    action.canInsertMarkdown
+      ? "- You may call insertMarkdownAtCursor to commit exact Markdown at [CURSOR]. This is the only note commit tool."
+      : "- Do not modify the note. No note commit tool is available.",
+    action.canAnswerOnly
+      ? "- You may finish with an assistant answer without inserting Markdown."
+      : "- Do not treat answer-only prose as final completion. If more information is needed, ask in the popup; otherwise commit with insertMarkdownAtCursor.",
+    action.canEditWorkspaceFiles
+      ? "- You may persist real workspace file edits with writeWorkspaceFile when needed."
+      : "- You may not persist workspace file edits in this action.",
+    action.canCreatePythonBlockDraft
+      ? "- For Python analysis blocks, save or identify the .py callable, call createPythonBlockDraft, edit the returned Markdown draft as needed, then commit it with insertMarkdownAtCursor."
+      : "- createPythonBlockDraft is not available in this action.",
+    ""
+  ].filter((line) => line.length > 0);
+  const normalizedUserId = userId.trim();
+
+  lines.push(
+    normalizedUserId.length > 0
+      ? `Configured IntegralNotes user ID: ${normalizedUserId}. For new datatype names, prefer the ${normalizedUserId}/... namespace.`
+      : "No IntegralNotes user ID is configured. For new datatype names, use concise descriptive names and prefer a namespace if the user provides one."
+  );
+
+  if (skillPrompt.trim().length > 0) {
+    lines.push("", "# Python analysis block implementation contract", skillPrompt.trim());
+  }
+
+  return lines.join("\n");
+}
+
+function buildInlineActionPrompt(
+  request: SubmitInlineActionRequest,
+  messages: readonly AiChatMessage[],
+  action: InlineActionDefinition
+): string {
+  return [
+    "Inline action transcript:",
+    formatInlinePythonBlockTranscript(messages),
+    "",
+    `Action: @@${action.name}`,
+    `Source note path: ${request.sourceNotePath}`,
+    `Active path: ${request.context.activeRelativePath ?? "(none)"}`,
+    `Selected workspace paths: ${
+      request.context.selectedPaths.length > 0 ? request.context.selectedPaths.join(", ") : "(none)"
+    }`,
+    `Insertion position: ${formatInlineInsertionPosition(request.insertionPosition)}`,
+    `Open Markdown length: ${request.documentMarkdown.length} chars`,
+    "",
+    "Open Markdown document (current editor state):",
+    truncateInlineDocument(request.documentMarkdown),
+    "",
+    "Markdown before cursor:",
+    truncateInlineContext(request.beforeText, "tail"),
+    "",
+    "[CURSOR]",
+    "",
+    "Markdown after cursor:",
+    truncateInlineContext(request.afterText, "head"),
+    "",
+    action.promptRequired
+      ? "Respond to the latest user message under this action contract."
+      : "The user provided no prompt. Infer the useful next action from the document, cursor context, selected paths, and available evidence.",
+    action.canInsertMarkdown
+      ? "If ready to write to the note, call insertMarkdownAtCursor with exactly the Markdown that belongs at [CURSOR]."
+      : "Do not insert Markdown for this action.",
+    action.canCreatePythonBlockDraft
+      ? "For Python blocks, create or identify a callable, use createPythonBlockDraft, adjust the draft for obvious inputs/params/outputs, then insert the final Markdown."
+      : ""
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
 function createInlineMarkdownInsertionTools(): ToolSet {
   return {
     insertMarkdownAtCursor: tool({
@@ -1258,6 +1587,513 @@ function createInlineMarkdownInsertionTools(): ToolSet {
       })
     })
   };
+}
+
+function createInlineActionTools({
+  action,
+  createPythonBlockDraft
+}: {
+  action: InlineActionDefinition;
+  createPythonBlockDraft: (
+    scriptPath: string,
+    functionName: string
+  ) => Promise<{ blockType: string; markdown: string }>;
+}): ToolSet {
+  return {
+    ...(action.canInsertMarkdown ? createInlineMarkdownInsertionTools() : {}),
+    ...(action.canCreatePythonBlockDraft
+      ? {
+          createPythonBlockDraft: tool({
+            description:
+              "Create an itg-notes Markdown draft for a saved Python callable. This does not modify the note. Edit the returned Markdown as needed, then commit it with insertMarkdownAtCursor.",
+            inputSchema: z.object({
+              functionName: z.string().min(1),
+              scriptPath: z.string().min(1)
+            }),
+            execute: async ({ functionName, scriptPath }) =>
+              createPythonBlockDraft(scriptPath, functionName)
+          })
+        }
+      : {})
+  };
+}
+
+function toWorkspaceToolPolicy(action: InlineActionDefinition): AiAgentWorkspaceToolPolicy {
+  return {
+    canEditWorkspaceFiles: action.canEditWorkspaceFiles,
+    canRunShellCommand: action.canRunShellCommand,
+    readDirs: action.readDirs,
+    readScope: action.readScope
+  };
+}
+
+function getInlineActionMaxSteps(action: InlineActionDefinition): number {
+  if (!action.promptRequired) {
+    return TOOL_LOOP_PROMPTLESS_CONTINUATION_MAX_STEPS;
+  }
+
+  if (action.canEditWorkspaceFiles || action.canCreatePythonBlockDraft) {
+    return TOOL_LOOP_BLOCK_IMPLEMENTATION_MAX_STEPS;
+  }
+
+  return TOOL_LOOP_INLINE_INSERTION_MAX_STEPS;
+}
+
+function getInlineActionTerminalToolNames(action: InlineActionDefinition): string[] {
+  return action.canInsertMarkdown ? ["insertMarkdownAtCursor"] : [];
+}
+
+const INLINE_ACTION_READ_SCOPES: readonly InlineActionReadScope[] = [
+  "current-document-only",
+  "current-document-and-selected-files",
+  "selected-files",
+  "same-folder",
+  "specific-dirs",
+  "entire-workspace"
+];
+
+const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
+  {
+    canAnswerOnly: false,
+    canCreatePythonBlockDraft: true,
+    canEditWorkspaceFiles: true,
+    canInsertMarkdown: true,
+    canRunShellCommand: true,
+    description: "文脈から次の内容を自動で書き足します",
+    name: "continue",
+    promptRequired: false,
+    readDirs: [],
+    readScope: "current-document-and-selected-files",
+    relativePath: ".inline-action/continue.md",
+    systemPrompt: [
+      "You are continuing a Markdown note directly at the cursor.",
+      "Infer the user's intent from the current document and surrounding context.",
+      "Do not ask clarifying questions. Insert only the concrete Markdown that should be added.",
+      "If a Python analysis block is needed, create a draft first and then insert the final Markdown block."
+    ].join("\n")
+  },
+  {
+    canAnswerOnly: false,
+    canCreatePythonBlockDraft: false,
+    canEditWorkspaceFiles: false,
+    canInsertMarkdown: true,
+    canRunShellCommand: true,
+    description: "指示に従ってMarkdownを書き込みます",
+    name: "write",
+    promptRequired: true,
+    readDirs: [],
+    readScope: "entire-workspace",
+    relativePath: ".inline-action/write.md",
+    systemPrompt: [
+      "You are writing Markdown into the current note.",
+      "Use the user's instruction and workspace context to produce useful note content.",
+      "Commit by inserting Markdown at the cursor. Do not only answer in chat unless the action explicitly permits it."
+    ].join("\n")
+  },
+  {
+    canAnswerOnly: false,
+    canCreatePythonBlockDraft: true,
+    canEditWorkspaceFiles: true,
+    canInsertMarkdown: true,
+    canRunShellCommand: true,
+    description: "Python解析ブロックを作成して挿入します",
+    name: "mkpy",
+    promptRequired: true,
+    readDirs: [],
+    readScope: "entire-workspace",
+    relativePath: ".inline-action/mkpy.md",
+    systemPrompt: [
+      "You are creating a Python analysis block for Integral Notes.",
+      "Prefer creating or updating a Python file when implementation is needed, then create a Python block draft and insert the final Markdown.",
+      "The final commit must be Markdown insertion at the cursor."
+    ].join("\n")
+  },
+  {
+    canAnswerOnly: true,
+    canCreatePythonBlockDraft: false,
+    canEditWorkspaceFiles: false,
+    canInsertMarkdown: false,
+    canRunShellCommand: true,
+    description: "文書やワークスペースについて質問します",
+    name: "ask",
+    promptRequired: true,
+    readDirs: [],
+    readScope: "entire-workspace",
+    relativePath: ".inline-action/ask.md",
+    systemPrompt: [
+      "Answer the user's question using the current document and workspace context.",
+      "Do not edit files and do not insert Markdown. Return the answer in chat."
+    ].join("\n")
+  }
+];
+
+function getFallbackInlineActions(): InlineActionDefinition[] {
+  return FALLBACK_INLINE_ACTIONS.map((action) => ({ ...action, readDirs: [...action.readDirs] }));
+}
+
+function mergeFallbackInlineActions(actions: InlineActionDefinition[]): InlineActionDefinition[] {
+  const merged = [...actions];
+  const names = new Set(merged.map((action) => action.name));
+
+  for (const fallback of getFallbackInlineActions()) {
+    if (!names.has(fallback.name)) {
+      merged.push(fallback);
+    }
+  }
+
+  return merged;
+}
+
+function normalizeInlineActionSaveRequest(request: SaveInlineActionRequest): InlineActionDefinition {
+  const name = normalizeInlineActionName(request.name);
+  const systemPrompt = normalizeMultilineText(request.systemPrompt);
+
+  if (systemPrompt.length === 0) {
+    throw new Error("Inline Action の prompt は必須です。");
+  }
+
+  return {
+    canAnswerOnly: Boolean(request.canAnswerOnly),
+    canCreatePythonBlockDraft: Boolean(request.canCreatePythonBlockDraft),
+    canEditWorkspaceFiles: Boolean(request.canEditWorkspaceFiles),
+    canInsertMarkdown: Boolean(request.canInsertMarkdown),
+    canRunShellCommand: Boolean(request.canRunShellCommand),
+    description: normalizeInlineActionDescription(request.description),
+    name,
+    promptRequired: Boolean(request.promptRequired),
+    readDirs: normalizeReadDirs(request.readDirs),
+    readScope: normalizeInlineActionReadScope(request.readScope),
+    relativePath: `${INLINE_ACTION_DIRECTORY}/${name}.md`,
+    systemPrompt
+  };
+}
+
+function parseInlineActionDefinition(
+  content: string,
+  relativePath: string,
+  fallbackName: string
+): InlineActionDefinition {
+  const parsed = parseMarkdownFrontmatter(content);
+  const fallback = getFallbackInlineActions().find((action) => action.name === fallbackName);
+  const name = normalizeInlineActionName(parsed.metadata.name ?? fallbackName);
+  const systemPrompt = normalizeMultilineText(parsed.body) || fallback?.systemPrompt || "";
+
+  if (systemPrompt.length === 0) {
+    throw new Error(`Inline Action の prompt が空です: ${relativePath}`);
+  }
+
+  return {
+    canAnswerOnly: normalizeMetadataBoolean(parsed.metadata.canAnswerOnly, fallback?.canAnswerOnly ?? false),
+    canCreatePythonBlockDraft: normalizeMetadataBoolean(
+      parsed.metadata.canCreatePythonBlockDraft,
+      fallback?.canCreatePythonBlockDraft ?? false
+    ),
+    canEditWorkspaceFiles: normalizeMetadataBoolean(
+      parsed.metadata.canEditWorkspaceFiles,
+      fallback?.canEditWorkspaceFiles ?? false
+    ),
+    canInsertMarkdown: normalizeMetadataBoolean(
+      parsed.metadata.canInsertMarkdown,
+      fallback?.canInsertMarkdown ?? true
+    ),
+    canRunShellCommand: normalizeMetadataBoolean(
+      parsed.metadata.canRunShellCommand,
+      fallback?.canRunShellCommand ?? true
+    ),
+    description: normalizeMetadataString(parsed.metadata.description, fallback?.description ?? ""),
+    name,
+    promptRequired: normalizeMetadataBoolean(parsed.metadata.promptRequired, fallback?.promptRequired ?? true),
+    readDirs: normalizeReadDirs(parseMetadataList(parsed.metadata.readDirs) ?? fallback?.readDirs ?? []),
+    readScope: normalizeInlineActionReadScope(parsed.metadata.readScope ?? fallback?.readScope ?? "entire-workspace"),
+    relativePath,
+    systemPrompt
+  };
+}
+
+function serializeInlineActionDefinition(action: InlineActionDefinition): string {
+  const frontmatter = [
+    ["name", action.name],
+    ["description", action.description],
+    ["promptRequired", action.promptRequired],
+    ["canInsertMarkdown", action.canInsertMarkdown],
+    ["canEditWorkspaceFiles", action.canEditWorkspaceFiles],
+    ["canRunShellCommand", action.canRunShellCommand],
+    ["canCreatePythonBlockDraft", action.canCreatePythonBlockDraft],
+    ["canAnswerOnly", action.canAnswerOnly],
+    ["readScope", action.readScope],
+    ["readDirs", action.readDirs]
+  ]
+    .map(([key, value]) => `${key}: ${serializeFrontmatterValue(value)}`)
+    .join("\n");
+
+  return `---\n${frontmatter}\n---\n\n${normalizeMultilineText(action.systemPrompt)}\n`;
+}
+
+function normalizeInlineActionName(value: unknown): string {
+  const name = typeof value === "string" ? value.trim() : "";
+
+  if (!INLINE_ACTION_NAME_PATTERN.test(name)) {
+    throw new Error("Inline Action 名は ASCII 英数字、ハイフン、アンダースコアのみ使用できます。");
+  }
+
+  return name;
+}
+
+function normalizeInlineActionDescription(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeMultilineText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : "";
+}
+
+function normalizeInlineActionReadScope(value: unknown): InlineActionReadScope {
+  const scope = typeof value === "string" ? value.trim() : "";
+
+  return (INLINE_ACTION_READ_SCOPES as readonly string[]).includes(scope)
+    ? (scope as InlineActionReadScope)
+    : "entire-workspace";
+}
+
+function normalizeReadDirs(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean))];
+}
+
+function parseMarkdownFrontmatter(content: string): { body: string; metadata: Record<string, string> } {
+  const normalized = content.replace(/^\uFEFF/u, "").replace(/\r\n/g, "\n");
+
+  if (!normalized.startsWith("---\n")) {
+    return { body: normalized.trim(), metadata: {} };
+  }
+
+  const end = normalized.indexOf("\n---", 4);
+
+  if (end < 0) {
+    return { body: normalized.trim(), metadata: {} };
+  }
+
+  const frontmatter = normalized.slice(4, end);
+  const bodyStart = normalized.startsWith("\n", end + 4) ? end + 5 : end + 4;
+  const metadata: Record<string, string> = {};
+
+  for (const line of frontmatter.split("\n")) {
+    const separator = line.indexOf(":");
+
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+
+    if (key.length > 0) {
+      metadata[key] = stripYamlQuotes(value);
+    }
+  }
+
+  return { body: normalized.slice(bodyStart).trim(), metadata };
+}
+
+function serializeFrontmatterValue(value: unknown): string {
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => quoteYamlString(String(item))).join(", ")}]`;
+  }
+
+  return quoteYamlString(typeof value === "string" ? value : String(value ?? ""));
+}
+
+function stripYamlQuotes(value: string): string {
+  const trimmed = value.trim();
+
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
+function quoteYamlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function normalizeMetadataString(value: string | undefined, fallback: string): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function normalizeMetadataBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (["true", "yes", "on", "1"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "no", "off", "0"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function parseMetadataList(value: string | undefined): string[] | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    return [];
+  }
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed
+      .slice(1, -1)
+      .split(",")
+      .map((item) => stripYamlQuotes(item.trim()))
+      .filter(Boolean);
+  }
+
+  return trimmed
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function createPythonBlockDraftMarkdown(
+  catalog: IntegralAssetCatalog,
+  blockType: string,
+  options: { outputRoot: string | null }
+): string {
+  const definition =
+    catalog.blockTypes.find(
+      (candidate) =>
+        candidate.pluginId === GENERAL_ANALYSIS_PLUGIN_ID && candidate.blockType === blockType
+    ) ?? catalog.blockTypes.find((candidate) => candidate.blockType === blockType);
+
+  if (!definition) {
+    return toIntegralCodeBlock(
+      serializeIntegralBlockContent({
+        "block-type": blockType,
+        id: createIntegralBlockId(),
+        inputs: {},
+        outputs: {},
+        params: {},
+        plugin: GENERAL_ANALYSIS_PLUGIN_ID
+      })
+    );
+  }
+
+  return toIntegralCodeBlock(serializeIntegralBlockContent(createInitialIntegralBlock(definition, options)));
+}
+
+function createInitialIntegralBlock(
+  definition: IntegralBlockTypeDefinition,
+  options: { outputRoot: string | null }
+): IntegralBlockDocument {
+  return {
+    "block-type": definition.blockType,
+    id: createIntegralBlockId(),
+    inputs: Object.fromEntries(definition.inputSlots.map((slot) => [slot.name, null])),
+    outputs: Object.fromEntries(
+      definition.outputSlots.map((slot) => [
+        slot.name,
+        createDefaultIntegralOutputPathWithRandomSuffix(slot, {
+          analysisDisplayName: definition.title,
+          outputRoot: options.outputRoot
+        })
+      ])
+    ),
+    params: createDefaultIntegralParams(definition.paramsSchema),
+    plugin: definition.pluginId
+  };
+}
+
+function serializeIntegralBlockContent(block: IntegralBlockDocument): string {
+  const document: Record<string, unknown> = {
+    id: block.id ?? createIntegralBlockId(),
+    [block.plugin === GENERAL_ANALYSIS_PLUGIN_ID ? "run" : "use"]:
+      block.plugin === GENERAL_ANALYSIS_PLUGIN_ID ? block["block-type"] : `${block.plugin}/${block["block-type"]}`,
+    in: block.inputs
+  };
+
+  if (Object.keys(block.params).length > 0) {
+    document.params = block.params;
+  }
+
+  document.out = block.outputs;
+
+  return serializeSimpleYamlDocument(document);
+}
+
+function toIntegralCodeBlock(content: string): string {
+  return [`\`\`\`${INTEGRAL_BLOCK_LANGUAGE}`, content, "```"].join("\n");
+}
+
+function serializeSimpleYamlDocument(value: Record<string, unknown>): string {
+  return serializeSimpleYamlObject(value, 0);
+}
+
+function serializeSimpleYamlObject(value: Record<string, unknown>, indent: number): string {
+  let result = "";
+  const prefix = " ".repeat(indent);
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === undefined) {
+      continue;
+    }
+
+    if (isRecord(entry) && Object.keys(entry).length > 0) {
+      result += `${prefix}${key}:\n${serializeSimpleYamlObject(entry, indent + 2)}`;
+      continue;
+    }
+
+    if (isRecord(entry)) {
+      result += `${prefix}${key}: {}\n`;
+      continue;
+    }
+
+    result += `${prefix}${key}: ${serializeYamlScalar(entry)}\n`;
+  }
+
+  return result;
+}
+
+function serializeYamlScalar(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => serializeYamlScalar(item)).join(", ")}]`;
+  }
+
+  return quoteYamlString(typeof value === "string" ? value : JSON.stringify(value));
+}
+
+function createIntegralBlockId(): string {
+  return `BLK-${Date.now().toString(36).toUpperCase()}${Math.random()
+    .toString(36)
+    .slice(2, 6)
+    .toUpperCase()}`;
 }
 
 function createInlinePythonBlockTools(): ToolSet {

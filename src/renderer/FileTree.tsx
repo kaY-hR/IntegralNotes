@@ -323,6 +323,7 @@ function FileTreeNode({
               onActivateEntry={onActivateEntry}
               onCancelEditing={onCancelEditing}
               onContextMenuEntry={onContextMenuEntry}
+              onDoubleActivateEntry={onDoubleActivateEntry}
               onDragEnd={onDragEnd}
               onDragOverEntry={onDragOverEntry}
               onDragStartEntry={onDragStartEntry}

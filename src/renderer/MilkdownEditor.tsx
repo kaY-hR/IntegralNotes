@@ -28,8 +28,7 @@ import type {
   AiChatSkillSummary,
   AiChatStreamEvent,
   AiChatToolTraceEntry,
-  InlinePythonBlockInsertion,
-  PromptlessContinuationInsertion
+  InlineActionDefinition
 } from "../shared/aiChat";
 import {
   findActiveAiSkillTrigger,
@@ -49,10 +48,8 @@ import {
   initializeIntegralPluginRuntime
 } from "./integralPluginRuntime";
 import {
-  GENERAL_ANALYSIS_PLUGIN_ID,
   INTEGRAL_BLOCK_LANGUAGE,
   createInitialIntegralBlock,
-  createPythonIntegralBlockMarkdown,
   parseIntegralBlockSource,
   serializeIntegralBlockContent,
   toIntegralCodeBlock
@@ -116,10 +113,20 @@ interface AnalysisCompletionState {
   y: number;
 }
 
-type InlineAiMode = "insert-text" | "python-block" | "promptless-continuation";
+interface InlineActionCompletionState {
+  query: string;
+  replaceFrom: number;
+  replaceTo: number;
+  selectedIndex: number;
+  x: number;
+  y: number;
+}
+
+type InlineAiMode = "inline-action" | "inline-action-picker";
 type InlineAiTriggerMarker = "??" | ">>" | "@@";
 
 interface InlineAiPromptState {
+  action: InlineActionDefinition | null;
   afterText: string;
   anchorPos: number;
   beforeText: string;
@@ -133,6 +140,7 @@ interface InlineAiPromptState {
   streamId: string | null;
   streamingText: string;
   streamingToolTrace: AiChatToolTraceEntry[];
+  triggerText: string;
   x: number;
   y: number;
 }
@@ -150,12 +158,14 @@ interface InlineAiSkillCompletionState extends AiSkillTextTrigger {
 }
 
 interface InlineAiTriggerState {
+  actionName: string | null;
   afterText: string;
   beforeText: string;
   marker: InlineAiTriggerMarker;
   mode: InlineAiMode;
   replaceFrom: number;
   replaceTo: number;
+  triggerText: string;
   x: number;
   y: number;
 }
@@ -198,12 +208,14 @@ export function MilkdownEditor({
   const focusedBlockIdRef = useRef(focusedBlockId ?? null);
   const linkCompletionRef = useRef<LinkCompletionState | null>(null);
   const analysisCompletionRef = useRef<AnalysisCompletionState | null>(null);
+  const inlineActionCompletionRef = useRef<InlineActionCompletionState | null>(null);
   const inlineAiPromptRef = useRef<InlineAiPromptState | null>(null);
   const inlineAiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const activeInlineAiStreamIdRef = useRef<string | null>(null);
   const completionPanelRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
   const selectedEntryPathsRef = useRef<string[]>(selectedEntryPaths);
+  const availableInlineActionsRef = useRef<InlineActionDefinition[]>([]);
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
     collectWorkspaceFileSuggestions(workspaceEntries)
   );
@@ -211,10 +223,13 @@ export function MilkdownEditor({
   const workspaceRootNameRef = useRef<string | null>(workspaceRootName);
   const [linkCompletion, setLinkCompletion] = useState<LinkCompletionState | null>(null);
   const [analysisCompletion, setAnalysisCompletion] = useState<AnalysisCompletionState | null>(null);
+  const [inlineActionCompletion, setInlineActionCompletion] =
+    useState<InlineActionCompletionState | null>(null);
   const [inlineAiPrompt, setInlineAiPrompt] = useState<InlineAiPromptState | null>(null);
   const [inlineAiSkillCompletion, setInlineAiSkillCompletion] =
     useState<InlineAiSkillCompletionState | null>(null);
   const [availableAiSkills, setAvailableAiSkills] = useState<AiChatSkillSummary[]>([]);
+  const [availableInlineActions, setAvailableInlineActions] = useState<InlineActionDefinition[]>([]);
 
   useEffect(() => {
     analysisResultDirectoryRef.current = analysisResultDirectory ?? null;
@@ -250,6 +265,7 @@ export function MilkdownEditor({
     if (!isActive) {
       setLinkCompletion(null);
       setAnalysisCompletion(null);
+      setInlineActionCompletion(null);
       activeInlineAiStreamIdRef.current = null;
       inlineAiDragStateRef.current = null;
       setInlineAiSkillCompletion(null);
@@ -270,6 +286,10 @@ export function MilkdownEditor({
   useEffect(() => {
     workspaceRootNameRef.current = workspaceRootName;
   }, [workspaceRootName]);
+
+  useEffect(() => {
+    availableInlineActionsRef.current = availableInlineActions;
+  }, [availableInlineActions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -296,12 +316,61 @@ export function MilkdownEditor({
   }, [workspaceRootName]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadInlineActions = async (): Promise<void> => {
+      try {
+        const actions = await window.integralNotes.listInlineActions();
+
+        if (!cancelled) {
+          setAvailableInlineActions(actions);
+        }
+      } catch {
+        if (!cancelled) {
+          setAvailableInlineActions([]);
+        }
+      }
+    };
+
+    void loadInlineActions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceRootName]);
+
+  useEffect(() => {
+    const reloadInlineActions = (): void => {
+      void window.integralNotes
+        .listInlineActions()
+        .then((actions) => {
+          availableInlineActionsRef.current = actions;
+          setAvailableInlineActions(actions);
+        })
+        .catch(() => {
+          availableInlineActionsRef.current = [];
+          setAvailableInlineActions([]);
+        });
+    };
+
+    window.addEventListener("integral-inline-actions-changed", reloadInlineActions);
+
+    return () => {
+      window.removeEventListener("integral-inline-actions-changed", reloadInlineActions);
+    };
+  }, []);
+
+  useEffect(() => {
     linkCompletionRef.current = linkCompletion;
   }, [linkCompletion]);
 
   useEffect(() => {
     analysisCompletionRef.current = analysisCompletion;
   }, [analysisCompletion]);
+
+  useEffect(() => {
+    inlineActionCompletionRef.current = inlineActionCompletion;
+  }, [inlineActionCompletion]);
 
   useEffect(() => {
     inlineAiPromptRef.current = inlineAiPrompt;
@@ -360,7 +429,7 @@ export function MilkdownEditor({
   }, []);
 
   useEffect(() => {
-    if (!inlineAiPrompt || inlineAiPrompt.mode === "promptless-continuation") {
+    if (!inlineAiPrompt || inlineAiPrompt.mode !== "inline-action" || inlineAiPrompt.isSubmitting) {
       return;
     }
 
@@ -376,7 +445,7 @@ export function MilkdownEditor({
   useEffect(() => {
     const completionPanel = completionPanelRef.current;
 
-    if (!completionPanel || (!linkCompletion && !analysisCompletion)) {
+    if (!completionPanel || (!linkCompletion && !analysisCompletion && !inlineActionCompletion)) {
       return;
     }
 
@@ -387,7 +456,7 @@ export function MilkdownEditor({
     selectedItem?.scrollIntoView({
       block: "nearest"
     });
-  }, [analysisCompletion, linkCompletion]);
+  }, [analysisCompletion, inlineActionCompletion, linkCompletion]);
 
   useEffect(() => {
     const rootElement = rootRef.current;
@@ -536,10 +605,26 @@ export function MilkdownEditor({
           const inlineTrigger = computeInlineAiTriggerState(view, selection);
 
           if (inlineTrigger && !inlineAiPromptRef.current) {
-            if (inlineTrigger.mode === "promptless-continuation") {
-              startPromptlessContinuation(view, inlineTrigger);
+            if (inlineTrigger.marker === "@@") {
+              const action = resolveInlineActionForTrigger(inlineTrigger);
+              const actionSuggestions = getVisibleInlineActionSuggestions(
+                availableInlineActionsRef.current,
+                inlineTrigger.actionName ?? ""
+              );
+
+              if (action && inlineTrigger.actionName === action.name && actionSuggestions.length === 1) {
+                setInlineActionCompletion(null);
+                startInlineAction(view, inlineTrigger, action);
+              } else {
+                openInlineActionCompletion(inlineTrigger);
+              }
             } else {
-              openInlineAiPrompt(view, inlineTrigger);
+              const action = resolveInlineActionForTrigger(inlineTrigger);
+
+              if (action) {
+                setInlineActionCompletion(null);
+                startInlineAction(view, inlineTrigger, action);
+              }
             }
             return;
           }
@@ -547,15 +632,18 @@ export function MilkdownEditor({
           if (inlineAiPromptRef.current) {
             setLinkCompletion(null);
             setAnalysisCompletion(null);
+            setInlineActionCompletion(null);
             return;
           }
 
+          setInlineActionCompletion(null);
           setLinkCompletion(computeLinkCompletionState(view, selection));
           setAnalysisCompletion(computeAnalysisCompletionState(view, selection));
         });
         listener.blur(() => {
           setLinkCompletion(null);
           setAnalysisCompletion(null);
+          setInlineActionCompletion(null);
         });
       });
 
@@ -603,6 +691,58 @@ export function MilkdownEditor({
     const handleEditorKeyDown = (event: KeyboardEvent): void => {
       if (!isActiveRef.current) {
         return;
+      }
+
+      const inlineActionState = inlineActionCompletionRef.current;
+
+      if (inlineActionState) {
+        const suggestions = getVisibleInlineActionSuggestions(
+          availableInlineActionsRef.current,
+          inlineActionState.query
+        );
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setInlineActionCompletion(null);
+          return;
+        }
+
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (suggestions.length === 0) {
+            return;
+          }
+
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          setInlineActionCompletion((current) =>
+            current
+              ? {
+                  ...current,
+                  selectedIndex:
+                    (Math.min(current.selectedIndex, suggestions.length - 1) +
+                      direction +
+                      suggestions.length) %
+                    suggestions.length
+                }
+              : current
+          );
+          return;
+        }
+
+        if ((event.key === "Enter" || event.key === "Tab") && suggestions.length > 0) {
+          const selectedAction =
+            suggestions[Math.min(inlineActionState.selectedIndex, suggestions.length - 1)];
+
+          if (selectedAction) {
+            event.preventDefault();
+            event.stopPropagation();
+            completeInlineActionFromCompletion(selectedAction);
+            return;
+          }
+        }
       }
 
       const analysisState = analysisCompletionRef.current;
@@ -789,6 +929,16 @@ export function MilkdownEditor({
           analysisCompletion?.selectedIndex ?? 0,
           visibleIntegralBlockSuggestions.length - 1
         );
+  const visibleInlineActionSuggestions = inlineActionCompletion
+    ? getVisibleInlineActionSuggestions(availableInlineActions, inlineActionCompletion.query)
+    : [];
+  const selectedInlineActionSuggestionIndex =
+    visibleInlineActionSuggestions.length === 0
+      ? -1
+      : Math.min(
+          inlineActionCompletion?.selectedIndex ?? 0,
+          visibleInlineActionSuggestions.length - 1
+        );
   const visibleInlineAiSkillSuggestions = inlineAiSkillCompletion
     ? getAiSkillSuggestions(availableAiSkills, inlineAiSkillCompletion.query)
     : [];
@@ -800,8 +950,83 @@ export function MilkdownEditor({
           visibleInlineAiSkillSuggestions.length - 1
         );
 
-  const openInlineAiPrompt = (view: EditorView, trigger: InlineAiTriggerState): void => {
+  const resolveInlineActionForTrigger = (
+    trigger: InlineAiTriggerState
+  ): InlineActionDefinition | null => {
+    const actionName =
+      trigger.actionName ??
+      (trigger.marker === "??" ? "continue" : trigger.marker === ">>" ? "mkpy" : null);
+
+    if (!actionName) {
+      return null;
+    }
+
+    return availableInlineActionsRef.current.find((action) => action.name === actionName) ?? null;
+  };
+
+  const openInlineActionCompletion = (trigger: InlineAiTriggerState): void => {
+    const query = trigger.actionName ?? "";
+    const current = inlineActionCompletionRef.current;
+    const nextCompletion: InlineActionCompletionState = {
+      query,
+      replaceFrom: trigger.replaceFrom,
+      replaceTo: trigger.replaceTo,
+      selectedIndex:
+        current &&
+        current.replaceFrom === trigger.replaceFrom &&
+        current.replaceTo === trigger.replaceTo
+          ? current.selectedIndex
+          : 0,
+      x: trigger.x,
+      y: trigger.y
+    };
+
+    inlineActionCompletionRef.current = nextCompletion;
+    setInlineActionCompletion(nextCompletion);
+    setInlineAiSkillCompletion(null);
+    setLinkCompletion(null);
+    setAnalysisCompletion(null);
+  };
+
+  const completeInlineActionFromCompletion = (action: InlineActionDefinition): void => {
+    const editor = editorRef.current;
+    const completion = inlineActionCompletionRef.current;
+
+    if (!editor || !completion) {
+      return;
+    }
+
+    editor.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const trigger: InlineAiTriggerState = {
+        actionName: action.name,
+        afterText: view.state.doc.textBetween(
+          completion.replaceTo,
+          view.state.doc.content.size,
+          "\n",
+          "\0"
+        ),
+        beforeText: view.state.doc.textBetween(0, completion.replaceFrom, "\n", "\0"),
+        marker: "@@",
+        mode: "inline-action",
+        replaceFrom: completion.replaceFrom,
+        replaceTo: completion.replaceTo,
+        triggerText: `@@${completion.query}`,
+        x: completion.x,
+        y: completion.y
+      };
+
+      startInlineAction(view, trigger, action);
+    });
+  };
+
+  const startInlineAction = (
+    view: EditorView,
+    trigger: InlineAiTriggerState,
+    action: InlineActionDefinition
+  ): void => {
     const nextPrompt: InlineAiPromptState = {
+      action,
       afterText: trigger.afterText,
       anchorPos: trigger.replaceFrom,
       beforeText: trigger.beforeText,
@@ -809,50 +1034,20 @@ export function MilkdownEditor({
       error: null,
       isSubmitting: false,
       messages: [],
-      mode: trigger.mode,
+      mode: "inline-action",
       prompt: "",
       sessionId: null,
       streamId: null,
       streamingText: "",
       streamingToolTrace: [],
+      triggerText: trigger.triggerText,
       x: trigger.x,
       y: trigger.y
     };
 
     inlineAiPromptRef.current = nextPrompt;
     setInlineAiPrompt(nextPrompt);
-    setInlineAiSkillCompletion(null);
-    setLinkCompletion(null);
-    setAnalysisCompletion(null);
-
-    const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
-    transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
-    view.dispatch(transaction.scrollIntoView());
-  };
-
-  const startPromptlessContinuation = (view: EditorView, trigger: InlineAiTriggerState): void => {
-    const streamId = createInlineAiStreamId();
-    const nextPrompt: InlineAiPromptState = {
-      afterText: trigger.afterText,
-      anchorPos: trigger.replaceFrom,
-      beforeText: trigger.beforeText,
-      documentMarkdown: lastSyncedMarkdownRef.current,
-      error: null,
-      isSubmitting: true,
-      messages: [],
-      mode: "promptless-continuation",
-      prompt: "",
-      sessionId: null,
-      streamId,
-      streamingText: "",
-      streamingToolTrace: [],
-      x: trigger.x,
-      y: trigger.y
-    };
-
-    inlineAiPromptRef.current = nextPrompt;
-    activeInlineAiStreamIdRef.current = streamId;
-    setInlineAiPrompt(nextPrompt);
+    setInlineActionCompletion(null);
     setInlineAiSkillCompletion(null);
     setLinkCompletion(null);
     setAnalysisCompletion(null);
@@ -861,17 +1056,39 @@ export function MilkdownEditor({
     transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
     view.dispatch(transaction.scrollIntoView());
 
-    void submitPromptlessContinuation(nextPrompt);
+    if (!action.promptRequired) {
+      void submitInlineAiPrompt();
+    }
   };
 
-  const closeInlineAiPrompt = (): void => {
-    if (inlineAiPromptRef.current?.isSubmitting) {
+  const selectInlineAction = (action: InlineActionDefinition): void => {
+    const current = inlineAiPromptRef.current;
+
+    if (!current || current.mode !== "inline-action-picker") {
       return;
     }
 
+    const nextPrompt: InlineAiPromptState = {
+      ...current,
+      action,
+      error: null,
+      mode: "inline-action",
+      prompt: ""
+    };
+
+    inlineAiPromptRef.current = nextPrompt;
+    setInlineAiPrompt(nextPrompt);
+
+    if (!action.promptRequired) {
+      void submitInlineAiPrompt();
+    }
+  };
+
+  const closeInlineAiPrompt = (): void => {
     inlineAiDragStateRef.current = null;
     inlineAiPromptRef.current = null;
     activeInlineAiStreamIdRef.current = null;
+    setInlineActionCompletion(null);
     setInlineAiSkillCompletion(null);
     setInlineAiPrompt(null);
     editorRef.current?.editor.action((ctx) => {
@@ -1138,7 +1355,14 @@ export function MilkdownEditor({
     const current = inlineAiPromptRef.current;
     const editor = editorRef.current;
 
-    if (!current || !editor || current.isSubmitting || current.prompt.trim().length === 0) {
+    if (
+      !current ||
+      !editor ||
+      current.mode !== "inline-action" ||
+      !current.action ||
+      current.isSubmitting ||
+      (current.action.promptRequired && current.prompt.trim().length === 0)
+    ) {
       return;
     }
 
@@ -1159,150 +1383,39 @@ export function MilkdownEditor({
     setInlineAiPrompt(submittingState);
 
     try {
-      if (current.mode === "insert-text") {
-        const result = await window.integralNotes.submitInlineAiInsertion({
-          afterText: current.afterText,
-          beforeText: current.beforeText,
-          context: buildInlineAiContextSummary(current),
-          documentMarkdown: current.documentMarkdown,
-          history: current.messages,
-          insertionPosition: current.anchorPos,
-          prompt: current.prompt,
-          requestedSkills,
-          sessionId: current.sessionId,
-          sourceNotePath: relativePath,
-          streamId
-        });
-        const nextMessages = [...current.messages, result.userMessage, ...result.messages];
-
-        if (!result.insertion) {
-          const nextState = {
-            ...current,
-            error: null,
-            isSubmitting: false,
-            messages: nextMessages,
-            prompt: "",
-            sessionId: result.sessionId,
-            streamId: null,
-            streamingText: "",
-            streamingToolTrace: []
-          };
-
-          activeInlineAiStreamIdRef.current = null;
-          inlineAiPromptRef.current = nextState;
-          setInlineAiPrompt(nextState);
-          return;
-        }
-
-        const shouldInsert = await playInlineAiInsertionPreview(streamId, result.insertion.text);
-
-        if (!shouldInsert) {
-          return;
-        }
-
-        insertMarkdownAtPosition(
-          current.anchorPos,
-          prependInlineAiTranscript(
-            result.insertion.text,
-            buildInlineAiTranscript(nextMessages)
-          ),
-          {
-            marker: "??",
-            originalAfterText: current.afterText
-          }
-        );
-      } else {
-        const result = await window.integralNotes.submitInlinePythonBlock({
-          afterText: current.afterText,
-          beforeText: current.beforeText,
-          context: buildInlineAiContextSummary(current),
-          documentMarkdown: current.documentMarkdown,
-          history: current.messages,
-          insertionPosition: current.anchorPos,
-          prompt: current.prompt,
-          requestedSkills,
-          sessionId: current.sessionId,
-          sourceNotePath: relativePath,
-          streamId
-        });
-        const nextMessages = [...current.messages, result.userMessage, ...result.messages];
-
-        if (!result.insertion) {
-          const nextState = {
-            ...current,
-            error: null,
-            isSubmitting: false,
-            messages: nextMessages,
-            prompt: "",
-            sessionId: result.sessionId,
-            streamId: null,
-            streamingText: "",
-            streamingToolTrace: []
-          };
-
-          activeInlineAiStreamIdRef.current = null;
-          inlineAiPromptRef.current = nextState;
-          setInlineAiPrompt(nextState);
-          return;
-        }
-
-        await insertInlinePythonBlockResult(
-          current.anchorPos,
-          result.insertion,
-          current.afterText,
-          buildInlineAiTranscript(nextMessages)
-        );
-      }
-
-      inlineAiPromptRef.current = null;
-      activeInlineAiStreamIdRef.current = null;
-      setInlineAiPrompt(null);
-    } catch (error) {
-      const nextState = {
-        ...current,
-        error: toErrorMessage(error),
-        isSubmitting: false,
-        streamId: null,
-        streamingText: "",
-        streamingToolTrace: []
-      };
-
-      activeInlineAiStreamIdRef.current = null;
-      inlineAiPromptRef.current = nextState;
-      setInlineAiPrompt(nextState);
-    }
-  };
-
-  const submitPromptlessContinuation = async (
-    current: InlineAiPromptState
-  ): Promise<void> => {
-    const editor = editorRef.current;
-    const streamId = current.streamId;
-
-    if (!editor || current.mode !== "promptless-continuation" || !streamId) {
-      return;
-    }
-
-    try {
-      const result = await window.integralNotes.submitPromptlessContinuation({
+      const result = await window.integralNotes.submitInlineAction({
+        actionName: current.action.name,
         afterText: current.afterText,
         beforeText: current.beforeText,
         context: buildInlineAiContextSummary(current),
         documentMarkdown: current.documentMarkdown,
         history: current.messages,
         insertionPosition: current.anchorPos,
+        prompt: current.prompt,
+        requestedSkills,
         sessionId: current.sessionId,
         sourceNotePath: relativePath,
         streamId
       });
+
+      if (
+        activeInlineAiStreamIdRef.current !== streamId ||
+        inlineAiPromptRef.current?.streamId !== streamId
+      ) {
+        return;
+      }
+
       const nextMessages = [...current.messages, result.userMessage, ...result.messages];
 
       if (!result.insertion) {
         const nextState = {
           ...current,
-          error: "AI が挿入内容を確定しませんでした。必要なら ?? で明示的に指示してください。",
+          error: current.action.canAnswerOnly
+            ? null
+            : "AI が挿入内容を確定しませんでした。必要なら追加で指示してください。",
           isSubmitting: false,
           messages: nextMessages,
+          prompt: "",
           sessionId: result.sessionId,
           streamId: null,
           streamingText: "",
@@ -1315,17 +1428,32 @@ export function MilkdownEditor({
         return;
       }
 
-      await insertPromptlessContinuationResult(
+      const shouldInsert = await playInlineAiInsertionPreview(streamId, result.insertion.text);
+
+      if (!shouldInsert) {
+        return;
+      }
+
+      insertMarkdownAtPosition(
         current.anchorPos,
-        result.insertion,
-        current.afterText,
-        streamId
+        prependInlineAiTranscript(result.insertion.text, buildInlineAiTranscript(nextMessages)),
+        {
+          marker: current.triggerText,
+          originalAfterText: current.afterText
+        }
       );
 
       inlineAiPromptRef.current = null;
       activeInlineAiStreamIdRef.current = null;
       setInlineAiPrompt(null);
     } catch (error) {
+      if (
+        activeInlineAiStreamIdRef.current !== streamId ||
+        inlineAiPromptRef.current?.streamId !== streamId
+      ) {
+        return;
+      }
+
       const nextState = {
         ...current,
         error: toErrorMessage(error),
@@ -1341,39 +1469,10 @@ export function MilkdownEditor({
     }
   };
 
-  const insertPromptlessContinuationResult = async (
-    anchorPos: number,
-    insertion: PromptlessContinuationInsertion,
-    originalAfterText: string,
-    streamId: string
-  ): Promise<void> => {
-    if (insertion.kind === "markdown") {
-      const shouldInsert = await playInlineAiInsertionPreview(streamId, insertion.markdown.text);
-
-      if (!shouldInsert) {
-        return;
-      }
-
-      insertMarkdownAtPosition(anchorPos, insertion.markdown.text, {
-        marker: "@@",
-        originalAfterText
-      });
-      return;
-    }
-
-    await insertInlinePythonBlockResult(
-      anchorPos,
-      insertion.pythonBlock,
-      originalAfterText,
-      "",
-      "@@"
-    );
-  };
-
   const insertMarkdownAtPosition = (
     position: number,
     markdown: string,
-    triggerCleanup?: { marker: InlineAiTriggerMarker; originalAfterText: string }
+    triggerCleanup?: { marker: string; originalAfterText: string }
   ): void => {
     const editor = editorRef.current;
 
@@ -1416,53 +1515,6 @@ export function MilkdownEditor({
       view.dispatch(transaction.scrollIntoView());
       view.focus();
     });
-  };
-
-  const insertInlinePythonBlockResult = async (
-    anchorPos: number,
-    insertion: InlinePythonBlockInsertion,
-    originalAfterText: string,
-    transcript: string,
-    marker: InlineAiTriggerMarker = ">>"
-  ): Promise<void> => {
-    const snapshot = await window.integralNotes.syncWorkspace();
-
-    if (snapshot) {
-      onWorkspaceSnapshotChangedRef.current(
-        snapshot,
-        `${insertion.scriptPath} を AI で作成しました`
-      );
-    }
-
-    const catalog = await window.integralNotes.getIntegralAssetCatalog();
-    onIntegralAssetCatalogChangedRef.current(catalog);
-
-    const blockType = `${insertion.scriptPath}:${insertion.functionName}`;
-    const definition =
-      catalog.blockTypes.find(
-        (candidate) =>
-          candidate.pluginId === GENERAL_ANALYSIS_PLUGIN_ID && candidate.blockType === blockType
-      ) ?? null;
-    const blockMarkdown = definition
-      ? toIntegralCodeBlock(
-          serializeIntegralBlockContent(
-            createInitialIntegralBlock(definition, {
-              outputRoot: analysisResultDirectoryRef.current
-            })
-          )
-        )
-      : createPythonIntegralBlockMarkdown(blockType, {
-          outputRoot: analysisResultDirectoryRef.current
-        });
-
-    insertMarkdownAtPosition(
-      anchorPos,
-      prependInlineAiTranscript(blockMarkdown, transcript),
-      {
-        marker,
-        originalAfterText
-      }
-    );
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
@@ -1703,17 +1755,21 @@ export function MilkdownEditor({
             onPointerUp={stopInlineAiPopupDrag}
           >
             <strong>
-              {inlineAiPrompt.mode === "insert-text"
-                ? "AI 挿入"
-                : inlineAiPrompt.mode === "python-block"
-                  ? "Python block 生成"
-                  : "@@ 続き生成"}
+              {inlineAiPrompt.mode === "inline-action-picker"
+                ? "@@ Inline Action"
+                : inlineAiPrompt.action
+                  ? `@@${inlineAiPrompt.action.name}`
+                  : "Inline Action"}
             </strong>
             <button
               aria-label="閉じる"
               className="editor-ai-popup__close"
-              disabled={inlineAiPrompt.isSubmitting}
               onClick={closeInlineAiPrompt}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                closeInlineAiPrompt();
+              }}
               type="button"
             >
               ×
@@ -1774,12 +1830,46 @@ export function MilkdownEditor({
               ) : null}
             </div>
           ) : null}
-          {inlineAiPrompt.mode === "promptless-continuation" ? (
+          {inlineAiPrompt.mode === "inline-action-picker" ? (
+            <div className="editor-ai-popup__picker">
+              {availableInlineActions.length > 0 ? (
+                availableInlineActions.map((action) => (
+                  <button
+                    className="editor-ai-popup__picker-item"
+                    key={action.name}
+                    onClick={() => {
+                      selectInlineAction(action);
+                    }}
+                    type="button"
+                  >
+                    <strong>@@{action.name}</strong>
+                    <span>{action.description || action.relativePath}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="editor-ai-popup__status">
+                  Inline Action が見つかりません。
+                </div>
+              )}
+              {inlineAiPrompt.error ? (
+                <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
+              ) : null}
+              <div className="editor-ai-popup__actions">
+                <button
+                  className="button button--ghost button--xs"
+                  onClick={closeInlineAiPrompt}
+                  type="button"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          ) : inlineAiPrompt.action && !inlineAiPrompt.action.promptRequired ? (
             <>
               <div className="editor-ai-popup__status">
                 {inlineAiPrompt.isSubmitting
-                  ? "@@ から続きを生成しています"
-                  : "@@ の処理を停止しました"}
+                  ? `@@${inlineAiPrompt.action.name} を実行しています`
+                  : `@@${inlineAiPrompt.action.name} の処理を停止しました`}
               </div>
               {inlineAiPrompt.error ? (
                 <div className="editor-ai-popup__error">{inlineAiPrompt.error}</div>
@@ -1830,13 +1920,11 @@ export function MilkdownEditor({
                   }
                 }}
                 placeholder={
-                  inlineAiPrompt.mode === "insert-text"
-                    ? inlineAiPrompt.messages.length > 0
-                      ? "追加の指示や回答を入力"
-                      : "挿入したい内容を指示"
-                    : inlineAiPrompt.messages.length > 0
-                      ? "追加の指示や回答を入力"
-                      : "実装したい解析 block を指示"
+                  inlineAiPrompt.messages.length > 0
+                    ? "追加の指示や回答を入力"
+                    : inlineAiPrompt.action?.name === "mkpy"
+                      ? "実装したい解析 block を指示"
+                      : "実行したい内容を指示"
                 }
                 ref={inlineAiTextareaRef}
                 rows={4}
@@ -1870,7 +1958,10 @@ export function MilkdownEditor({
                 </button>
                 <button
                   className="button button--primary button--xs"
-                  disabled={inlineAiPrompt.isSubmitting || inlineAiPrompt.prompt.trim().length === 0}
+                  disabled={
+                    inlineAiPrompt.isSubmitting ||
+                    Boolean(inlineAiPrompt.action?.promptRequired && inlineAiPrompt.prompt.trim().length === 0)
+                  }
                   type="submit"
                 >
                   {inlineAiPrompt.isSubmitting
@@ -1883,6 +1974,43 @@ export function MilkdownEditor({
             </>
           )}
         </form>
+      ) : null}
+      {inlineActionCompletion ? (
+        <div
+          className="editor-link-completion"
+          ref={completionPanelRef}
+          style={{
+            left: `${inlineActionCompletion.x}px`,
+            top: `${inlineActionCompletion.y}px`
+          }}
+        >
+          {visibleInlineActionSuggestions.length > 0 ? (
+            visibleInlineActionSuggestions.map((action, index) => (
+              <button
+                className={`editor-link-completion__item${
+                  index === selectedInlineActionSuggestionIndex
+                    ? " editor-link-completion__item--selected"
+                    : ""
+                }`}
+                key={action.name}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                }}
+                onClick={() => {
+                  completeInlineActionFromCompletion(action);
+                }}
+                type="button"
+              >
+                <span className="editor-link-completion__name">@@{action.name}</span>
+                {action.description ? (
+                  <span className="editor-link-completion__path">{action.description}</span>
+                ) : null}
+              </button>
+            ))
+          ) : (
+            <span className="editor-link-completion__empty">一致する Inline Action がありません</span>
+          )}
+        </div>
       ) : null}
       {analysisCompletion ? (
         <div
@@ -1993,12 +2121,13 @@ function computeInlineAiTriggerState(
   const { $from, from } = selection;
   const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
   const currentLineBefore = textBefore.slice(textBefore.lastIndexOf("\n") + 1);
+  const commandMatch = /^@@([A-Za-z0-9_-]+)?$/u.exec(currentLineBefore);
   const marker: InlineAiTriggerMarker | null =
     currentLineBefore === "??"
       ? "??"
       : currentLineBefore === ">>"
         ? ">>"
-        : currentLineBefore === "@@"
+        : commandMatch
           ? "@@"
           : null;
 
@@ -2006,7 +2135,8 @@ function computeInlineAiTriggerState(
     return null;
   }
 
-  const replaceFrom = from - marker.length;
+  const triggerText = currentLineBefore;
+  const replaceFrom = from - triggerText.length;
   const replaceTo = from;
 
   try {
@@ -2014,17 +2144,14 @@ function computeInlineAiTriggerState(
     const popupLayout = computePopupLayout(coords);
 
     return {
+      actionName: commandMatch?.[1] ?? null,
       afterText: view.state.doc.textBetween(replaceTo, view.state.doc.content.size, "\n", "\0"),
       beforeText: view.state.doc.textBetween(0, replaceFrom, "\n", "\0"),
       marker,
-      mode:
-        marker === "??"
-          ? "insert-text"
-          : marker === ">>"
-            ? "python-block"
-            : "promptless-continuation",
+      mode: marker === "@@" && !commandMatch?.[1] ? "inline-action-picker" : "inline-action",
       replaceFrom,
       replaceTo,
+      triggerText,
       x: clampPopupCoordinate(coords.left, INLINE_AI_POPUP_WIDTH, window.innerWidth),
       y: popupLayout.y
     };
@@ -2246,6 +2373,19 @@ function getVisibleIntegralBlockSuggestions(
     });
 
   return ranked.map((entry) => entry.definition);
+}
+
+function getVisibleInlineActionSuggestions(
+  actions: readonly InlineActionDefinition[],
+  query: string
+): InlineActionDefinition[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase("ja");
+  const candidates =
+    normalizedQuery.length === 0
+      ? actions
+      : actions.filter((action) => action.name.toLocaleLowerCase("ja").startsWith(normalizedQuery));
+
+  return [...candidates].sort((left, right) => left.name.localeCompare(right.name, "ja"));
 }
 
 function scoreWorkspaceSuggestion(
