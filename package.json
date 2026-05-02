@@ -30,16 +30,8 @@
     },
     "extraResources": [
       {
-        "from": "scripts/integral",
-        "to": "python-sdk/integral"
-      },
-      {
-        "from": "Notes/.codex/skills",
-        "to": "workspace-skills/codex/skills"
-      },
-      {
-        "from": "Notes/.claude/skills",
-        "to": "workspace-skills/claude/skills"
+        "from": "Notes",
+        "to": "workspace-template"
       }
     ],
     "files": [

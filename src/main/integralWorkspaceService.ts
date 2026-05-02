@@ -817,7 +817,7 @@ export class IntegralWorkspaceService {
   }
 
   private async ensureWorkspacePythonSdkReady(): Promise<void> {
-    const sourcePackageRootPath = resolveBundledPythonSdkPackageTemplatePath();
+    const sourcePackageRootPath = await resolveBundledPythonSdkPackageTemplatePath();
     const targetPackageRootPath = this.resolveWorkspacePythonSdkPackagePath();
 
     if (areSameNormalizedPath(sourcePackageRootPath, targetPackageRootPath)) {
@@ -4600,12 +4600,27 @@ function buildPythonExecutionLogText({
   ].join("\n");
 }
 
-function resolveBundledPythonSdkPackageTemplatePath(): string {
-  if (process.env.VITE_DEV_SERVER_URL) {
-    return path.resolve(__dirname, "../../scripts/integral");
+async function resolveBundledPythonSdkPackageTemplatePath(): Promise<string> {
+  const developmentSourcePath = path.resolve(__dirname, "../../Notes/scripts/integral");
+  const legacyDevelopmentSourcePath = path.resolve(__dirname, "../../scripts/integral");
+  const packagedSourcePath = path.join(
+    process.resourcesPath,
+    "workspace-template",
+    "scripts",
+    "integral"
+  );
+  const legacyPackagedSourcePath = path.join(process.resourcesPath, "python-sdk", "integral");
+  const candidatePaths = process.env.VITE_DEV_SERVER_URL
+    ? [developmentSourcePath, legacyDevelopmentSourcePath, packagedSourcePath, legacyPackagedSourcePath]
+    : [packagedSourcePath, legacyPackagedSourcePath, developmentSourcePath, legacyDevelopmentSourcePath];
+
+  for (const candidatePath of candidatePaths) {
+    if (await pathExists(candidatePath)) {
+      return candidatePath;
+    }
   }
 
-  return path.join(process.resourcesPath, "python-sdk", "integral");
+  return candidatePaths[0] ?? developmentSourcePath;
 }
 
 function isRenderableExtension(

@@ -45,6 +45,7 @@ const api: IntegralNotesApi = {
   getWorkspaceSnapshot: () => ipcRenderer.invoke("workspace:getSnapshot"),
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
   syncWorkspace: () => ipcRenderer.invoke("workspace:sync"),
+  applyWorkspaceTemplate: () => ipcRenderer.invoke("workspace:applyTemplate"),
   zoomIn: () => adjustZoomLevel("in"),
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),

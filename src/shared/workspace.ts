@@ -58,6 +58,15 @@ export interface WorkspaceSnapshot {
   entries: WorkspaceEntry[];
 }
 
+export interface ApplyWorkspaceTemplateResult {
+  copiedDirectoryCount: number;
+  copiedFileCount: number;
+  skippedEntryCount: number;
+  snapshot: WorkspaceSnapshot;
+  templateSourcePath: string;
+  updatedRelativePaths: string[];
+}
+
 export interface NoteDocument {
   kind: "markdown";
   relativePath: string;
@@ -303,6 +312,7 @@ export interface IntegralNotesApi {
   getWorkspaceSnapshot: () => Promise<WorkspaceSnapshot | null>;
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   syncWorkspace: () => Promise<WorkspaceSnapshot | null>;
+  applyWorkspaceTemplate: () => Promise<ApplyWorkspaceTemplateResult | null>;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;

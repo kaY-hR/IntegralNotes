@@ -1659,6 +1659,40 @@ export function App(): JSX.Element {
     }
   };
 
+  const applyWorkspaceTemplate = async (): Promise<void> => {
+    if (!workspace) {
+      setStatusMessage("ワークスペースフォルダを開いてください。");
+      return;
+    }
+
+    setLoadingWorkspace(true);
+
+    try {
+      const result = await window.integralNotes.applyWorkspaceTemplate();
+
+      if (!result) {
+        setStatusMessage("初期化/更新をキャンセルしました。");
+        return;
+      }
+
+      invalidateWorkspaceRuntime();
+      applyWorkspaceSnapshot(result.snapshot, {
+        statusMessage:
+          `template を展開しました: ${result.copiedFileCount} files` +
+          (result.skippedEntryCount > 0 ? ` / skipped ${result.skippedEntryCount}` : "")
+      });
+      await Promise.all([
+        reloadWorkspaceTabsFromDisk(result.updatedRelativePaths),
+        refreshManagedDataTrackingIssues(),
+        refreshAssetCatalog()
+      ]);
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    } finally {
+      setLoadingWorkspace(false);
+    }
+  };
+
   const resolveTrackingIssue = async (
     action: ResolveIntegralManagedDataTrackingIssueRequest["action"],
     selectedPath?: string
@@ -3957,6 +3991,17 @@ export function App(): JSX.Element {
           type="button"
         >
           VSCodeで開く
+        </button>
+        <button
+          className="button button--ghost button--menu"
+          disabled={!workspace || loadingWorkspace}
+          onClick={() => {
+            void applyWorkspaceTemplate();
+          }}
+          title={workspace ? "workspace template を強制上書き展開します" : "ワークスペースフォルダを開いてください"}
+          type="button"
+        >
+          初期化/更新
         </button>
         <button
           className="button button--ghost button--menu"

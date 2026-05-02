@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import {
   findInstalledPluginViewerByExtension,
@@ -37,7 +39,8 @@ import {
   WorkspaceSearchResult,
   WorkspaceEntryKind,
   WorkspaceFileDocument,
-  WorkspaceSnapshot
+  WorkspaceSnapshot,
+  type ApplyWorkspaceTemplateResult
 } from "../shared/workspace";
 import {
   toCanonicalWorkspaceTarget,
@@ -72,27 +75,25 @@ interface PersistedWorkspaceState {
 }
 
 interface EnsureWorkspaceReadyOptions {
-  forceSkillBootstrap?: boolean;
+  skipTemplateAutoInitialize?: boolean;
 }
+
+interface WorkspaceTemplateCopyStats {
+  copiedDirectoryCount: number;
+  copiedFileCount: number;
+  skippedEntryCount: number;
+  updatedRelativePaths: string[];
+  mutations: WorkspaceMutation[];
+}
+
+const execFileAsync = promisify(execFile);
 
 const DATA_DIRECTORY = "Data";
 const STORE_DIRECTORY = ".store";
 const STORE_METADATA_DIRECTORY = ".integral";
 const DATA_NOTE_DIRECTORY = "data-notes";
-const WORKSPACE_SKILL_BOOTSTRAPS = [
-  {
-    destinationRelativePath: path.join(".claude", "skills"),
-    bundledSourceRelativePath: path.join("workspace-skills", "claude", "skills"),
-    developmentSourceRelativePath: path.join("Notes", ".claude", "skills"),
-    workspaceSourceRelativePath: path.join("Notes", ".claude", "skills")
-  },
-  {
-    destinationRelativePath: path.join(".codex", "skills"),
-    bundledSourceRelativePath: path.join("workspace-skills", "codex", "skills"),
-    developmentSourceRelativePath: path.join("Notes", ".codex", "skills"),
-    workspaceSourceRelativePath: path.join("Notes", ".codex", "skills")
-  }
-] as const;
+const WORKSPACE_TEMPLATE_RESOURCE_DIRECTORY = "workspace-template";
+const WORKSPACE_TEMPLATE_DEVELOPMENT_DIRECTORY = "Notes";
 const HTML_EXTENSIONS = new Set([".htm", ".html"]);
 const IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp"]);
 const TEXT_EXTENSIONS = new Set([
@@ -152,7 +153,7 @@ export type WorkspaceMutationListener = (
 export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
-  private readonly bootstrappedSkillRootPaths = new Set<string>();
+  private readonly templateAutoCheckedRootPaths = new Set<string>();
   private readonly mutationListeners = new Set<WorkspaceMutationListener>();
   private pluginRegistry: PluginRegistry | null = null;
   private readonly stateFilePath: string;
@@ -187,7 +188,8 @@ export class WorkspaceService {
 
   async setRootPath(nextRootPath: string): Promise<WorkspaceSnapshot> {
     this.rootPath = path.resolve(nextRootPath);
-    await this.ensureWorkspaceReady({ forceSkillBootstrap: true });
+    this.templateAutoCheckedRootPaths.delete(this.rootPath);
+    await this.ensureWorkspaceReady();
     await this.persistState();
 
     const snapshot = await this.getSnapshot();
@@ -209,9 +211,9 @@ export class WorkspaceService {
       }),
       fs.mkdir(path.join(rootPath, STORE_DIRECTORY, STORE_METADATA_DIRECTORY), { recursive: true })
     ]);
-    await this.syncWorkspaceSkillBootstraps(rootPath, {
-      force: options.forceSkillBootstrap === true
-    });
+    if (options.skipTemplateAutoInitialize !== true) {
+      await this.ensureWorkspaceTemplateAutoInitialized(rootPath);
+    }
     await this.syncManagedDataNotesInternal(rootPath);
   }
 
@@ -250,12 +252,38 @@ export class WorkspaceService {
       return null;
     }
 
-    await this.ensureWorkspaceReady({ forceSkillBootstrap: true });
+    await this.ensureWorkspaceReady();
 
     return {
       rootName: path.basename(rootPath) || rootPath,
       rootPath,
       entries: await this.readDirectoryEntries("")
+    };
+  }
+
+  async applyWorkspaceTemplate(): Promise<ApplyWorkspaceTemplateResult> {
+    const rootPath = this.getConfiguredRootPath();
+
+    await this.ensureWorkspaceReady({ skipTemplateAutoInitialize: true });
+
+    const templateSourcePath = await this.resolveWorkspaceTemplateRootPath();
+
+    if (!templateSourcePath) {
+      throw new Error("workspace template が見つかりません。");
+    }
+
+    const copyStats = await this.copyWorkspaceTemplate(templateSourcePath, rootPath);
+    this.templateAutoCheckedRootPaths.add(rootPath);
+    await this.syncManagedDataNotesInternal(rootPath);
+    await this.emitWorkspaceMutations(copyStats.mutations);
+
+    return {
+      copiedDirectoryCount: copyStats.copiedDirectoryCount,
+      copiedFileCount: copyStats.copiedFileCount,
+      skippedEntryCount: copyStats.skippedEntryCount,
+      snapshot: await this.getRequiredSnapshot(),
+      templateSourcePath,
+      updatedRelativePaths: copyStats.updatedRelativePaths
     };
   }
 
@@ -783,42 +811,133 @@ export class WorkspaceService {
     return `data:${inferMimeType(absolutePath)};base64,${content.toString("base64")}`;
   }
 
-  private async syncWorkspaceSkillBootstraps(
-    rootPath: string,
-    options: {
-      force?: boolean;
-    } = {}
-  ): Promise<void> {
-    if (!options.force && this.bootstrappedSkillRootPaths.has(rootPath)) {
+  private async ensureWorkspaceTemplateAutoInitialized(rootPath: string): Promise<void> {
+    if (this.templateAutoCheckedRootPaths.has(rootPath)) {
       return;
     }
 
-    await Promise.all(
-      WORKSPACE_SKILL_BOOTSTRAPS.map(async (bootstrap) => {
-        const sourceAbsolutePath = await resolveWorkspaceSkillBootstrapSourcePath(
-          rootPath,
-          bootstrap
-        );
+    this.templateAutoCheckedRootPaths.add(rootPath);
 
-        if (!sourceAbsolutePath) {
-          return;
-        }
+    const templateSourcePath = await this.resolveWorkspaceTemplateRootPath();
 
-        const destinationAbsolutePath = path.join(rootPath, bootstrap.destinationRelativePath);
+    if (!templateSourcePath || isSamePath(templateSourcePath, rootPath)) {
+      return;
+    }
 
-        if (isSamePath(sourceAbsolutePath, destinationAbsolutePath)) {
-          return;
-        }
+    if (!(await isWorkspaceEmptyForTemplate(rootPath))) {
+      return;
+    }
 
-        await fs.mkdir(path.dirname(destinationAbsolutePath), { recursive: true });
-        await fs.cp(sourceAbsolutePath, destinationAbsolutePath, {
-          errorOnExist: false,
-          force: true,
-          recursive: true
-        });
-      })
+    const copyStats = await this.copyWorkspaceTemplate(templateSourcePath, rootPath);
+    await this.emitWorkspaceMutations(copyStats.mutations);
+  }
+
+  private async resolveWorkspaceTemplateRootPath(): Promise<string | null> {
+    const candidatePaths = resolveWorkspaceTemplateRootCandidatePaths();
+
+    for (const candidatePath of candidatePaths) {
+      if (await directoryExists(candidatePath)) {
+        return candidatePath;
+      }
+    }
+
+    return null;
+  }
+
+  private async copyWorkspaceTemplate(
+    sourceRootPath: string,
+    destinationRootPath: string
+  ): Promise<WorkspaceTemplateCopyStats> {
+    const resolvedSourceRootPath = path.resolve(sourceRootPath);
+    const resolvedDestinationRootPath = path.resolve(destinationRootPath);
+    const stats: WorkspaceTemplateCopyStats = {
+      copiedDirectoryCount: 0,
+      copiedFileCount: 0,
+      skippedEntryCount: 0,
+      updatedRelativePaths: [],
+      mutations: []
+    };
+
+    if (isSamePath(resolvedSourceRootPath, resolvedDestinationRootPath)) {
+      return stats;
+    }
+
+    await fs.mkdir(resolvedDestinationRootPath, { recursive: true });
+    await this.copyWorkspaceTemplateEntries(
+      resolvedSourceRootPath,
+      resolvedSourceRootPath,
+      resolvedDestinationRootPath,
+      stats
     );
-    this.bootstrappedSkillRootPaths.add(rootPath);
+
+    return stats;
+  }
+
+  private async copyWorkspaceTemplateEntries(
+    sourceRootPath: string,
+    currentSourcePath: string,
+    destinationRootPath: string,
+    stats: WorkspaceTemplateCopyStats
+  ): Promise<void> {
+    const sourceEntries = await fs.readdir(currentSourcePath, { withFileTypes: true });
+
+    for (const entry of sourceEntries) {
+      const sourcePath = path.join(currentSourcePath, entry.name);
+      const relativePath = normalizeRelativePath(path.relative(sourceRootPath, sourcePath));
+
+      if (relativePath.length === 0 || relativePath.startsWith("..")) {
+        stats.skippedEntryCount += 1;
+        continue;
+      }
+
+      if (entry.isSymbolicLink()) {
+        stats.skippedEntryCount += 1;
+        continue;
+      }
+
+      const destinationPath = path.resolve(destinationRootPath, ...relativePath.split("/"));
+      assertPathStaysWithinRoot(destinationRootPath, destinationPath, relativePath);
+
+      if (entry.isDirectory()) {
+        const existed = await pathExists(destinationPath);
+
+        await fs.mkdir(destinationPath, { recursive: true });
+
+        if (!existed) {
+          stats.copiedDirectoryCount += 1;
+          stats.mutations.push({
+            kind: "create",
+            path: relativePath,
+            targetKind: "directory"
+          });
+        }
+
+        await this.copyWorkspaceTemplateEntries(
+          sourceRootPath,
+          sourcePath,
+          destinationRootPath,
+          stats
+        );
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        stats.skippedEntryCount += 1;
+        continue;
+      }
+
+      const existed = await pathExists(destinationPath);
+
+      await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+      await fs.copyFile(sourcePath, destinationPath);
+      stats.copiedFileCount += 1;
+      stats.updatedRelativePaths.push(relativePath);
+      stats.mutations.push({
+        kind: existed ? "modify" : "create",
+        path: relativePath,
+        targetKind: "file"
+      });
+    }
   }
 
   private async ensureDirectoryPath(relativePath: string): Promise<string> {
@@ -1809,42 +1928,66 @@ function assertDestinationIsOutsideSource(
   }
 }
 
-async function resolveWorkspaceSkillBootstrapSourcePath(
-  rootPath: string,
-  bootstrap: (typeof WORKSPACE_SKILL_BOOTSTRAPS)[number]
-): Promise<string | null> {
-  const workspaceSourcePath = path.join(rootPath, bootstrap.workspaceSourceRelativePath);
-
-  if (await directoryExists(workspaceSourcePath)) {
-    return workspaceSourcePath;
-  }
-
-  const bundledSourcePaths = resolveBundledWorkspaceSkillBootstrapSourcePaths(bootstrap);
-
-  for (const bundledSourcePath of bundledSourcePaths) {
-    if (await directoryExists(bundledSourcePath)) {
-      return bundledSourcePath;
-    }
-  }
-
-  return null;
-}
-
-function resolveBundledWorkspaceSkillBootstrapSourcePaths(
-  bootstrap: (typeof WORKSPACE_SKILL_BOOTSTRAPS)[number]
-): string[] {
+function resolveWorkspaceTemplateRootCandidatePaths(): string[] {
   const developmentSourcePath = path.resolve(
     __dirname,
     "../..",
-    bootstrap.developmentSourceRelativePath
+    WORKSPACE_TEMPLATE_DEVELOPMENT_DIRECTORY
   );
-  const packagedSourcePath = path.join(process.resourcesPath, bootstrap.bundledSourceRelativePath);
+  const packagedSourcePath = path.join(
+    process.resourcesPath,
+    WORKSPACE_TEMPLATE_RESOURCE_DIRECTORY
+  );
 
   if (process.env.VITE_DEV_SERVER_URL) {
     return [developmentSourcePath, packagedSourcePath];
   }
 
   return [packagedSourcePath, developmentSourcePath];
+}
+
+async function isWorkspaceEmptyForTemplate(rootPath: string): Promise<boolean> {
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name.startsWith(".")) {
+      continue;
+    }
+
+    if (await hasWindowsHiddenAttribute(path.join(rootPath, entry.name))) {
+      continue;
+    }
+
+    return false;
+  }
+
+  return true;
+}
+
+async function hasWindowsHiddenAttribute(targetPath: string): Promise<boolean> {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  try {
+    const { stdout } = await execFileAsync("attrib", [targetPath], {
+      windowsHide: true
+    });
+    const firstLine = stdout.split(/\r?\n/u).find((line) => line.trim().length > 0) ?? "";
+    const attributeSegment = firstLine.slice(0, Math.max(0, firstLine.search(/[A-Za-z]:\\/u)));
+
+    return /\bH\b/u.test(attributeSegment.replace(/\s+/gu, " "));
+  } catch {
+    return false;
+  }
+}
+
+function assertPathStaysWithinRoot(rootPath: string, candidatePath: string, displayPath: string): void {
+  const relativePath = path.relative(rootPath, candidatePath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    throw new Error(`workspace template の展開先が workspace 外です: ${displayPath}`);
+  }
 }
 
 async function createCopyDestinationPath(

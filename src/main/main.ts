@@ -465,6 +465,39 @@ function registerIpcHandlers(): void {
     mainWindow?.setTitle(formatWindowTitle(snapshot));
     return snapshot;
   });
+  ipcMain.handle("workspace:applyTemplate", async () => {
+    if (!mainWindow) {
+      throw new Error("main window is not available.");
+    }
+
+    const rootPath = workspaceService.currentRootPath;
+
+    if (!rootPath) {
+      throw new Error("workspace folder is not open.");
+    }
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      buttons: ["キャンセル", "初期化/更新"],
+      cancelId: 0,
+      defaultId: 0,
+      detail:
+        `${rootPath}\n\n` +
+        "workspace template の同じ相対パスにあるファイルで上書きします。template から削除されたファイルは削除しません。",
+      message: "現在の workspace を template で初期化/更新しますか？",
+      noLink: true,
+      title: "Workspace の初期化/更新",
+      type: "warning"
+    });
+
+    if (result.response !== 1) {
+      return null;
+    }
+
+    const applyResult = await workspaceService.applyWorkspaceTemplate();
+    mainWindow.setTitle(formatWindowTitle(applyResult.snapshot));
+
+    return applyResult;
+  });
   ipcMain.handle("workspace:openFolder", async () => {
     if (!mainWindow) {
       return null;
