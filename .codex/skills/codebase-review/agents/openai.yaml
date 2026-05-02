@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codebase Review"
+  short_description: "Scan source for design and logic risks"
+  default_prompt: "Use $codebase-review to scan src for bloated design, weak logic, and maintainability risks."
