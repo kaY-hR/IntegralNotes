@@ -111,6 +111,7 @@ const TEXT_EXTENSIONS = new Set([
 const EXTERNAL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/u;
 const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".inline-action",
   ".next",
   ".store",
   ".turbo",

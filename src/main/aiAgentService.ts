@@ -3,6 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import {
   ToolLoopAgent,
   createGateway,
+  hasToolCall,
   stepCountIs,
   tool,
   type LanguageModel,
@@ -21,7 +22,8 @@ import {
   type AiChatMessage,
   type AiChatMessageDiagnostics,
   type AiChatSkillInvocation,
-  type AiChatToolTraceEntry
+  type AiChatToolTraceEntry,
+  type InlineActionReadScope
 } from "../shared/aiChat";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
@@ -56,6 +58,7 @@ const IMAGE_FILE_EXTENSIONS = new Set([
 ]);
 const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
   ".git",
+  ".inline-action",
   ".integral-ai-skills",
   "dist",
   "dist-electron",
@@ -76,6 +79,18 @@ interface AiHostCommandExecutor {
 
 interface AiAgentHostCommandOptions {
   shellExecutablePath?: string | null;
+}
+
+export interface AiAgentWorkspaceToolPolicy {
+  canEditWorkspaceFiles?: boolean;
+  canRunShellCommand?: boolean;
+  readDirs?: string[];
+  readScope?: InlineActionReadScope;
+}
+
+interface AiAgentReadAccess {
+  canRead: (relativePath: string) => boolean;
+  description: string;
 }
 
 export interface AiAgentStreamCallbacks {
@@ -129,7 +144,7 @@ export class AiAgentService {
     text: string;
   }> {
     const { model, providerOptions } = this.createLanguageModel(runtime);
-    const toolContext = await this.createToolContext(hostCommand);
+    const toolContext = await this.createToolContext(context, hostCommand);
     const agent = new ToolLoopAgent({
       instructions: buildAgentInstructions(context, toolContext, systemPrompt),
       model,
@@ -182,7 +197,9 @@ export class AiAgentService {
     runtime,
     hostCommand,
     stream,
-    useWorkspaceTools
+    terminalToolNames,
+    useWorkspaceTools,
+    workspaceToolPolicy
   }: {
     context: AiChatContextSummary;
     extraTools?: ToolSet;
@@ -192,15 +209,18 @@ export class AiAgentService {
     prompt: string;
     runtime: AiAgentExecutionRuntime;
     stream?: AiAgentStreamCallbacks;
+    terminalToolNames?: readonly string[];
     useWorkspaceTools: boolean;
+    workspaceToolPolicy?: AiAgentWorkspaceToolPolicy;
   }): Promise<{
     diagnostics: AiChatMessageDiagnostics;
     text: string;
   }> {
     const { model, providerOptions } = this.createLanguageModel(runtime);
     const toolContext = useWorkspaceTools
-      ? await this.createToolContext(hostCommand)
+      ? await this.createToolContext(context, hostCommand, workspaceToolPolicy)
       : {
+          readScopeDescription: "workspace tools disabled",
           skillCount: 0,
           tools: {},
           workspaceMounted: false
@@ -209,11 +229,15 @@ export class AiAgentService {
       ...toolContext.tools,
       ...(extraTools ?? {})
     };
+    const stopWhen =
+      terminalToolNames && terminalToolNames.length > 0
+        ? [stepCountIs(maxSteps), ...terminalToolNames.map((toolName) => hasToolCall(toolName))]
+        : stepCountIs(maxSteps);
     const agent = new ToolLoopAgent({
       instructions: buildTaskInstructions(instructions, context, toolContext),
       model,
       providerOptions: providerOptions as any,
-      stopWhen: stepCountIs(maxSteps),
+      stopWhen,
       tools
     });
     const messages: ModelMessage[] = [
@@ -367,7 +391,12 @@ export class AiAgentService {
     }
   }
 
-  private async createToolContext(hostCommand?: AiAgentHostCommandOptions): Promise<{
+  private async createToolContext(
+    context: AiChatContextSummary,
+    hostCommand?: AiAgentHostCommandOptions,
+    workspaceToolPolicy?: AiAgentWorkspaceToolPolicy
+  ): Promise<{
+    readScopeDescription: string;
     skillCount: number;
     tools: ToolSet;
     workspaceMounted: boolean;
@@ -376,17 +405,20 @@ export class AiAgentService {
 
     if (!workspaceRootPath) {
       return {
-      skillCount: 0,
+        readScopeDescription: "workspace not open",
+        skillCount: 0,
         tools: {},
         workspaceMounted: false
       };
     }
 
+    const effectivePolicy = normalizeWorkspaceToolPolicy(workspaceToolPolicy);
+    const readAccess = createReadAccess(context, effectivePolicy);
     const { experimental_createSkillTool, createBashTool } =
       await importEsmModule<typeof import("bash-tool")>("bash-tool");
     const skillsDirectoryPath = path.join(workspaceRootPath, ".codex", "skills");
     const [workspaceFiles, skillToolkit] = await Promise.all([
-      collectWorkspaceFiles(workspaceRootPath),
+      collectWorkspaceFiles(workspaceRootPath, readAccess),
       (await directoryExists(skillsDirectoryPath))
         ? experimental_createSkillTool({
             destination: AGENT_SKILLS_DESTINATION,
@@ -409,10 +441,13 @@ export class AiAgentService {
       this.workspaceVisualRenderService,
       this.getIntegralWorkspaceService,
       this.hostCommandExecutor,
-      hostCommand
+      hostCommand,
+      effectivePolicy,
+      readAccess
     );
 
     return {
+      readScopeDescription: readAccess.description,
       skillCount: skillToolkit?.skills.length ?? 0,
       tools: skillToolkit
         ? {
@@ -429,6 +464,7 @@ export class AiAgentService {
 function buildAgentInstructions(
   context: AiChatContextSummary,
   toolContext: {
+    readScopeDescription?: string;
     skillCount: number;
     workspaceMounted: boolean;
   },
@@ -448,6 +484,7 @@ function buildTaskInstructions(
   instructions: string,
   context: AiChatContextSummary,
   toolContext: {
+    readScopeDescription?: string;
     skillCount: number;
     workspaceMounted: boolean;
   }
@@ -464,6 +501,7 @@ function buildTaskInstructions(
 function buildWorkspaceContextInstructions(
   context: AiChatContextSummary,
   toolContext: {
+    readScopeDescription?: string;
     skillCount: number;
     workspaceMounted: boolean;
   }
@@ -472,6 +510,7 @@ function buildWorkspaceContextInstructions(
     `workspace: ${context.workspaceRootName ?? "(not open)"}`,
     `active path: ${context.activeRelativePath ?? "(none)"}`,
     `workspace tools mounted: ${toolContext.workspaceMounted ? "yes" : "no"}`,
+    `workspace read scope: ${toolContext.readScopeDescription ?? "entire workspace"}`,
     `skills available: ${toolContext.skillCount}`
   ];
 
@@ -529,7 +568,10 @@ async function directoryExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function collectWorkspaceFiles(workspaceRootPath: string): Promise<Record<string, string>> {
+async function collectWorkspaceFiles(
+  workspaceRootPath: string,
+  readAccess: AiAgentReadAccess
+): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
   let loadedFileCount = 0;
 
@@ -570,7 +612,7 @@ async function collectWorkspaceFiles(workspaceRootPath: string): Promise<Record<
 
       const relativePath = normalizeRelativeWorkspacePath(workspaceRootPath, entryPath);
 
-      if (!relativePath) {
+      if (!relativePath || !readAccess.canRead(relativePath)) {
         continue;
       }
 
@@ -600,6 +642,124 @@ function normalizeRelativeWorkspacePath(
   }
 
   return relativePath.replace(/\\/gu, "/");
+}
+
+function normalizeWorkspaceToolPolicy(
+  policy?: AiAgentWorkspaceToolPolicy
+): Required<AiAgentWorkspaceToolPolicy> {
+  return {
+    canEditWorkspaceFiles: policy?.canEditWorkspaceFiles ?? true,
+    canRunShellCommand: policy?.canRunShellCommand ?? true,
+    readDirs: policy?.readDirs ?? [],
+    readScope: policy?.readScope ?? "entire-workspace"
+  };
+}
+
+function createReadAccess(
+  context: AiChatContextSummary,
+  policy: Required<AiAgentWorkspaceToolPolicy>
+): AiAgentReadAccess {
+  const activePath = normalizeWorkspaceAccessPath(context.activeRelativePath ?? "");
+  const selectedPaths = context.selectedPaths.map(normalizeWorkspaceAccessPath).filter(Boolean);
+  const readDirs = policy.readDirs.map(normalizeWorkspaceAccessPath).filter(Boolean);
+
+  switch (policy.readScope) {
+    case "current-document-only": {
+      return {
+        canRead: (relativePath) =>
+          activePath.length > 0 && normalizeWorkspaceAccessPath(relativePath) === activePath,
+        description: "current document only"
+      };
+    }
+
+    case "current-document-and-selected-files": {
+      const allowedPaths = new Set([activePath, ...selectedPaths].filter(Boolean));
+      return {
+        canRead: (relativePath) => isAllowedByPathSet(relativePath, allowedPaths),
+        description: "current document and selected files"
+      };
+    }
+
+    case "selected-files": {
+      const allowedPaths = new Set(selectedPaths);
+      return {
+        canRead: (relativePath) => isAllowedByPathSet(relativePath, allowedPaths),
+        description: "selected files"
+      };
+    }
+
+    case "same-folder": {
+      const activeDirectory = activePath.length > 0 ? path.posix.dirname(activePath) : "";
+      return {
+        canRead: (relativePath) => {
+          const normalizedPath = normalizeWorkspaceAccessPath(relativePath);
+          if (activeDirectory === ".") {
+            return !normalizedPath.includes("/");
+          }
+          return (
+            normalizedPath === activeDirectory ||
+            normalizedPath.startsWith(`${activeDirectory}/`)
+          );
+        },
+        description: "same folder as active document"
+      };
+    }
+
+    case "specific-dirs": {
+      return {
+        canRead: (relativePath) =>
+          readDirs.some((directoryPath) =>
+            isPathInsideDirectory(normalizeWorkspaceAccessPath(relativePath), directoryPath)
+          ),
+        description:
+          readDirs.length > 0 ? `specific dirs: ${readDirs.join(", ")}` : "specific dirs: none"
+      };
+    }
+
+    case "entire-workspace":
+    default:
+      return {
+        canRead: () => true,
+        description: "entire workspace"
+      };
+  }
+}
+
+function normalizeWorkspaceAccessPath(value: string): string {
+  return value
+    .trim()
+    .replace(/\\/gu, "/")
+    .replace(/^\/+/u, "")
+    .split("/")
+    .filter(Boolean)
+    .join("/");
+}
+
+function isAllowedByPathSet(relativePath: string, allowedPaths: ReadonlySet<string>): boolean {
+  const normalizedPath = normalizeWorkspaceAccessPath(relativePath);
+
+  for (const allowedPath of allowedPaths) {
+    if (normalizedPath === allowedPath || isPathInsideDirectory(normalizedPath, allowedPath)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isPathInsideDirectory(relativePath: string, directoryPath: string): boolean {
+  return (
+    directoryPath.length > 0 &&
+    (relativePath === directoryPath || relativePath.startsWith(`${directoryPath}/`))
+  );
+}
+
+function assertCanReadWorkspacePath(readAccess: AiAgentReadAccess, relativePath: string): void {
+  if (!readAccess.canRead(relativePath)) {
+    throw new Error(
+      `Workspace read scope (${readAccess.description}) does not allow reading: ${relativePath}`
+    );
+  }
 }
 
 async function tryReadWorkspaceTextFile(filePath: string): Promise<string | null> {
@@ -664,7 +824,12 @@ function createPersistentWorkspaceTools(
   workspaceVisualRenderService: WorkspaceVisualRenderService,
   getIntegralWorkspaceService?: () => IntegralWorkspaceService | null,
   hostCommandExecutor?: AiHostCommandExecutor,
-  hostCommandOptions?: AiAgentHostCommandOptions
+  hostCommandOptions?: AiAgentHostCommandOptions,
+  workspaceToolPolicy: Required<AiAgentWorkspaceToolPolicy> = normalizeWorkspaceToolPolicy(),
+  readAccess: AiAgentReadAccess = {
+    canRead: () => true,
+    description: "entire workspace"
+  }
 ): ToolSet {
   const tools: ToolSet = {
     resolveManagedDataByPath: tool({
@@ -721,6 +886,7 @@ function createPersistentWorkspaceTools(
       }),
       execute: async ({ path: targetPath, waitMs, width }) => {
         const relativePath = normalizeWorkspaceRelativePath(targetPath);
+        assertCanReadWorkspacePath(readAccess, relativePath);
 
         return workspaceVisualRenderService.renderWorkspaceDocument(relativePath, {
           waitMs,
@@ -750,6 +916,7 @@ function createPersistentWorkspaceTools(
       }),
       execute: async ({ path: targetPath }) => {
         const relativePath = normalizeWorkspaceRelativePath(targetPath);
+        assertCanReadWorkspacePath(readAccess, relativePath);
         const absolutePath = resolveWorkspaceAbsolutePath(workspaceRootPath, relativePath);
         const fileStats = await fs.stat(absolutePath).catch(() => null);
 
@@ -793,7 +960,10 @@ function createPersistentWorkspaceTools(
         ]
       })
     }),
-    writeWorkspaceFile: tool({
+  };
+
+  if (workspaceToolPolicy.canEditWorkspaceFiles) {
+    tools.writeWorkspaceFile = tool({
       description:
         "Persist UTF-8 text changes to a real workspace file. Use this for actual saves; bash/writeFile is preview-only.",
       inputSchema: z.object({
@@ -834,10 +1004,10 @@ function createPersistentWorkspaceTools(
           saved: true
         };
       }
-    })
-  };
+    });
+  }
 
-  if (hostCommandExecutor) {
+  if (workspaceToolPolicy.canRunShellCommand && hostCommandExecutor) {
     tools.runShellCommand = tool({
       description:
         "Run a real PowerShell-compatible command in the user's workspace after explicit user approval. Use this when a live command is needed, such as running tests, scripts, package installers, or workspace-generating commands. The user sees and can edit or reject the command before execution. Provide a concise purpose so the user can judge the request.",
@@ -1045,6 +1215,14 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return `${scriptPath}:${functionName}`;
   }
 
+  if (toolName === "createPythonBlockDraft" && isRecord(input)) {
+    const scriptPath = typeof input.scriptPath === "string" ? input.scriptPath : "(unknown script)";
+    const functionName =
+      typeof input.functionName === "string" ? input.functionName : "(unknown function)";
+
+    return `${scriptPath}:${functionName}`;
+  }
+
   if (toolName === "insertMarkdownAtCursor" && isRecord(input)) {
     const textLength = typeof input.text === "string" ? input.text.length : null;
 
@@ -1137,6 +1315,14 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
       summary: typeof output.summary === "string" ? output.summary : "",
       text: output.text
     });
+  }
+
+  if (
+    toolName === "createPythonBlockDraft" &&
+    isRecord(output) &&
+    typeof output.markdown === "string"
+  ) {
+    return `${output.markdown.length} chars`;
   }
 
   if (toolName === "readWorkspaceImage" && isRecord(output) && typeof output.path === "string") {

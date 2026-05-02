@@ -347,7 +347,8 @@ const aiChatService = new AiChatService(
   workspaceService,
   appSettingsService,
   path.join(app.getPath("userData"), "ai-chat-settings.json"),
-  path.join(app.getPath("userData"), "ai-chat-history.json")
+  path.join(app.getPath("userData"), "ai-chat-history.json"),
+  () => integralWorkspaceService
 );
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -910,8 +911,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ai-chat:saveSession", async (_event, request) => aiChatService.saveSession(request));
   ipcMain.handle("ai-chat:switchSession", async (_event, sessionId) => aiChatService.switchSession(sessionId));
   ipcMain.handle("ai-chat:deleteSession", async (_event, sessionId) => aiChatService.deleteSession(sessionId));
+  ipcMain.handle("ai-chat:listInlineActions", async () => aiChatService.listInlineActions());
+  ipcMain.handle("ai-chat:saveInlineAction", async (_event, request) =>
+    aiChatService.saveInlineAction(request)
+  );
+  ipcMain.handle("ai-chat:deleteInlineAction", async (_event, name) =>
+    aiChatService.deleteInlineAction(name)
+  );
   ipcMain.handle("ai-chat:submit", async (event, request) =>
     aiChatService.submit(request, {
+      onStreamEvent: (streamEvent) => {
+        event.sender.send("ai-chat:streamEvent", streamEvent);
+      }
+    })
+  );
+  ipcMain.handle("ai-chat:submitInlineAction", async (event, request) =>
+    aiChatService.submitInlineAction(request, {
       onStreamEvent: (streamEvent) => {
         event.sender.send("ai-chat:streamEvent", streamEvent);
       }

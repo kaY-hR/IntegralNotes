@@ -123,6 +123,7 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const SEARCH_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".inline-action",
   ".next",
   ".turbo",
   "coverage",
@@ -130,6 +131,7 @@ const SEARCH_EXCLUDED_DIRECTORY_NAMES = new Set([
   "node_modules",
   "out"
 ]);
+const SNAPSHOT_HIDDEN_DIRECTORY_NAMES = new Set([".git"]);
 const DEFAULT_WORKSPACE_SEARCH_MAX_RESULTS = 400;
 
 interface ManagedDataNoteWritePlan {
@@ -1024,13 +1026,15 @@ export class WorkspaceService {
     const absolutePath = this.resolveWorkspacePath(relativePath);
     const directoryEntries = await fs.readdir(absolutePath, { withFileTypes: true });
 
-    const supportedEntries = directoryEntries.sort((left, right) => {
-      if (left.isDirectory() !== right.isDirectory()) {
-        return left.isDirectory() ? -1 : 1;
-      }
+    const supportedEntries = directoryEntries
+      .filter((entry) => !SNAPSHOT_HIDDEN_DIRECTORY_NAMES.has(entry.name))
+      .sort((left, right) => {
+        if (left.isDirectory() !== right.isDirectory()) {
+          return left.isDirectory() ? -1 : 1;
+        }
 
-      return left.name.localeCompare(right.name, "ja");
-    });
+        return left.name.localeCompare(right.name, "ja");
+      });
 
     const entries = await Promise.all(
       supportedEntries.map(async (entry) => {
