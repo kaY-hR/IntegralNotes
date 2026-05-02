@@ -300,7 +300,16 @@ export interface BeforeCloseResponse {
   requestId: string;
 }
 
+export type RendererLogDetails = Record<string, boolean | null | number | string | undefined>;
+
+export interface RendererLogRequest {
+  details?: RendererLogDetails;
+  event: string;
+  source: string;
+}
+
 export interface IntegralNotesApi {
+  logRendererEvent: (request: RendererLogRequest) => Promise<void>;
   confirmDiscardUnsavedChanges: (request: ConfirmDiscardUnsavedChangesRequest) => Promise<boolean>;
   onBeforeCloseRequest: (handler: (request: BeforeCloseRequest) => void) => () => void;
   respondBeforeClose: (response: BeforeCloseResponse) => void;

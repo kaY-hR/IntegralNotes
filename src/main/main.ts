@@ -6,7 +6,9 @@ import {
   ipcMain,
   shell,
   type IpcMainEvent,
-  type MessageBoxOptions
+  type IpcMainInvokeEvent,
+  type MessageBoxOptions,
+  type WebContents
 } from "electron";
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
@@ -36,6 +38,7 @@ import type {
   ExecuteIntegralActionRequest,
   MoveEntriesRequest,
   RenameEntryRequest,
+  RendererLogRequest,
   SaveClipboardImageRequest,
   SaveNoteImageRequest,
   SelectWorkspaceFileRequest,
@@ -62,6 +65,108 @@ const execFileAsync = promisify(execFile);
 const WORKSPACE_SELECTION_CLIPBOARD_FORMAT = "application/x-integralnotes-workspace-selection";
 
 initializeNetworkProxyFromEnvironment();
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+type AppLogDetails = Record<string, boolean | null | number | string | undefined>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function sanitizeLogDetails(details: unknown): AppLogDetails {
+  if (!isRecord(details)) {
+    return {};
+  }
+
+  const sanitized: AppLogDetails = {};
+
+  for (const [key, value] of Object.entries(details)) {
+    if (typeof value === "string") {
+      sanitized[key] = value.length > 500 ? `${value.slice(0, 497)}...` : value;
+      continue;
+    }
+
+    if (typeof value === "number") {
+      sanitized[key] = Number.isFinite(value) ? value : null;
+      continue;
+    }
+
+    if (typeof value === "boolean" || value === null || value === undefined) {
+      sanitized[key] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+function getAppLogFilePath(): string {
+  const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/gu, "");
+  return path.join(app.getPath("userData"), "logs", `integral-notes-${dateStamp}.jsonl`);
+}
+
+function appendAppLog(source: string, event: string, details?: unknown): void {
+  let logFilePath: string;
+
+  try {
+    logFilePath = getAppLogFilePath();
+  } catch (error) {
+    console.warn(`[Main] failed to resolve log path: ${toErrorMessage(error)}`);
+    return;
+  }
+
+  const entry = `${JSON.stringify({
+    details: sanitizeLogDetails(details),
+    event,
+    source,
+    timestamp: new Date().toISOString()
+  })}\n`;
+
+  void fs
+    .mkdir(path.dirname(logFilePath), { recursive: true })
+    .then(() => fs.appendFile(logFilePath, entry, "utf8"))
+    .catch((error) => {
+      console.warn(`[Main] failed to append app log: ${toErrorMessage(error)}`);
+    });
+}
+
+function sendToWebContents(webContents: WebContents, channel: string, ...args: unknown[]): boolean {
+  if (webContents.isDestroyed()) {
+    appendAppLog("main", "ipc-send-skipped", {
+      channel,
+      reason: "webContentsDestroyed"
+    });
+    return false;
+  }
+
+  try {
+    webContents.send(channel, ...args);
+    return true;
+  } catch (error) {
+    appendAppLog("main", "ipc-send-skipped", {
+      channel,
+      error: toErrorMessage(error)
+    });
+    console.warn(`[Main] skipped IPC send to renderer (${channel}): ${toErrorMessage(error)}`);
+    return false;
+  }
+}
+
+function createAiChatStreamOptions(event: IpcMainInvokeEvent): {
+  onStreamEvent: (streamEvent: unknown) => void;
+} {
+  return {
+    onStreamEvent: (streamEvent) => {
+      sendToWebContents(event.sender, "ai-chat:streamEvent", streamEvent);
+    }
+  };
+}
 
 function configureAutomationUserDataPath(): void {
   const configuredUserDataPath = process.env.INTEGRALNOTES_USER_DATA_DIR?.trim();
@@ -214,13 +319,16 @@ function requestBeforeCloseFromRenderer(window: BrowserWindow): Promise<boolean>
 
   return new Promise((resolve) => {
     let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
     const settle = (allowClose: boolean): void => {
       if (settled) {
         return;
       }
 
       settled = true;
-      clearTimeout(timeout);
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
       ipcMain.removeListener("app:beforeCloseResponse", listener);
       resolve(allowClose);
     };
@@ -231,12 +339,14 @@ function requestBeforeCloseFromRenderer(window: BrowserWindow): Promise<boolean>
 
       settle(response.allowClose);
     };
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
       settle(true);
     }, 5000);
 
     ipcMain.on("app:beforeCloseResponse", listener);
-    window.webContents.send("app:beforeCloseRequest", { requestId });
+    if (!sendToWebContents(window.webContents, "app:beforeCloseRequest", { requestId })) {
+      settle(true);
+    }
   });
 }
 
@@ -405,6 +515,21 @@ function registerDevelopmentShortcuts(window: BrowserWindow): void {
   });
 }
 
+function registerRendererDiagnostics(window: BrowserWindow): void {
+  window.webContents.on("render-process-gone", (_event, details) => {
+    appendAppLog("main", "render-process-gone", {
+      exitCode: details.exitCode,
+      reason: details.reason
+    });
+  });
+  window.webContents.on("unresponsive", () => {
+    appendAppLog("main", "renderer-unresponsive");
+  });
+  window.webContents.on("responsive", () => {
+    appendAppLog("main", "renderer-responsive");
+  });
+}
+
 async function createMainWindow(): Promise<void> {
   closingAfterUnsavedConfirmation = false;
   closeConfirmationPending = false;
@@ -423,6 +548,7 @@ async function createMainWindow(): Promise<void> {
   });
   registerWindowZoomHandlers(mainWindow);
   registerDevelopmentShortcuts(mainWindow);
+  registerRendererDiagnostics(mainWindow);
   registerUnsavedChangesCloseHandler(mainWindow);
   mainWindow.removeMenu();
 
@@ -447,6 +573,18 @@ function registerIpcHandlers(): void {
 
   ipcRegistered = true;
 
+  ipcMain.handle("app:rendererLog", async (_event, request: RendererLogRequest) => {
+    const event =
+      typeof request?.event === "string" && request.event.trim().length > 0
+        ? request.event.trim().slice(0, 120)
+        : "unknown";
+    const source =
+      typeof request?.source === "string" && request.source.trim().length > 0
+        ? request.source.trim().slice(0, 120)
+        : "renderer";
+
+    appendAppLog(source, event, request?.details);
+  });
   ipcMain.handle(
     "app:confirmDiscardUnsavedChanges",
     async (_event, request: ConfirmDiscardUnsavedChangesRequest) =>
@@ -919,39 +1057,19 @@ function registerIpcHandlers(): void {
     aiChatService.deleteInlineAction(name)
   );
   ipcMain.handle("ai-chat:submit", async (event, request) =>
-    aiChatService.submit(request, {
-      onStreamEvent: (streamEvent) => {
-        event.sender.send("ai-chat:streamEvent", streamEvent);
-      }
-    })
+    aiChatService.submit(request, createAiChatStreamOptions(event))
   );
   ipcMain.handle("ai-chat:submitInlineAction", async (event, request) =>
-    aiChatService.submitInlineAction(request, {
-      onStreamEvent: (streamEvent) => {
-        event.sender.send("ai-chat:streamEvent", streamEvent);
-      }
-    })
+    aiChatService.submitInlineAction(request, createAiChatStreamOptions(event))
   );
   ipcMain.handle("ai-chat:submitInlineInsertion", async (event, request) =>
-    aiChatService.submitInlineInsertion(request, {
-      onStreamEvent: (streamEvent) => {
-        event.sender.send("ai-chat:streamEvent", streamEvent);
-      }
-    })
+    aiChatService.submitInlineInsertion(request, createAiChatStreamOptions(event))
   );
   ipcMain.handle("ai-chat:submitInlinePythonBlock", async (event, request) =>
-    aiChatService.submitInlinePythonBlock(request, {
-      onStreamEvent: (streamEvent) => {
-        event.sender.send("ai-chat:streamEvent", streamEvent);
-      }
-    })
+    aiChatService.submitInlinePythonBlock(request, createAiChatStreamOptions(event))
   );
   ipcMain.handle("ai-chat:submitPromptlessContinuation", async (event, request) =>
-    aiChatService.submitPromptlessContinuation(request, {
-      onStreamEvent: (streamEvent) => {
-        event.sender.send("ai-chat:streamEvent", streamEvent);
-      }
-    })
+    aiChatService.submitPromptlessContinuation(request, createAiChatStreamOptions(event))
   );
   aiHostCommandService.registerIpcHandlers(ipcMain);
 }

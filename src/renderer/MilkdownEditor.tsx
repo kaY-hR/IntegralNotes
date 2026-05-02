@@ -173,7 +173,11 @@ interface InlineAiTriggerState {
 const INLINE_AI_INSERTION_PREVIEW_FRAME_MS = 24;
 const INLINE_AI_INSERTION_PREVIEW_TARGET_FRAMES = 64;
 const INLINE_AI_INSERTION_PREVIEW_MIN_CHUNK_SIZE = 2;
+const INLINE_AI_INSERTION_PREVIEW_MAX_CHARS = 12_000;
 const INLINE_AI_POPUP_WIDTH = 520;
+const INLINE_AI_STREAM_UPDATE_INTERVAL_MS = 80;
+const INLINE_AI_STREAMING_TEXT_MAX_CHARS = 12_000;
+const INLINE_AI_TOOL_TRACE_PREVIEW_LIMIT = 24;
 
 export function MilkdownEditor({
   analysisResultDirectory,
@@ -377,55 +381,132 @@ export function MilkdownEditor({
   }, [inlineAiPrompt]);
 
   useEffect(() => {
-    return window.integralNotes.onAiChatStreamEvent((event: AiChatStreamEvent) => {
-      if (event.id !== activeInlineAiStreamIdRef.current) {
+    let pendingStreamEvent:
+      | {
+          error: string | null;
+          id: string;
+          resetText: boolean;
+          textDelta: string;
+          toolTrace: AiChatToolTraceEntry[];
+        }
+      | null = null;
+    let flushTimer: number | null = null;
+    let flushedBatchCount = 0;
+
+    const flushPendingStreamEvent = (): void => {
+      flushTimer = null;
+
+      const eventBatch = pendingStreamEvent;
+      pendingStreamEvent = null;
+
+      if (!eventBatch || eventBatch.id !== activeInlineAiStreamIdRef.current) {
         return;
       }
 
+      flushedBatchCount += 1;
+
+      if (
+        flushedBatchCount === 1 ||
+        flushedBatchCount % 20 === 0 ||
+        eventBatch.toolTrace.length > 0 ||
+        eventBatch.error
+      ) {
+        logInlineAiDebugEvent("stream-batch", {
+          batchCount: flushedBatchCount,
+          hasError: Boolean(eventBatch.error),
+          resetText: eventBatch.resetText,
+          streamId: eventBatch.id,
+          textDeltaLength: eventBatch.textDelta.length,
+          toolTraceCount: eventBatch.toolTrace.length
+        });
+      }
+
       setInlineAiPrompt((current) => {
-        if (!current || current.streamId !== event.id) {
+        if (!current || current.streamId !== eventBatch.id) {
           return current;
         }
 
-        let next = current;
-
-        switch (event.type) {
-          case "text-delta":
-            if (event.textDelta) {
-              next = {
-                ...current,
-                streamingText: `${current.streamingText}${event.textDelta}`
-              };
-            }
-            break;
-          case "text-reset":
-            next = {
-              ...current,
-              streamingText: ""
-            };
-            break;
-          case "tool-trace":
-            if (event.toolTrace?.length) {
-              next = {
-                ...current,
-                streamingToolTrace: [...current.streamingToolTrace, ...(event.toolTrace ?? [])]
-              };
-            }
-            break;
-          case "error":
-            next = {
-              ...current,
-              error: event.message ?? "Inline AI streaming failed."
-            };
-            break;
-          default:
-            break;
-        }
+        const streamingTextBase = eventBatch.resetText ? "" : current.streamingText;
+        const streamingText =
+          eventBatch.textDelta.length > 0
+            ? toInlineAiStreamingPreviewText(`${streamingTextBase}${eventBatch.textDelta}`)
+            : streamingTextBase;
+        const streamingToolTrace =
+          eventBatch.toolTrace.length > 0
+            ? [...current.streamingToolTrace, ...eventBatch.toolTrace].slice(
+                -INLINE_AI_TOOL_TRACE_PREVIEW_LIMIT
+              )
+            : current.streamingToolTrace;
+        const next = {
+          ...current,
+          ...(eventBatch.error ? { error: eventBatch.error } : {}),
+          streamingText,
+          streamingToolTrace
+        };
 
         inlineAiPromptRef.current = next;
         return next;
       });
+    };
+
+    const scheduleFlush = (): void => {
+      if (flushTimer !== null) {
+        return;
+      }
+
+      flushTimer = window.setTimeout(
+        flushPendingStreamEvent,
+        INLINE_AI_STREAM_UPDATE_INTERVAL_MS
+      );
+    };
+
+    const unsubscribe = window.integralNotes.onAiChatStreamEvent((event: AiChatStreamEvent) => {
+      if (event.id !== activeInlineAiStreamIdRef.current) {
+        return;
+      }
+
+      const currentBatch =
+        pendingStreamEvent && pendingStreamEvent.id === event.id
+          ? pendingStreamEvent
+          : {
+              error: null,
+              id: event.id,
+              resetText: false,
+              textDelta: "",
+              toolTrace: []
+            };
+
+      switch (event.type) {
+        case "text-delta":
+          currentBatch.textDelta += event.textDelta ?? "";
+          break;
+        case "text-reset":
+          currentBatch.resetText = true;
+          currentBatch.textDelta = "";
+          break;
+        case "tool-trace":
+          if (event.toolTrace?.length) {
+            currentBatch.toolTrace.push(...event.toolTrace);
+          }
+          break;
+        case "error":
+          currentBatch.error = event.message ?? "Inline AI streaming failed.";
+          break;
+        default:
+          break;
+      }
+
+      pendingStreamEvent = currentBatch;
+      scheduleFlush();
     });
+
+    return () => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+      }
+
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -1051,10 +1132,25 @@ export function MilkdownEditor({
     setInlineAiSkillCompletion(null);
     setLinkCompletion(null);
     setAnalysisCompletion(null);
+    logInlineAiDebugEvent("start", {
+      action: action.name,
+      afterLength: trigger.afterText.length,
+      anchorPos: trigger.replaceFrom,
+      beforeLength: trigger.beforeText.length,
+      documentLength: nextPrompt.documentMarkdown.length,
+      marker: trigger.marker,
+      promptRequired: action.promptRequired,
+      replaceTo: trigger.replaceTo
+    });
 
     const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
     transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
     view.dispatch(transaction.scrollIntoView());
+    logInlineAiDebugEvent("trigger-deleted", {
+      action: action.name,
+      anchorPos: trigger.replaceFrom,
+      documentSize: transaction.doc.content.size
+    });
 
     if (!action.promptRequired) {
       void submitInlineAiPrompt();
@@ -1292,9 +1388,19 @@ export function MilkdownEditor({
     streamId: string,
     markdown: string
   ): Promise<boolean> => {
-    const previewText = markdown.trim();
+    const startedAt = performance.now();
+    const previewText = toInlineAiInsertionPreviewText(markdown);
+    logInlineAiDebugEvent("preview-start", {
+      markdownLength: markdown.length,
+      previewLength: previewText.length,
+      streamId,
+      truncated: previewText.length !== markdown.trim().length
+    });
 
     if (previewText.length === 0) {
+      logInlineAiDebugEvent("preview-empty", {
+        streamId
+      });
       return true;
     }
 
@@ -1315,6 +1421,10 @@ export function MilkdownEditor({
         current.streamId !== streamId ||
         activeInlineAiStreamIdRef.current !== streamId
       ) {
+        logInlineAiDebugEvent("preview-cancelled", {
+          streamId,
+          visibleLength
+        });
         return false;
       }
 
@@ -1336,6 +1446,10 @@ export function MilkdownEditor({
       current.streamId !== streamId ||
       activeInlineAiStreamIdRef.current !== streamId
     ) {
+      logInlineAiDebugEvent("preview-cancelled", {
+        streamId,
+        visibleLength: previewText.length
+      });
       return false;
     }
 
@@ -1347,6 +1461,12 @@ export function MilkdownEditor({
     inlineAiPromptRef.current = next;
     setInlineAiPrompt(next);
     await waitInlineAiInsertionPreviewFrame();
+
+    logInlineAiDebugEvent("preview-finished", {
+      durationMs: Math.round(performance.now() - startedAt),
+      previewLength: previewText.length,
+      streamId
+    });
 
     return true;
   };
@@ -1381,6 +1501,14 @@ export function MilkdownEditor({
     inlineAiPromptRef.current = submittingState;
     setInlineAiSkillCompletion(null);
     setInlineAiPrompt(submittingState);
+    logInlineAiDebugEvent("submit-start", {
+      action: current.action.name,
+      documentLength: current.documentMarkdown.length,
+      historyCount: current.messages.length,
+      promptLength: current.prompt.length,
+      requestedSkillCount: requestedSkills.length,
+      streamId
+    });
 
     try {
       const result = await window.integralNotes.submitInlineAction({
@@ -1398,16 +1526,33 @@ export function MilkdownEditor({
         streamId
       });
 
+      logInlineAiDebugEvent("submit-result", {
+        action: current.action.name,
+        hasInsertion: Boolean(result.insertion),
+        insertionLength: result.insertion?.text.length ?? 0,
+        messageCount: result.messages.length,
+        streamId
+      });
+
       if (
         activeInlineAiStreamIdRef.current !== streamId ||
         inlineAiPromptRef.current?.streamId !== streamId
       ) {
+        logInlineAiDebugEvent("submit-result-ignored", {
+          action: current.action.name,
+          streamId
+        });
         return;
       }
 
       const nextMessages = [...current.messages, result.userMessage, ...result.messages];
 
       if (!result.insertion) {
+        logInlineAiDebugEvent("no-insertion", {
+          action: current.action.name,
+          canAnswerOnly: current.action.canAnswerOnly,
+          streamId
+        });
         const nextState = {
           ...current,
           error: current.action.canAnswerOnly
@@ -1431,6 +1576,10 @@ export function MilkdownEditor({
       const shouldInsert = await playInlineAiInsertionPreview(streamId, result.insertion.text);
 
       if (!shouldInsert) {
+        logInlineAiDebugEvent("preview-cancelled-before-insert", {
+          action: current.action.name,
+          streamId
+        });
         return;
       }
 
@@ -1442,11 +1591,21 @@ export function MilkdownEditor({
           originalAfterText: current.afterText
         }
       );
+      logInlineAiDebugEvent("insert-complete", {
+        action: current.action.name,
+        streamId
+      });
 
       inlineAiPromptRef.current = null;
       activeInlineAiStreamIdRef.current = null;
       setInlineAiPrompt(null);
     } catch (error) {
+      logInlineAiDebugEvent("submit-error", {
+        action: current.action.name,
+        message: toErrorMessage(error),
+        streamId
+      });
+
       if (
         activeInlineAiStreamIdRef.current !== streamId ||
         inlineAiPromptRef.current?.streamId !== streamId
@@ -1477,44 +1636,81 @@ export function MilkdownEditor({
     const editor = editorRef.current;
 
     if (!editor) {
+      logInlineAiDebugEvent("insert-skipped", {
+        markdownLength: markdown.length,
+        position,
+        reason: "editorMissing"
+      });
       return;
     }
 
-    editor.editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx);
-      const parsedDocument = ctx.get(parserCtx)(markdown);
-
-      if (!parsedDocument) {
-        return;
-      }
-
-      const from = Math.max(0, Math.min(position, view.state.doc.content.size));
-      let to = from;
-
-      if (triggerCleanup && !triggerCleanup.originalAfterText.startsWith(triggerCleanup.marker)) {
-        const markerTo = Math.min(
-          from + triggerCleanup.marker.length,
-          view.state.doc.content.size
-        );
-        const markerAtPosition = view.state.doc.textBetween(from, markerTo, "\n", "\0");
-
-        if (markerAtPosition === triggerCleanup.marker) {
-          to = markerTo;
-        }
-      }
-
-      const insertedSlice = new Slice(parsedDocument.content, 0, 0);
-      const transaction = view.state.tr.replaceRange(from, to, insertedSlice);
-      const nextSelectionPosition = Math.min(
-        from + insertedSlice.size,
-        transaction.doc.content.size
-      );
-      transaction.setSelection(
-        ProseSelection.near(transaction.doc.resolve(nextSelectionPosition), -1)
-      );
-      view.dispatch(transaction.scrollIntoView());
-      view.focus();
+    const startedAt = performance.now();
+    logInlineAiDebugEvent("insert-start", {
+      hasTriggerCleanup: Boolean(triggerCleanup),
+      markdownLength: markdown.length,
+      position
     });
+
+    try {
+      editor.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const parseStartedAt = performance.now();
+        const parsedDocument = ctx.get(parserCtx)(markdown);
+
+        logInlineAiDebugEvent("insert-parsed", {
+          durationMs: Math.round(performance.now() - parseStartedAt),
+          markdownLength: markdown.length,
+          parsed: Boolean(parsedDocument)
+        });
+
+        if (!parsedDocument) {
+          return;
+        }
+
+        const from = Math.max(0, Math.min(position, view.state.doc.content.size));
+        let to = from;
+        const beforeDocSize = view.state.doc.content.size;
+
+        if (triggerCleanup && !triggerCleanup.originalAfterText.startsWith(triggerCleanup.marker)) {
+          const markerTo = Math.min(
+            from + triggerCleanup.marker.length,
+            view.state.doc.content.size
+          );
+          const markerAtPosition = view.state.doc.textBetween(from, markerTo, "\n", "\0");
+
+          if (markerAtPosition === triggerCleanup.marker) {
+            to = markerTo;
+          }
+        }
+
+        const dispatchStartedAt = performance.now();
+        const insertedSlice = new Slice(parsedDocument.content, 0, 0);
+        const transaction = view.state.tr.replaceRange(from, to, insertedSlice);
+        const nextSelectionPosition = Math.min(
+          from + insertedSlice.size,
+          transaction.doc.content.size
+        );
+        transaction.setSelection(
+          ProseSelection.near(transaction.doc.resolve(nextSelectionPosition), -1)
+        );
+        view.dispatch(transaction.scrollIntoView());
+        view.focus();
+        logInlineAiDebugEvent("insert-dispatched", {
+          afterDocSize: transaction.doc.content.size,
+          beforeDocSize,
+          dispatchDurationMs: Math.round(performance.now() - dispatchStartedAt),
+          insertedSliceSize: insertedSlice.size,
+          totalDurationMs: Math.round(performance.now() - startedAt)
+        });
+      });
+    } catch (error) {
+      logInlineAiDebugEvent("insert-error", {
+        markdownLength: markdown.length,
+        message: toErrorMessage(error),
+        position
+      });
+      throw error;
+    }
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
@@ -2195,6 +2391,23 @@ function waitInlineAiInsertionPreviewFrame(): Promise<void> {
   });
 }
 
+function logInlineAiDebugEvent(
+  event: string,
+  details: Record<string, boolean | null | number | string | undefined> = {}
+): void {
+  try {
+    void window.integralNotes
+      .logRendererEvent({
+        details,
+        event,
+        source: "MilkdownEditor.inlineAi"
+      })
+      .catch(() => {});
+  } catch {
+    // Diagnostics must never affect the editor path.
+  }
+}
+
 function computeLinkCompletionState(
   view: EditorView,
   selection: Selection
@@ -2511,6 +2724,32 @@ function toMarkdownCodeFence(content: string, language = ""): string {
   const fenceHeader = normalizedLanguage.length > 0 ? `${fence}${normalizedLanguage}` : fence;
 
   return `${fenceHeader}\n${content}\n${fence}`;
+}
+
+function toInlineAiInsertionPreviewText(markdown: string): string {
+  const trimmedMarkdown = markdown.trim();
+
+  if (trimmedMarkdown.length <= INLINE_AI_INSERTION_PREVIEW_MAX_CHARS) {
+    return trimmedMarkdown;
+  }
+
+  return [
+    trimmedMarkdown.slice(0, INLINE_AI_INSERTION_PREVIEW_MAX_CHARS),
+    "",
+    `[preview truncated: full ${trimmedMarkdown.length} chars will be inserted]`
+  ].join("\n");
+}
+
+function toInlineAiStreamingPreviewText(markdown: string): string {
+  if (markdown.length <= INLINE_AI_STREAMING_TEXT_MAX_CHARS) {
+    return markdown;
+  }
+
+  return [
+    `[stream preview truncated to last ${INLINE_AI_STREAMING_TEXT_MAX_CHARS} chars]`,
+    "",
+    markdown.slice(-INLINE_AI_STREAMING_TEXT_MAX_CHARS)
+  ].join("\n");
 }
 
 function truncateInlinePopupContext(value: string, side: "head" | "tail"): string {

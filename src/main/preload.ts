@@ -22,6 +22,7 @@ function adjustZoomLevel(direction: "in" | "out" | "reset"): void {
 }
 
 const api: IntegralNotesApi = {
+  logRendererEvent: (request) => ipcRenderer.invoke("app:rendererLog", request),
   confirmDiscardUnsavedChanges: (request) =>
     ipcRenderer.invoke("app:confirmDiscardUnsavedChanges", request),
   onBeforeCloseRequest: (handler) => {
