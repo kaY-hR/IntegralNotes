@@ -45,7 +45,8 @@ import {
 import { installIntegralCodeBlockFeature } from "./integralCodeBlockFeature";
 import {
   getAvailableIntegralBlockTypes,
-  initializeIntegralPluginRuntime
+  initializeIntegralPluginRuntime,
+  setIntegralPluginRuntimeCatalog
 } from "./integralPluginRuntime";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
@@ -1641,19 +1642,6 @@ export function MilkdownEditor({
     try {
       editor.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const parseStartedAt = performance.now();
-        const parsedDocument = ctx.get(parserCtx)(markdown);
-
-        logInlineAiDebugEvent("insert-parsed", {
-          durationMs: Math.round(performance.now() - parseStartedAt),
-          markdownLength: markdown.length,
-          parsed: Boolean(parsedDocument)
-        });
-
-        if (!parsedDocument) {
-          return;
-        }
-
         const from = Math.max(0, Math.min(position, view.state.doc.content.size));
         let to = from;
         const beforeDocSize = view.state.doc.content.size;
@@ -1670,6 +1658,19 @@ export function MilkdownEditor({
           }
         }
 
+        const parseStartedAt = performance.now();
+        const parsedDocument = ctx.get(parserCtx)(markdown);
+
+        logInlineAiDebugEvent("insert-parsed", {
+          durationMs: Math.round(performance.now() - parseStartedAt),
+          markdownLength: markdown.length,
+          parsed: Boolean(parsedDocument)
+        });
+
+        if (!parsedDocument) {
+          return;
+        }
+
         const dispatchStartedAt = performance.now();
         const insertedSlice = new Slice(parsedDocument.content, 0, 0);
         const transaction = view.state.tr.replaceRange(from, to, insertedSlice);
@@ -1682,6 +1683,7 @@ export function MilkdownEditor({
         );
         view.dispatch(transaction.scrollIntoView());
         view.focus();
+        refreshIntegralRuntimeAfterInlineInsertion(markdown, view);
         logInlineAiDebugEvent("insert-dispatched", {
           afterDocSize: transaction.doc.content.size,
           beforeDocSize,
@@ -1726,6 +1728,31 @@ export function MilkdownEditor({
       });
     autoSaveQueueRef.current = nextSave;
     return nextSave;
+  };
+
+  const refreshIntegralRuntimeAfterInlineInsertion = (
+    markdown: string,
+    view: EditorView
+  ): void => {
+    if (!containsIntegralNotesFence(markdown)) {
+      return;
+    }
+
+    void window.integralNotes
+      .getIntegralAssetCatalog()
+      .then((catalog) => {
+        setIntegralPluginRuntimeCatalog(catalog);
+        onIntegralAssetCatalogChanged(catalog);
+
+        if (view.dom.isConnected) {
+          view.dispatch(view.state.tr.setMeta("integral-runtime-refreshed", true));
+        }
+      })
+      .catch((error) => {
+        logInlineAiDebugEvent("integral-runtime-refresh-error", {
+          message: toErrorMessage(error)
+        });
+      });
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
@@ -2719,6 +2746,10 @@ function prependInlineAiTranscript(markdown: string, transcript: string): string
   }
 
   return `${toMarkdownCodeFence(trimmedMessage)}\n\n${markdown}`;
+}
+
+function containsIntegralNotesFence(markdown: string): boolean {
+  return /(?:^|\r?\n)(?:`{3,}|~{3,})[ \t]*itg-notes(?:[ \t]|\r?\n|$)/iu.test(markdown);
 }
 
 function toMarkdownCodeFence(content: string, language = ""): string {
