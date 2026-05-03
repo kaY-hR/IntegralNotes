@@ -24,6 +24,7 @@ Do not rely on repository-level product docs, architecture docs, development his
 ## Working Rules
 
 - Start from the SDK surface area, not from product positioning.
+- Before creating a new script, inspect existing workspace scripts such as `scripts/**/*.py`; if a suitable `@integral_block` callable already exists, prefer reusing or minimally updating it.
 - Explain blocks in terms of the Python file the user is writing: decorator fields, slot names, path validation, and emitted files.
 - Treat slot I/O as path-based.
 - Non-`.idts` inputs are file paths.
@@ -44,6 +45,7 @@ Do not rely on repository-level product docs, architecture docs, development his
 - Use `options = params or {}` for optional params.
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
 - Use slot `datatype` as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as `{user-id}/peak-table` when the app prompt provides a user ID.
+- If an input slot should accept a `.idts` dataset, always declare `extensions=[".idts"]` in addition to any `datatype`. `.idts` is the bundle representation, and the input picker uses extensions to find dataset candidates.
 - Do not group files with different roles or user intent into one `.idts` output just for convenience.
 - Use a `.idts` output only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same datatype and role.
 - If the user is meant to inspect an output directly, make it its own output slot. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other renderable artifacts.

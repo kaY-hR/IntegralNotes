@@ -1663,7 +1663,7 @@ const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
     name: "continue",
     promptRequired: false,
     readDirs: [],
-    readScope: "current-document-and-selected-files",
+    readScope: "entire-workspace",
     relativePath: ".inline-action/continue.md",
     systemPrompt: [
       "You are continuing a Markdown note directly at the cursor.",
@@ -2316,8 +2316,8 @@ function formatInlinePythonBlockTranscript(messages: readonly AiChatMessage[]): 
 
 async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string): Promise<string> {
   const candidateRoots = [
-    path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block"),
-    path.join(workspaceRootPath, "Notes", ".codex", "skills", "implement-integral-block")
+    path.join(workspaceRootPath, "Notes", ".codex", "skills", "implement-integral-block"),
+    path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block")
   ];
 
   for (const skillRootPath of candidateRoots) {
@@ -2348,10 +2348,12 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
     "Use from integral import integral_block.",
     "The decorator supports display_name, description, inputs, outputs, and params.",
     "Slot objects support name, extension/extensions, datatype, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "Before creating a new script, inspect existing workspace scripts such as scripts/**/*.py; if a suitable @integral_block callable already exists, prefer reusing or minimally updating it.",
     "Use datatype as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as {user-id}/peak-table when a user ID is available.",
     "Define user-editable parameters with params={...}, using a Python literal JSON Schema subset.",
     "The supported params schema is root type object with properties whose type is string, number, integer, or boolean. Supported UI metadata: title, description, default, enum, minimum, maximum.",
     "Decorator params is the source of truth. Do not rely on undeclared YAML params; schema-external params are removed by the app.",
+    "For an input slot that should accept a .idts dataset, always declare extensions=[\".idts\"] in addition to any datatype. .idts is a bundle representation, not the datatype itself, and the input picker uses extensions for dataset candidates.",
     "Do not group files with different roles or user intent into one .idts output just for convenience.",
     "Use .idts outputs only when multiple files of the same nature are generated as one set.",
     "When writing to a .idts output, treat outputs[slotName] as a directory path and create the member files inside that directory. Do not create the .idts manifest yourself.",
