@@ -64,7 +64,7 @@ picker は出さず、`@@mkpy` の user prompt popup を直接表示する。
 文脈から自動で次に必要な内容を推定し、cursor 位置へ反映する。
 
 - promptRequired: `false`
-- readScope: `current-document-and-selected-files`
+- readScope: `entire-workspace`
 - canInsertMarkdown: `true`
 - canEditWorkspaceFiles: `true`
 - canRunShellCommand: `true`
@@ -341,7 +341,7 @@ workspace file の追加読み取りは行わない。
 
 現在 document に加え、ユーザーが選択している workspace file を読める。
 
-`@@continue` の標準設定。
+`@@continue` はユーザーの代わりに実装まで進める action なので、標準では `entire-workspace` を使う。
 
 ### `selected-files`
 

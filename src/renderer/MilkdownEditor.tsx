@@ -1111,6 +1111,15 @@ export function MilkdownEditor({
     trigger: InlineAiTriggerState,
     action: InlineActionDefinition
   ): void => {
+    setInlineActionCompletion(null);
+    setInlineAiSkillCompletion(null);
+    setLinkCompletion(null);
+    setAnalysisCompletion(null);
+
+    const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
+    transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
+    view.dispatch(transaction.scrollIntoView());
+    const startAutoSave = queueCurrentMarkdownAutoSave("inline-ai-start");
     const nextPrompt: InlineAiPromptState = {
       action,
       afterText: trigger.afterText,
@@ -1133,10 +1142,6 @@ export function MilkdownEditor({
 
     inlineAiPromptRef.current = nextPrompt;
     setInlineAiPrompt(nextPrompt);
-    setInlineActionCompletion(null);
-    setInlineAiSkillCompletion(null);
-    setLinkCompletion(null);
-    setAnalysisCompletion(null);
     logInlineAiDebugEvent("start", {
       action: action.name,
       afterLength: trigger.afterText.length,
@@ -1147,21 +1152,14 @@ export function MilkdownEditor({
       promptRequired: action.promptRequired,
       replaceTo: trigger.replaceTo
     });
-
-    const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
-    transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
-    view.dispatch(transaction.scrollIntoView());
     logInlineAiDebugEvent("trigger-deleted", {
       action: action.name,
       anchorPos: trigger.replaceFrom,
       documentSize: transaction.doc.content.size
     });
-    if (trigger.marker === "@@") {
-      queueCurrentMarkdownAutoSave("inline-ai-start");
-    }
 
     if (!action.promptRequired) {
-      void submitInlineAiPrompt();
+      void startAutoSave.then(() => submitInlineAiPrompt());
     }
   };
 
@@ -1431,7 +1429,7 @@ export function MilkdownEditor({
       return;
     }
 
-    const requestedSkills = findExplicitAiSkillMentions(current.prompt, availableAiSkills);
+    const initialRequestedSkills = findExplicitAiSkillMentions(current.prompt, availableAiSkills);
     const streamId = createInlineAiStreamId();
     const submittingState = {
       ...current,
@@ -1451,28 +1449,71 @@ export function MilkdownEditor({
       documentLength: current.documentMarkdown.length,
       historyCount: current.messages.length,
       promptLength: current.prompt.length,
-      requestedSkillCount: requestedSkills.length,
+      requestedSkillCount: initialRequestedSkills.length,
       streamId
     });
 
     try {
+      logInlineAiDebugEvent("autosave-wait-start", {
+        action: current.action.name,
+        streamId
+      });
+      await autoSaveQueueRef.current;
+      logInlineAiDebugEvent("autosave-wait-finished", {
+        action: current.action.name,
+        streamId
+      });
+
+      if (
+        activeInlineAiStreamIdRef.current !== streamId ||
+        inlineAiPromptRef.current?.streamId !== streamId
+      ) {
+        logInlineAiDebugEvent("submit-cancelled-after-autosave", {
+          action: current.action.name,
+          streamId
+        });
+        return;
+      }
+
+      const latestState = inlineAiPromptRef.current;
+
+      if (
+        !latestState ||
+        latestState.mode !== "inline-action" ||
+        !latestState.action
+      ) {
+        return;
+      }
+
+      const requestState = {
+        ...latestState,
+        documentMarkdown: lastSyncedMarkdownRef.current
+      };
+
+      inlineAiPromptRef.current = requestState;
+      setInlineAiPrompt(requestState);
+
+      const requestedSkills = findExplicitAiSkillMentions(
+        requestState.prompt,
+        availableAiSkills
+      );
       const result = await window.integralNotes.submitInlineAction({
-        actionName: current.action.name,
-        afterText: current.afterText,
-        beforeText: current.beforeText,
-        context: buildInlineAiContextSummary(current),
-        documentMarkdown: current.documentMarkdown,
-        history: current.messages,
-        insertionPosition: current.anchorPos,
-        prompt: current.prompt,
+        actionName: requestState.action.name,
+        afterText: requestState.afterText,
+        beforeText: requestState.beforeText,
+        context: buildInlineAiContextSummary(requestState),
+        documentMarkdown: requestState.documentMarkdown,
+        history: requestState.messages,
+        insertionPosition: requestState.anchorPos,
+        prompt: requestState.prompt,
         requestedSkills,
-        sessionId: current.sessionId,
+        sessionId: requestState.sessionId,
         sourceNotePath: relativePath,
         streamId
       });
 
       logInlineAiDebugEvent("submit-result", {
-        action: current.action.name,
+        action: requestState.action.name,
         hasInsertion: Boolean(result.insertion),
         insertionLength: result.insertion?.text.length ?? 0,
         messageCount: result.messages.length,
@@ -1484,23 +1525,23 @@ export function MilkdownEditor({
         inlineAiPromptRef.current?.streamId !== streamId
       ) {
         logInlineAiDebugEvent("submit-result-ignored", {
-          action: current.action.name,
+          action: requestState.action.name,
           streamId
         });
         return;
       }
 
-      const nextMessages = [...current.messages, result.userMessage, ...result.messages];
+      const nextMessages = [...requestState.messages, result.userMessage, ...result.messages];
 
       if (!result.insertion) {
         logInlineAiDebugEvent("no-insertion", {
-          action: current.action.name,
-          canAnswerOnly: current.action.canAnswerOnly,
+          action: requestState.action.name,
+          canAnswerOnly: requestState.action.canAnswerOnly,
           streamId
         });
         const nextState = {
-          ...current,
-          error: current.action.canAnswerOnly
+          ...requestState,
+          error: requestState.action.canAnswerOnly
             ? null
             : "AI が挿入内容を確定しませんでした。必要なら追加で指示してください。",
           isSubmitting: false,
@@ -1522,23 +1563,23 @@ export function MilkdownEditor({
 
       if (!shouldInsert) {
         logInlineAiDebugEvent("preview-cancelled-before-insert", {
-          action: current.action.name,
+          action: requestState.action.name,
           streamId
         });
         return;
       }
 
       insertMarkdownAtPosition(
-        current.anchorPos,
+        requestState.anchorPos,
         prependInlineAiTranscript(result.insertion.text, buildInlineAiTranscript(nextMessages)),
         {
-          autoSaveReason: current.triggerText.startsWith("@@") ? "inline-ai-finish" : undefined,
-          marker: current.triggerText,
-          originalAfterText: current.afterText
+          autoSaveReason: "inline-ai-finish",
+          marker: requestState.triggerText,
+          originalAfterText: requestState.afterText
         }
       );
       logInlineAiDebugEvent("insert-complete", {
-        action: current.action.name,
+        action: requestState.action.name,
         streamId
       });
 
@@ -1663,26 +1704,28 @@ export function MilkdownEditor({
     }
   };
 
-  const queueCurrentMarkdownAutoSave = (reason: string): void => {
+  const queueCurrentMarkdownAutoSave = (reason: string): Promise<void> => {
     const editor = editorRef.current;
     const markdown = editor?.getMarkdown() ?? lastSyncedMarkdownRef.current;
     lastSyncedMarkdownRef.current = markdown;
-    queueMarkdownAutoSave(markdown, reason);
+    return queueMarkdownAutoSave(markdown, reason);
   };
 
-  const queueMarkdownAutoSave = (markdown: string, reason: string): void => {
+  const queueMarkdownAutoSave = (markdown: string, reason: string): Promise<void> => {
     const requestSave = onRequestSaveRef.current;
 
     if (!requestSave) {
-      return;
+      return Promise.resolve();
     }
 
-    autoSaveQueueRef.current = autoSaveQueueRef.current
+    const nextSave = autoSaveQueueRef.current
       .catch(() => undefined)
       .then(() => Promise.resolve(requestSave(markdown, reason)))
       .catch((error) => {
         onWorkspaceLinkErrorRef.current(toErrorMessage(error));
       });
+    autoSaveQueueRef.current = nextSave;
+    return nextSave;
   };
 
   const buildInlineAiContextSummary = (state: InlineAiPromptState): AiChatContextSummary => ({
