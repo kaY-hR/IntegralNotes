@@ -2346,6 +2346,7 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
 
   return [
     "Use from integral import integral_block.",
+    "The integral SDK lives under the hidden .integral-sdk/python/ import root and is system-managed. Do not create or modify files under .integral-sdk when implementing a block.",
     "The decorator supports display_name, description, inputs, outputs, and params.",
     "Slot objects support name, extension/extensions, datatype, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
     "Before creating a new script, inspect existing workspace scripts such as scripts/**/*.py; if a suitable @integral_block callable already exists, prefer reusing or minimally updating it.",

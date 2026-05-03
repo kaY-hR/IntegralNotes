@@ -154,6 +154,7 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "Help the user converge on a Python analysis block. Ask a concise follow-up question if the request is underspecified.",
     "When the block is ready, implement it as a real workspace Python file by using writeWorkspaceFile.",
     "Use the implement-integral-block skill rules below as the system contract for the Python file.",
+    "The integral SDK lives under the hidden .integral-sdk/python/ import root and is system-managed. Do not create or modify files under .integral-sdk when implementing a block.",
     "Before creating a new script, inspect existing workspace scripts such as scripts/**/*.py; if a suitable @integral_block callable already exists, prefer reusing or minimally updating it.",
     "Prefer a new file under scripts/ai_blocks/ with a descriptive snake_case name unless the user asks for a specific path.",
     "Do not modify the active note. The app will insert the itg-notes block after you return.",

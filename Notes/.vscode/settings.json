@@ -1,8 +1,10 @@
 {
   "python.analysis.extraPaths": [
+    "./.integral-sdk/python",
     "./scripts"
   ],
   "python.autoComplete.extraPaths": [
+    "./.integral-sdk/python",
     "./scripts"
   ]
 }

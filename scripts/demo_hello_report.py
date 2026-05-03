@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import html
+import sys
 from pathlib import Path
 from typing import Any
+
+SDK_IMPORT_ROOT = Path(__file__).resolve().parents[1] / ".integral-sdk" / "python"
+if SDK_IMPORT_ROOT.exists():
+    sys.path.insert(0, str(SDK_IMPORT_ROOT))
 
 from integral import integral_block
 

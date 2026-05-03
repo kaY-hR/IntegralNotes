@@ -70,9 +70,11 @@ const STORE_RUNTIME_DIRECTORY = "runtime";
 const DATASET_STAGING_DIRECTORY = "materialized-datasets";
 const INTEGRAL_BLOCK_LOG_DIRECTORY = "integral-block-logs";
 const INTEGRAL_BLOCK_LOG_DATATYPE = "integral-notes/python-execution-log";
-const PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY = "scripts";
+const PYTHON_SDK_WORKSPACE_SYSTEM_DIRECTORY = ".integral-sdk";
+const PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY = `${PYTHON_SDK_WORKSPACE_SYSTEM_DIRECTORY}/python`;
 const PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY = `${PYTHON_SDK_WORKSPACE_IMPORT_ROOT_DIRECTORY}/integral`;
-const PYTHON_EDITOR_IMPORT_PATH = "./scripts";
+const LEGACY_PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY = "scripts/integral";
+const PYTHON_EDITOR_IMPORT_PATH = "./.integral-sdk/python";
 
 const BUILTIN_DISPLAY_PLUGIN_ID = "core-display";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
@@ -111,6 +113,7 @@ const TEXT_EXTENSIONS = new Set([
 const EXTERNAL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/u;
 const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".integral-sdk",
   ".inline-action",
   ".next",
   ".store",
@@ -123,6 +126,7 @@ const AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES = new Set([
 ]);
 const REFERENCE_CLEANUP_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".integral-sdk",
   ".next",
   ".turbo",
   "coverage",
@@ -2063,6 +2067,7 @@ export class IntegralWorkspaceService {
 
   private assertRegisterableManagedFilePath(rootPath: string, absolutePath: string): void {
     const normalizedRelative = path.relative(rootPath, absolutePath);
+    const normalizedRelativePath = normalizeRelativePath(normalizedRelative);
 
     if (normalizedRelative.length === 0) {
       throw new Error("ワークスペース root 自体は managed file 登録できません。");
@@ -2070,7 +2075,10 @@ export class IntegralWorkspaceService {
 
     const topLevelSegment = normalizedRelative.split(path.sep).filter(Boolean)[0] ?? "";
 
-    if (topLevelSegment === STORE_DIRECTORY) {
+    if (
+      topLevelSegment === STORE_DIRECTORY ||
+      isSystemManagedPythonSdkPath(normalizedRelativePath)
+    ) {
       throw new Error("system 管理ディレクトリ配下は managed file 登録できません。");
     }
   }
@@ -2591,13 +2599,36 @@ export class IntegralWorkspaceService {
       datasetMetadataList.push(datasetMetadata);
     }
 
-    for (const metadata of [...managedFileMetadataList, ...datasetMetadataList]) {
+    const activeManagedFileMetadataList: ManagedFileMetadata[] = [];
+    const activeDatasetMetadataList: DatasetMetadata[] = [];
+
+    for (const metadata of managedFileMetadataList) {
+      if (isSystemManagedPythonSdkPath(metadata.path)) {
+        await this.removeManagedDataMetadata(metadata, { syncManagedDataNotes: false });
+        hasChanges = true;
+        continue;
+      }
+
+      activeManagedFileMetadataList.push(metadata);
+    }
+
+    for (const metadata of datasetMetadataList) {
+      if (isSystemManagedPythonSdkPath(metadata.path)) {
+        await this.removeManagedDataMetadata(metadata, { syncManagedDataNotes: false });
+        hasChanges = true;
+        continue;
+      }
+
+      activeDatasetMetadataList.push(metadata);
+    }
+
+    for (const metadata of [...activeManagedFileMetadataList, ...activeDatasetMetadataList]) {
       if (await this.resolveIfExists(metadata.path)) {
         claimedPaths.add(metadata.path);
       }
     }
 
-    for (const metadata of managedFileMetadataList) {
+    for (const metadata of activeManagedFileMetadataList) {
       const reconciled = await this.reconcileManagedFileMetadata(
         metadata,
         workspaceEntries,
@@ -2621,7 +2652,7 @@ export class IntegralWorkspaceService {
       }
     }
 
-    for (const metadata of datasetMetadataList) {
+    for (const metadata of activeDatasetMetadataList) {
       const reconciled = await this.reconcileDatasetMetadata(
         metadata,
         workspaceEntries,
@@ -3073,6 +3104,10 @@ async function collectWorkspacePythonRelativePaths(
 
     const nextRelativePath =
       currentRelativePath.length === 0 ? entry.name : `${currentRelativePath}/${entry.name}`;
+
+    if (isSystemManagedPythonSdkPath(nextRelativePath)) {
+      continue;
+    }
 
     if (entry.isDirectory()) {
       pythonPaths.push(...(await collectWorkspacePythonRelativePaths(rootPath, nextRelativePath)));
@@ -4268,6 +4303,22 @@ function inferVisibilityFromPath(
   return "visible";
 }
 
+function isSystemManagedPythonSdkPath(relativePath: string): boolean {
+  const normalizedPath = normalizeRelativePath(relativePath);
+  const sdkSystemPaths = [
+    PYTHON_SDK_WORKSPACE_SYSTEM_DIRECTORY,
+    PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY,
+    LEGACY_PYTHON_SDK_WORKSPACE_PACKAGE_DIRECTORY
+  ];
+
+  return sdkSystemPaths.some((sdkSystemPath) => {
+    const normalizedSdkSystemPath = normalizeRelativePath(sdkSystemPath);
+
+    return normalizedPath === normalizedSdkSystemPath ||
+      normalizedPath.startsWith(`${normalizedSdkSystemPath}/`);
+  });
+}
+
 function isHiddenDirectorySegment(segment: string): boolean {
   return segment.startsWith(".") || segment.startsWith("_");
 }
@@ -4591,6 +4642,7 @@ function isAutoRegisterableManagedFileEntry(
 
   if (
     pathSegments.length === 0 ||
+    isSystemManagedPythonSdkPath(normalizedRelativePath) ||
     pathSegments.slice(0, -1).some(isHiddenDirectorySegment) ||
     (pathSegments[pathSegments.length - 1] ?? "").startsWith(".") ||
     pathSegments.some((segment) => AUTO_REGISTER_EXCLUDED_DIRECTORY_NAMES.has(segment))
@@ -4666,9 +4718,18 @@ function buildPythonExecutionLogText({
 }
 
 async function resolveBundledPythonSdkPackageTemplatePath(): Promise<string> {
-  const developmentSourcePath = path.resolve(__dirname, "../../Notes/scripts/integral");
+  const developmentSourcePath = path.resolve(__dirname, "../../Notes/.integral-sdk/python/integral");
+  const developmentFallbackSourcePath = path.resolve(__dirname, "../../.integral-sdk/python/integral");
+  const legacyWorkspaceTemplateDevelopmentSourcePath = path.resolve(__dirname, "../../Notes/scripts/integral");
   const legacyDevelopmentSourcePath = path.resolve(__dirname, "../../scripts/integral");
   const packagedSourcePath = path.join(
+    process.resourcesPath,
+    "workspace-template",
+    ".integral-sdk",
+    "python",
+    "integral"
+  );
+  const legacyWorkspaceTemplatePackagedSourcePath = path.join(
     process.resourcesPath,
     "workspace-template",
     "scripts",
@@ -4676,8 +4737,24 @@ async function resolveBundledPythonSdkPackageTemplatePath(): Promise<string> {
   );
   const legacyPackagedSourcePath = path.join(process.resourcesPath, "python-sdk", "integral");
   const candidatePaths = process.env.VITE_DEV_SERVER_URL
-    ? [developmentSourcePath, legacyDevelopmentSourcePath, packagedSourcePath, legacyPackagedSourcePath]
-    : [packagedSourcePath, legacyPackagedSourcePath, developmentSourcePath, legacyDevelopmentSourcePath];
+    ? [
+        developmentSourcePath,
+        developmentFallbackSourcePath,
+        legacyWorkspaceTemplateDevelopmentSourcePath,
+        legacyDevelopmentSourcePath,
+        packagedSourcePath,
+        legacyWorkspaceTemplatePackagedSourcePath,
+        legacyPackagedSourcePath
+      ]
+    : [
+        packagedSourcePath,
+        legacyWorkspaceTemplatePackagedSourcePath,
+        legacyPackagedSourcePath,
+        developmentSourcePath,
+        developmentFallbackSourcePath,
+        legacyWorkspaceTemplateDevelopmentSourcePath,
+        legacyDevelopmentSourcePath
+      ];
 
   for (const candidatePath of candidatePaths) {
     if (await pathExists(candidatePath)) {

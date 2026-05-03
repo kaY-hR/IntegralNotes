@@ -2,7 +2,7 @@
 
 Use this reference when writing or revising the Python file behind an `@integral_block`.
 
-Use `../../../scripts/integral/__init__.py` as the SDK source of truth. Do not assume demo scripts are present in every workspace template.
+Use `../../../.integral-sdk/python/integral/__init__.py` as the SDK source of truth. Do not assume demo scripts are present in every workspace template.
 
 ## Runtime Contract
 
@@ -91,13 +91,13 @@ Required path helpers should fail clearly:
 
 ## Import Strategy
 
-The bundled runtime is expected to make `scripts/integral/` importable, so the normal import is:
+The bundled runtime is expected to make the hidden `.integral-sdk/python/` import root available, so the normal import is:
 
 ```python
 from integral import integral_block
 ```
 
-If the block lives in a nested folder and should also run directly from the command line or stay IDE-friendly outside the app, reuse the bootstrap pattern from `../../../src/*.py` to prepend the local `scripts/` directory to `sys.path` before importing `integral`.
+If the block lives in a nested folder and should also run directly from the command line or stay IDE-friendly outside the app, prepend the workspace `.integral-sdk/python/` directory to `sys.path` before importing `integral`.
 
 ## Output Metadata
 
