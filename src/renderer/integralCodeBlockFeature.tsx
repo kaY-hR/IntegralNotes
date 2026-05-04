@@ -51,6 +51,7 @@ import {
   IntegralAssetPreviewWindow,
   type IntegralAssetPreviewTarget
 } from "./IntegralAssetDialogs";
+import { CollapseToggleButton } from "./CollapseToggleButton";
 import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
 import {
@@ -725,6 +726,65 @@ function IntegralBlockPanel({
   const blockDefinition = parsed.block
     ? getIntegralBlockDefinition(parsed.block.plugin, parsed.block["block-type"])
     : null;
+  const isExecutedBlock =
+    parsed.block !== null &&
+    blockDefinition?.executionMode === "manual" &&
+    blockDefinition.outputSlots.length > 0 &&
+    blockDefinition.outputSlots.some((slot) =>
+      isExecutedOutputReference(parsed.block?.outputs[slot.name] ?? null, parsed.block?.id)
+    );
+  const blockCollapseIdentity = parsed.block
+    ? createIntegralBlockCollapseIdentity(parsed.block)
+    : "invalid";
+  const blockCollapseSignature = parsed.block
+    ? createIntegralBlockCollapseSignature(parsed.block, isExecutedBlock)
+    : "invalid";
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const autoCollapsedSignatureRef = useRef<string | null>(null);
+  const blockCollapseIdentityRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (blockCollapseIdentityRef.current === blockCollapseIdentity) {
+      return;
+    }
+
+    blockCollapseIdentityRef.current = blockCollapseIdentity;
+    autoCollapsedSignatureRef.current = null;
+    setIsCollapsed(false);
+  }, [blockCollapseIdentity]);
+
+  useEffect(() => {
+    if (!parsed.block) {
+      autoCollapsedSignatureRef.current = null;
+      setIsCollapsed(false);
+      return;
+    }
+
+    if (isExecutedBlock) {
+      if (autoCollapsedSignatureRef.current !== blockCollapseSignature) {
+        autoCollapsedSignatureRef.current = blockCollapseSignature;
+        setIsCollapsed(true);
+      }
+
+      return;
+    }
+
+    if (autoCollapsedSignatureRef.current !== null) {
+      autoCollapsedSignatureRef.current = null;
+      setIsCollapsed(false);
+    }
+  }, [blockCollapseSignature, isExecutedBlock, parsed.block]);
+
+  useEffect(() => {
+    if (!isCollapsed) {
+      return;
+    }
+
+    setSlotDialogState(null);
+    setSlotFieldPicker(null);
+    setSlotFieldPickerLayout(null);
+    setSlotFieldPreviewTarget(null);
+  }, [isCollapsed]);
 
   useEffect(() => {
     setSlotFieldPicker(null);
@@ -1113,12 +1173,6 @@ function IntegralBlockPanel({
   const hasCustomRenderer =
     blockDefinition?.source === "external-plugin" &&
     blockDefinition.externalPlugin?.rendererMode === "iframe";
-  const isExecutedBlock =
-    blockDefinition?.executionMode === "manual" &&
-    blockDefinition.outputSlots.length > 0 &&
-    blockDefinition.outputSlots.some((slot) =>
-      isExecutedOutputReference(parsed.block.outputs[slot.name] ?? null, parsed.block.id)
-    );
   const paramsForm = blockDefinition?.paramsSchema ? (
     <IntegralParamsForm
       disabled={isExecutedBlock || runState.status === "running"}
@@ -1130,21 +1184,22 @@ function IntegralBlockPanel({
       schema={blockDefinition.paramsSchema}
     />
   ) : null;
+  const toggleCollapsed = (): void => {
+    setIsCollapsed((current) => !current);
+  };
 
   if (!blockDefinition) {
     return (
-      <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
+      <div className={createIntegralBlockRootClassName({ isCollapsed, selected })}>
         <div className="integral-json-preview">
-          <div className="integral-json-preview__header">
-            <div>
-              <p className="integral-json-preview__eyebrow">Integral Block</p>
-              <h3 className="integral-json-preview__title">Unknown Block</h3>
-            </div>
-            <code className="integral-json-preview__type">
-              {parsed.block.plugin}/{parsed.block["block-type"]}
-            </code>
-          </div>
-          {renderIntegralBlockBody(parsed.block)}
+          <IntegralBlockHeader
+            blockType={`${parsed.block.plugin}/${parsed.block["block-type"]}`}
+            collapsed={isCollapsed}
+            eyebrow="Integral Block"
+            onToggleCollapsed={toggleCollapsed}
+            title="Unknown Block"
+          />
+          {isCollapsed ? null : renderIntegralBlockBody(parsed.block)}
         </div>
       </div>
     );
@@ -1157,9 +1212,20 @@ function IntegralBlockPanel({
     const hasSourceNote = sourceManagedData?.canOpenDataNote === true;
 
     return (
-      <div className={`integral-code-block integral-code-block--display${selected ? " integral-code-block--selected" : ""}`}>
+      <div
+        className={createIntegralBlockRootClassName({
+          extraClassName: "integral-code-block--display",
+          isCollapsed,
+          selected
+        })}
+      >
         <div className="integral-display-block">
           <div className="integral-display-block__toolbar">
+            <CollapseToggleButton
+              className="integral-display-block__collapse"
+              collapsed={isCollapsed}
+              onToggle={toggleCollapsed}
+            />
             <button
               className="integral-code-block__button integral-code-block__button--ghost integral-display-block__picker"
               onClick={() => {
@@ -1182,16 +1248,16 @@ function IntegralBlockPanel({
               </button>
             ) : null}
           </div>
-          <DatasetRenderableView datasetId={sourceDatasetId} />
+          {isCollapsed ? null : <DatasetRenderableView datasetId={sourceDatasetId} />}
         </div>
 
-        {inlineError ? (
+        {!isCollapsed && inlineError ? (
           <div className="integral-code-block__result integral-code-block__result--error">
             <strong>{inlineError}</strong>
           </div>
         ) : null}
 
-        {slotDialogState ? (
+        {!isCollapsed && slotDialogState ? (
           <DatasetPickerDialog
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
@@ -1509,37 +1575,39 @@ function IntegralBlockPanel({
 
   if (hasCustomRenderer) {
     return (
-      <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
+      <div className={createIntegralBlockRootClassName({ isCollapsed, selected })}>
         <div className="integral-json-preview integral-json-preview--compact">
-          <div className="integral-json-preview__header">
-            <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
-            <code className="integral-json-preview__type">
-              {parsed.block["block-type"]}
-            </code>
-          </div>
+          <IntegralBlockHeader
+            blockType={parsed.block["block-type"]}
+            collapsed={isCollapsed}
+            onToggleCollapsed={toggleCollapsed}
+            title={blockDefinition.title}
+          />
 
-          {blockDefinition.description ? (
+          {!isCollapsed && blockDefinition.description ? (
             <p className="integral-json-preview__description">{blockDefinition.description}</p>
           ) : null}
 
-          <ExternalPluginBlockRenderer
-            block={parsed.block}
-            definition={blockDefinition}
-            onUpdateParams={onUpdateParams}
-          />
+          {isCollapsed ? null : (
+            <ExternalPluginBlockRenderer
+              block={parsed.block}
+              definition={blockDefinition}
+              onUpdateParams={onUpdateParams}
+            />
+          )}
 
-          {paramsForm}
+          {isCollapsed ? null : paramsForm}
 
-          {slotAssignments}
+          {isCollapsed ? null : slotAssignments}
         </div>
 
-        {inlineError ? (
+        {!isCollapsed && inlineError ? (
           <div className="integral-code-block__result integral-code-block__result--error">
             <strong>{inlineError}</strong>
           </div>
         ) : null}
 
-        {slotDialogState ? (
+        {!isCollapsed && slotDialogState ? (
           <DatasetPickerDialog
             defaultDatasetName={slotDialogState.slotName}
             onClose={() => {
@@ -1558,24 +1626,24 @@ function IntegralBlockPanel({
   }
 
   return (
-    <div className={`integral-code-block${selected ? " integral-code-block--selected" : ""}`}>
+    <div className={createIntegralBlockRootClassName({ isCollapsed, selected })}>
       <div className="integral-json-preview integral-json-preview--compact">
-        <div className="integral-json-preview__header">
-          <h3 className="integral-json-preview__title">{blockDefinition.title}</h3>
-          <code className="integral-json-preview__type">
-            {parsed.block["block-type"]}
-          </code>
-        </div>
+        <IntegralBlockHeader
+          blockType={parsed.block["block-type"]}
+          collapsed={isCollapsed}
+          onToggleCollapsed={toggleCollapsed}
+          title={blockDefinition.title}
+        />
 
-        {blockDefinition.description ? (
+        {!isCollapsed && blockDefinition.description ? (
           <p className="integral-json-preview__description">{blockDefinition.description}</p>
         ) : null}
 
-        {paramsForm}
+        {isCollapsed ? null : paramsForm}
 
-        {slotAssignments}
+        {isCollapsed ? null : slotAssignments}
 
-        {blockDefinition.executionMode === "manual" && !hasCustomRenderer ? (
+        {!isCollapsed && blockDefinition.executionMode === "manual" && !hasCustomRenderer ? (
           <div className="integral-code-block__runbar">
             {isExecutedBlock ? (
               <div className="integral-code-block__runbar-actions">
@@ -1611,15 +1679,15 @@ function IntegralBlockPanel({
 
       </div>
 
-      {inlineError ? (
+      {!isCollapsed && inlineError ? (
         <div className="integral-code-block__result integral-code-block__result--error">
           <strong>{inlineError}</strong>
         </div>
       ) : null}
 
-      {runState.status !== "idle" ? <RunStateView runState={runState} /> : null}
+      {!isCollapsed && runState.status !== "idle" ? <RunStateView runState={runState} /> : null}
 
-      {slotDialogState ? (
+      {!isCollapsed && slotDialogState ? (
         <DatasetPickerDialog
           defaultDatasetName={slotDialogState.slotName}
           onClose={() => {
@@ -1633,6 +1701,37 @@ function IntegralBlockPanel({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+function IntegralBlockHeader({
+  blockType,
+  collapsed,
+  eyebrow,
+  onToggleCollapsed,
+  title
+}: {
+  blockType: string;
+  collapsed: boolean;
+  eyebrow?: string;
+  onToggleCollapsed: () => void;
+  title: string;
+}): JSX.Element {
+  return (
+    <div className="integral-json-preview__header">
+      <div className="integral-json-preview__heading">
+        <CollapseToggleButton
+          className="integral-json-preview__collapse"
+          collapsed={collapsed}
+          onToggle={onToggleCollapsed}
+        />
+        <div className="integral-json-preview__heading-text">
+          {eyebrow ? <p className="integral-json-preview__eyebrow">{eyebrow}</p> : null}
+          <h3 className="integral-json-preview__title">{title}</h3>
+        </div>
+      </div>
+      <code className="integral-json-preview__type">{blockType}</code>
     </div>
   );
 }
@@ -2110,6 +2209,43 @@ function computeSlotFieldPopupLayout(coords: {
     maxHeight,
     y: Math.max(margin, coords.top - maxHeight - offset)
   };
+}
+
+function createIntegralBlockRootClassName({
+  extraClassName,
+  isCollapsed,
+  selected
+}: {
+  extraClassName?: string;
+  isCollapsed: boolean;
+  selected: boolean;
+}): string {
+  return [
+    "integral-code-block",
+    extraClassName ?? "",
+    isCollapsed ? "integral-code-block--collapsed" : "",
+    selected ? "integral-code-block--selected" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function createIntegralBlockCollapseIdentity(block: IntegralBlockDocument): string {
+  return [block.id ?? "", block.plugin, block["block-type"]].join("|");
+}
+
+function createIntegralBlockCollapseSignature(
+  block: IntegralBlockDocument,
+  isExecutedBlock: boolean
+): string {
+  const outputSignature = Object.entries(block.outputs)
+    .sort(([leftName], [rightName]) => leftName.localeCompare(rightName, "ja"))
+    .map(([slotName, value]) => `${slotName}=${value ?? ""}`)
+    .join("&");
+
+  return `${createIntegralBlockCollapseIdentity(block)}|executed=${
+    isExecutedBlock ? "1" : "0"
+  }|outputs=${outputSignature}`;
 }
 
 function createIdleRunState(): RunState {
