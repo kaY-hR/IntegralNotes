@@ -278,10 +278,7 @@ function createLayoutModel(): FlexLayout.Model {
       return { enableDeleteWhenEmpty: true };
     }
 
-    return {
-      id: MAIN_TABSET_ID,
-      enableDeleteWhenEmpty: true
-    };
+    return { enableDeleteWhenEmpty: true };
   });
 
   return model;
@@ -917,6 +914,48 @@ function findSelectedTabId(model: FlexLayout.Model): string | undefined {
   return selectedTabId;
 }
 
+function findAdjacentLayoutTabId(
+  model: FlexLayout.Model,
+  selectedTabId: string | undefined,
+  direction: -1 | 1
+): string | undefined {
+  const currentTabId =
+    selectedTabId && model.getNodeById(selectedTabId) ? selectedTabId : findSelectedTabId(model);
+
+  if (!currentTabId) {
+    return undefined;
+  }
+
+  const currentNode = model.getNodeById(currentTabId);
+
+  if (!currentNode || currentNode.getType() !== "tab") {
+    return undefined;
+  }
+
+  const parentNode = currentNode.getParent();
+
+  if (!parentNode || parentNode.getType() !== "tabset") {
+    return undefined;
+  }
+
+  const tabIds = parentNode
+    .getChildren()
+    .filter((node): node is FlexLayout.TabNode => node.getType() === "tab")
+    .map((node) => node.getId());
+
+  if (tabIds.length < 2) {
+    return undefined;
+  }
+
+  const currentIndex = tabIds.indexOf(currentTabId);
+
+  if (currentIndex < 0) {
+    return undefined;
+  }
+
+  return tabIds[(currentIndex + direction + tabIds.length) % tabIds.length];
+}
+
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -1043,6 +1082,19 @@ function isZoomInShortcut(event: KeyboardEvent): boolean {
 
 function isZoomResetShortcut(event: KeyboardEvent): boolean {
   return isZoomModifierPressed(event) && (event.key === "0" || event.code === "Digit0" || event.code === "Numpad0");
+}
+
+function isLayoutTabSwitchShortcut(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && !event.altKey && event.key === "Tab";
+}
+
+function isCloseSelectedLayoutTabShortcut(event: KeyboardEvent): boolean {
+  return (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === "w"
+  );
 }
 
 function clampContextMenuPosition(x: number, y: number): Pick<TreeContextMenuState, "x" | "y"> {
@@ -2714,6 +2766,84 @@ export function App(): JSX.Element {
       return changed ? nextTabs : currentTabs;
     });
   };
+
+  const syncSelectedLayoutTab = (tabId: string | undefined): void => {
+    setSelectedTabId(tabId);
+
+    if (!tabId) {
+      return;
+    }
+
+    const relativePath = toRelativePathFromTabId(tabId);
+
+    if (relativePath) {
+      setLastFocusedWorkspaceTabPath(relativePath);
+      syncTreeSelectionForPath(relativePath);
+    }
+  };
+
+  const selectLayoutTab = (tabId: string): void => {
+    if (!model.getNodeById(tabId)) {
+      return;
+    }
+
+    model.doAction(FlexLayout.Actions.selectTab(tabId));
+    syncSelectedLayoutTab(tabId);
+  };
+
+  const selectAdjacentLayoutTab = (direction: -1 | 1): void => {
+    const nextTabId = findAdjacentLayoutTabId(model, selectedTabId, direction);
+
+    if (nextTabId) {
+      selectLayoutTab(nextTabId);
+    }
+  };
+
+  const closeSelectedLayoutTab = (): void => {
+    const currentTabId =
+      selectedTabId && model.getNodeById(selectedTabId) ? selectedTabId : findSelectedTabId(model);
+
+    if (!currentTabId || !model.getNodeById(currentTabId)) {
+      return;
+    }
+
+    const relativePath = toRelativePathFromTabId(currentTabId);
+
+    if (relativePath) {
+      requestCloseDirtyTab(relativePath);
+      return;
+    }
+
+    model.doAction(FlexLayout.Actions.deleteTab(currentTabId));
+    syncSelectedLayoutTab(findSelectedTabId(model));
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (hasBlockingDialog) {
+        return;
+      }
+
+      if (isLayoutTabSwitchShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        selectAdjacentLayoutTab(event.shiftKey ? -1 : 1);
+        return;
+      }
+
+      if (isCloseSelectedLayoutTabShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSelectedLayoutTab();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  });
 
   const handleCreateResult = async (result: CreateEntryResult): Promise<void> => {
     setWorkspace(result.snapshot);
