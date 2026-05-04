@@ -36,6 +36,7 @@ import {
   getAiSkillSuggestions,
   type AiSkillTextTrigger
 } from "../shared/aiChatSkills";
+import type { LinkPickerRankingSettings } from "../shared/appSettings";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "../shared/workspace";
 import {
   removeWorkspaceMarkdownReferences,
@@ -65,6 +66,7 @@ interface MilkdownEditorProps {
   focusedBlockId?: string | null;
   initialValue: string;
   isActive: boolean;
+  linkPickerRanking: LinkPickerRankingSettings;
   onChange: (markdown: string) => void;
   onFocusedBlockHandled?: () => void;
   onIntegralAssetCatalogChanged: (catalog: IntegralAssetCatalog) => void;
@@ -82,6 +84,12 @@ interface MilkdownEditorProps {
 interface WorkspaceFileSuggestion {
   name: string;
   relativePath: string;
+}
+
+interface WorkspaceSuggestionRankingContext {
+  completionKind: LinkCompletionState["kind"];
+  pathHops: ReadonlyMap<string, number>;
+  rankingSettings: LinkPickerRankingSettings;
 }
 
 const INTEGRAL_ERROR_BLOCK_LANGUAGE = "integral-error";
@@ -176,12 +184,15 @@ const INLINE_AI_POPUP_WIDTH = 520;
 const INLINE_AI_STREAM_UPDATE_INTERVAL_MS = 80;
 const INLINE_AI_STREAMING_TEXT_MAX_CHARS = 12_000;
 const INLINE_AI_TOOL_TRACE_PREVIEW_LIMIT = 24;
+const LINK_PICKER_GRAPH_MAX_HOPS = 3;
+const LINK_PICKER_OUT_OF_RANGE_HOP = LINK_PICKER_GRAPH_MAX_HOPS + 1;
 
 export function MilkdownEditor({
   analysisResultDirectory,
   focusedBlockId,
   initialValue,
   isActive,
+  linkPickerRanking,
   onChange,
   onFocusedBlockHandled,
   onIntegralAssetCatalogChanged,
@@ -219,6 +230,8 @@ export function MilkdownEditor({
   const activeInlineAiStreamIdRef = useRef<string | null>(null);
   const completionPanelRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
+  const linkPickerRankingRef = useRef(linkPickerRanking);
+  const relationPathHopsRef = useRef<ReadonlyMap<string, number>>(new Map());
   const selectedEntryPathsRef = useRef<string[]>(selectedEntryPaths);
   const availableInlineActionsRef = useRef<InlineActionDefinition[]>([]);
   const workspaceFilesRef = useRef<WorkspaceFileSuggestion[]>(
@@ -235,6 +248,9 @@ export function MilkdownEditor({
     useState<InlineAiSkillCompletionState | null>(null);
   const [availableAiSkills, setAvailableAiSkills] = useState<AiChatSkillSummary[]>([]);
   const [availableInlineActions, setAvailableInlineActions] = useState<InlineActionDefinition[]>([]);
+  const [relationPathHops, setRelationPathHops] = useState<ReadonlyMap<string, number>>(
+    () => new Map()
+  );
 
   useEffect(() => {
     analysisResultDirectoryRef.current = analysisResultDirectory ?? null;
@@ -269,6 +285,14 @@ export function MilkdownEditor({
   }, [onWorkspaceLinkError]);
 
   useEffect(() => {
+    linkPickerRankingRef.current = linkPickerRanking;
+  }, [linkPickerRanking]);
+
+  useEffect(() => {
+    relationPathHopsRef.current = relationPathHops;
+  }, [relationPathHops]);
+
+  useEffect(() => {
     isActiveRef.current = isActive;
 
     if (!isActive) {
@@ -295,6 +319,42 @@ export function MilkdownEditor({
   useEffect(() => {
     workspaceRootNameRef.current = workspaceRootName;
   }, [workspaceRootName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const originPath = normalizeRelativePath(relativePath);
+
+    if (!isActive || !workspaceRootName || originPath.length === 0) {
+      setRelationPathHops(new Map());
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void window.integralNotes
+      .getRelationPathDistances({
+        maxHops: LINK_PICKER_GRAPH_MAX_HOPS,
+        originPath
+      })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRelationPathHops(
+          new Map((result?.distances ?? []).map((distance) => [distance.path, distance.hop]))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRelationPathHops(new Map());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive, relativePath, workspaceRootName]);
 
   useEffect(() => {
     availableInlineActionsRef.current = availableInlineActions;
@@ -901,7 +961,12 @@ export function MilkdownEditor({
 
       const matches = getVisibleWorkspaceFileSuggestions(
         workspaceFilesRef.current,
-        completionState.query
+        completionState.query,
+        {
+          completionKind: completionState.kind,
+          pathHops: relationPathHopsRef.current,
+          rankingSettings: linkPickerRankingRef.current
+        }
       );
 
       if (event.key === "Escape") {
@@ -1000,7 +1065,11 @@ export function MilkdownEditor({
   }, []);
 
   const visibleSuggestions = linkCompletion
-    ? getVisibleWorkspaceFileSuggestions(workspaceFilesRef.current, linkCompletion.query)
+    ? getVisibleWorkspaceFileSuggestions(workspaceFilesRef.current, linkCompletion.query, {
+        completionKind: linkCompletion.kind,
+        pathHops: relationPathHops,
+        rankingSettings: linkPickerRanking
+      })
     : [];
   const selectedSuggestionIndex =
     visibleSuggestions.length === 0
@@ -2576,16 +2645,27 @@ function computeAnalysisCompletionState(
 
 function getVisibleWorkspaceFileSuggestions(
   suggestions: WorkspaceFileSuggestion[],
-  query: string
+  query: string,
+  rankingContext: WorkspaceSuggestionRankingContext
 ): WorkspaceFileSuggestion[] {
   const normalizedQuery = query.trim().toLocaleLowerCase("ja");
   const ranked = suggestions
     .map((suggestion) => ({
+      extensionRank: getWorkspaceSuggestionExtensionRank(suggestion, rankingContext),
+      graphHop: getWorkspaceSuggestionGraphHop(suggestion, rankingContext.pathHops),
       score: scoreWorkspaceSuggestion(suggestion, normalizedQuery),
       suggestion
     }))
     .filter((entry) => entry.score < Number.POSITIVE_INFINITY)
     .sort((left, right) => {
+      if (left.graphHop !== right.graphHop) {
+        return left.graphHop - right.graphHop;
+      }
+
+      if (left.extensionRank !== right.extensionRank) {
+        return left.extensionRank - right.extensionRank;
+      }
+
       if (left.score !== right.score) {
         return left.score - right.score;
       }
@@ -2594,6 +2674,30 @@ function getVisibleWorkspaceFileSuggestions(
     });
 
   return ranked.map((entry) => entry.suggestion);
+}
+
+function getWorkspaceSuggestionGraphHop(
+  suggestion: WorkspaceFileSuggestion,
+  pathHops: ReadonlyMap<string, number>
+): number {
+  const hop = pathHops.get(normalizeRelativePath(suggestion.relativePath));
+  return hop !== undefined && hop <= LINK_PICKER_GRAPH_MAX_HOPS
+    ? hop
+    : LINK_PICKER_OUT_OF_RANGE_HOP;
+}
+
+function getWorkspaceSuggestionExtensionRank(
+  suggestion: WorkspaceFileSuggestion,
+  rankingContext: WorkspaceSuggestionRankingContext
+): number {
+  const priority =
+    rankingContext.completionKind === "embed"
+      ? rankingContext.rankingSettings.embedLinkExtensions
+      : rankingContext.rankingSettings.normalLinkExtensions;
+  const extension = getWorkspaceFileExtension(suggestion.relativePath);
+  const index = priority.indexOf(extension);
+
+  return index === -1 ? priority.length : index;
 }
 
 function getVisibleIntegralBlockSuggestions(
@@ -2792,6 +2896,22 @@ function getFileName(relativePath: string): string {
   const normalizedPath = relativePath.replace(/\\/gu, "/");
   const segments = normalizedPath.split("/");
   return segments[segments.length - 1] ?? normalizedPath;
+}
+
+function getWorkspaceFileExtension(relativePath: string): string {
+  const fileName = getFileName(relativePath);
+  const extensionStart = fileName.lastIndexOf(".");
+
+  return extensionStart > 0 ? fileName.slice(extensionStart).toLowerCase() : "";
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath
+    .trim()
+    .replace(/\\/gu, "/")
+    .split("/")
+    .filter((part) => part.length > 0 && part !== ".")
+    .join("/");
 }
 
 function clampPopupCoordinate(value: number, panelSize: number, viewportSize: number): number {

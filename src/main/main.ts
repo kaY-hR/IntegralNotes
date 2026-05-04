@@ -30,6 +30,10 @@ import type {
 } from "../shared/integral";
 import { normalizeIntegralSlotExtensions } from "../shared/integral";
 import type {
+  RelationGraphNeighborhoodRequest,
+  RelationGraphPathDistanceRequest
+} from "../shared/relationGraph";
+import type {
   CopyEntriesRequest,
   CopyExternalEntriesRequest,
   CreateEntryRequest,
@@ -58,6 +62,7 @@ import { AiChatService } from "./aiChatService";
 import { AiHostCommandService } from "./aiHostCommandService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
+import { RelationGraphService } from "./relationGraphService";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
@@ -466,6 +471,7 @@ let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 let pluginRegistry: PluginRegistry | null = null;
 let integralWorkspaceService: IntegralWorkspaceService | null = null;
+let relationGraphService: RelationGraphService | null = null;
 let closingAfterUnsavedConfirmation = false;
 let closeConfirmationPending = false;
 let closeConfirmationRequestSequence = 0;
@@ -601,6 +607,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("workspace:sync", async () => {
     const snapshot = await workspaceService.syncWorkspace();
+    await getRelationGraphService().synchronize();
     mainWindow?.setTitle(formatWindowTitle(snapshot));
     return snapshot;
   });
@@ -633,6 +640,7 @@ function registerIpcHandlers(): void {
     }
 
     const applyResult = await workspaceService.applyWorkspaceTemplate();
+    await getRelationGraphService().synchronize();
     mainWindow.setTitle(formatWindowTitle(applyResult.snapshot));
 
     return applyResult;
@@ -653,10 +661,22 @@ function registerIpcHandlers(): void {
     }
 
     const snapshot = await workspaceService.setRootPath(result.filePaths[0]);
+    await getRelationGraphService().synchronize();
     mainWindow.setTitle(formatWindowTitle(snapshot));
 
     return snapshot;
   });
+  ipcMain.handle("relation-graph:getSnapshot", async () => getRelationGraphService().getSnapshot());
+  ipcMain.handle(
+    "relation-graph:getNeighborhood",
+    async (_event, request: RelationGraphNeighborhoodRequest) =>
+      getRelationGraphService().getNeighborhood(request)
+  );
+  ipcMain.handle(
+    "relation-graph:getPathDistances",
+    async (_event, request: RelationGraphPathDistanceRequest) =>
+      getRelationGraphService().getPathDistances(request)
+  );
     ipcMain.handle("workspace:selectDirectory", async (_event, initialRelativePath?: string | null) => {
       if (!mainWindow) {
         throw new Error("main window is not available.");
@@ -1090,6 +1110,14 @@ function getIntegralWorkspaceService(): IntegralWorkspaceService {
   return integralWorkspaceService;
 }
 
+function getRelationGraphService(): RelationGraphService {
+  if (relationGraphService === null) {
+    throw new Error("relation graph service is not ready.");
+  }
+
+  return relationGraphService;
+}
+
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
@@ -1116,8 +1144,15 @@ if (!hasSingleInstanceLock) {
       pluginRegistry,
       appSettingsService
     );
+    relationGraphService = new RelationGraphService({
+      getAssetCatalog: () => getIntegralWorkspaceService().listAssetCatalog(),
+      workspaceService
+    });
     workspaceService.addMutationListener((mutations) =>
       getIntegralWorkspaceService().handleWorkspaceMutations(mutations)
+    );
+    workspaceService.addMutationListener((mutations) =>
+      getRelationGraphService().handleWorkspaceMutations(mutations)
     );
     registerIpcHandlers();
     await createMainWindow();

@@ -47,6 +47,11 @@ const api: IntegralNotesApi = {
   openWorkspaceFolder: () => ipcRenderer.invoke("workspace:openFolder"),
   syncWorkspace: () => ipcRenderer.invoke("workspace:sync"),
   applyWorkspaceTemplate: () => ipcRenderer.invoke("workspace:applyTemplate"),
+  getRelationGraphSnapshot: () => ipcRenderer.invoke("relation-graph:getSnapshot"),
+  getRelationNeighborhood: (request) =>
+    ipcRenderer.invoke("relation-graph:getNeighborhood", request),
+  getRelationPathDistances: (request) =>
+    ipcRenderer.invoke("relation-graph:getPathDistances", request),
   zoomIn: () => adjustZoomLevel("in"),
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),

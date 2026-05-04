@@ -5,6 +5,7 @@ import {
   DEFAULT_APP_SETTINGS,
   normalizeAnalysisResultDirectory,
   normalizeDataRegistrationDirectory,
+  normalizeLinkPickerRankingSettings,
   normalizeUserId,
   type AppSettings,
   type SaveAppSettingsRequest
@@ -29,6 +30,16 @@ export class AppSettingsService {
         request.dataRegistrationDirectory === undefined
           ? currentSettings.dataRegistrationDirectory
           : normalizeDataRegistrationDirectory(request.dataRegistrationDirectory),
+      linkPickerRanking:
+        request.linkPickerRanking === undefined
+          ? currentSettings.linkPickerRanking
+          : normalizeLinkPickerRankingSettings(
+              {
+                ...currentSettings.linkPickerRanking,
+                ...request.linkPickerRanking
+              },
+              currentSettings.linkPickerRanking
+            ),
       userId:
         request.userId === undefined
           ? currentSettings.userId
@@ -55,6 +66,7 @@ export class AppSettingsService {
         dataRegistrationDirectory: normalizeDataRegistrationDirectory(
           parsed.dataRegistrationDirectory
         ),
+        linkPickerRanking: normalizeLinkPickerRankingSettings(parsed.linkPickerRanking),
         userId: normalizeUserId(parsed.userId)
       };
     } catch (error) {

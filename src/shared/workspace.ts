@@ -45,6 +45,13 @@ import type {
   UndoIntegralBlockRequest,
   UndoIntegralBlockResult
 } from "./integral";
+import type {
+  RelationGraphNeighborhood,
+  RelationGraphNeighborhoodRequest,
+  RelationGraphPathDistanceRequest,
+  RelationGraphPathDistances,
+  RelationGraphSnapshot
+} from "./relationGraph";
 
 export type WorkspaceEntryKind = "directory" | "file";
 
@@ -326,6 +333,13 @@ export interface IntegralNotesApi {
   openWorkspaceFolder: () => Promise<WorkspaceSnapshot | null>;
   syncWorkspace: () => Promise<WorkspaceSnapshot | null>;
   applyWorkspaceTemplate: () => Promise<ApplyWorkspaceTemplateResult | null>;
+  getRelationGraphSnapshot: () => Promise<RelationGraphSnapshot | null>;
+  getRelationNeighborhood: (
+    request: RelationGraphNeighborhoodRequest
+  ) => Promise<RelationGraphNeighborhood | null>;
+  getRelationPathDistances: (
+    request: RelationGraphPathDistanceRequest
+  ) => Promise<RelationGraphPathDistances | null>;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
