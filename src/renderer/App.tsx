@@ -251,11 +251,11 @@ function createDefaultSearchSidebarState(): SearchSidebarState {
 }
 
 function createLayoutModel(): FlexLayout.Model {
-  return FlexLayout.Model.fromJson({
+  const model = FlexLayout.Model.fromJson({
     global: {
       splitterSize: 6,
       tabEnableRename: false,
-      tabSetEnableDeleteWhenEmpty: false,
+      tabSetEnableDeleteWhenEmpty: true,
       tabSetEnableMaximize: true,
       tabSetEnableTabScrollbar: true
     },
@@ -266,12 +266,25 @@ function createLayoutModel(): FlexLayout.Model {
           id: MAIN_TABSET_ID,
           type: "tabset",
           weight: 100,
-          enableDeleteWhenEmpty: false,
+          enableDeleteWhenEmpty: true,
           children: []
         }
       ]
     }
   });
+
+  model.setOnCreateTabSet((tabNode) => {
+    if (tabNode) {
+      return { enableDeleteWhenEmpty: true };
+    }
+
+    return {
+      id: MAIN_TABSET_ID,
+      enableDeleteWhenEmpty: true
+    };
+  });
+
+  return model;
 }
 
 function toTabId(relativePath: string): string {
