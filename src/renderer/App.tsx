@@ -1333,6 +1333,21 @@ export function App(): JSX.Element {
     }
   };
 
+  const runWorkspaceSync = (): void => {
+    if (!workspace) {
+      setStatusMessage("ワークスペースフォルダを開いてください。");
+      return;
+    }
+
+    if (loadingWorkspace) {
+      return;
+    }
+
+    void refreshWorkspace("ワークスペースを更新しました", {
+      reloadWorkspaceRuntime: true
+    });
+  };
+
   useEffect(() => {
     return window.integralNotes.onAiHostCommandApprovalRequest((request) => {
       setHostCommandDialog({
@@ -2123,6 +2138,13 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "F5" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        runWorkspaceSync();
+        return;
+      }
+
       if (isZoomInShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -2160,7 +2182,7 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [activeTab]);
+  }, [activeTab, loadingWorkspace, workspace]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -3740,11 +3762,8 @@ export function App(): JSX.Element {
             </button>
             <button
               className="button button--ghost sidebar__action-text"
-              onClick={() => {
-                void refreshWorkspace("ワークスペースを更新しました", {
-                  reloadWorkspaceRuntime: true
-                });
-              }}
+              disabled={loadingWorkspace}
+              onClick={runWorkspaceSync}
               type="button"
             >
               Sync
