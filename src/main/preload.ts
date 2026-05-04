@@ -86,6 +86,8 @@ const api: IntegralNotesApi = {
   copyEntries: (request) => ipcRenderer.invoke("workspace:copyEntries", request),
   moveEntries: (request) => ipcRenderer.invoke("workspace:moveEntries", request),
   copyExternalEntries: (request) => ipcRenderer.invoke("workspace:copyExternalEntries", request),
+  addPythonScriptToUserStock: (relativePath) =>
+    ipcRenderer.invoke("workspace:addPythonScriptToUserStock", relativePath),
   saveClipboardImage: (request) => ipcRenderer.invoke("workspace:saveClipboardImage", request),
   saveNoteImage: (request, content) => ipcRenderer.invoke("workspace:saveNoteImage", request, content),
   getPathForFile: (file) =>

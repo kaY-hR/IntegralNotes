@@ -10,7 +10,9 @@ import {
   type ModelMessage,
   type ToolSet
 } from "ai";
+import { createHash } from "node:crypto";
 import { promises as fs, type Dirent } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 
@@ -25,7 +27,9 @@ import {
   type AiChatToolTraceEntry,
   type InlineActionReadScope
 } from "../shared/aiChat";
+import { normalizeAiSkillNameKey } from "../shared/aiChatSkills";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
+import { getGlobalSkillRootPaths } from "./pathTokens";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
@@ -422,13 +426,13 @@ export class AiAgentService {
     const readAccess = createReadAccess(context, effectivePolicy);
     const { experimental_createSkillTool, createBashTool } =
       await importEsmModule<typeof import("bash-tool")>("bash-tool");
-    const skillsDirectoryPath = path.join(workspaceRootPath, ".codex", "skills");
+    const mergedSkillsDirectoryPath = await prepareAgentSkillsDirectory(workspaceRootPath);
     const [workspaceFiles, skillToolkit] = await Promise.all([
       collectWorkspaceFiles(workspaceRootPath, readAccess),
-      (await directoryExists(skillsDirectoryPath))
+      mergedSkillsDirectoryPath
         ? experimental_createSkillTool({
             destination: AGENT_SKILLS_DESTINATION,
-            skillsDirectory: skillsDirectoryPath
+            skillsDirectory: mergedSkillsDirectoryPath
           })
         : Promise.resolve(null)
     ]);
@@ -576,6 +580,100 @@ async function directoryExists(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function prepareAgentSkillsDirectory(workspaceRootPath: string): Promise<string | null> {
+  const sourceRoots = [
+    path.join(workspaceRootPath, ".codex", "skills"),
+    path.join(workspaceRootPath, "Notes", ".codex", "skills"),
+    ...getGlobalSkillRootPaths()
+  ];
+  const existingRoots: string[] = [];
+
+  for (const sourceRoot of sourceRoots) {
+    if (await directoryExists(sourceRoot)) {
+      existingRoots.push(sourceRoot);
+    }
+  }
+
+  if (existingRoots.length === 0) {
+    return null;
+  }
+
+  const targetRoot = path.join(
+    os.tmpdir(),
+    "integralnotes-ai-skills",
+    createHash("sha1").update(path.resolve(workspaceRootPath)).digest("hex").slice(0, 12)
+  );
+  const seenSkillNames = new Set<string>();
+  const copiedDirectoryNames = new Set<string>();
+  let copiedSkillCount = 0;
+
+  await fs.rm(targetRoot, { force: true, recursive: true });
+  await fs.mkdir(targetRoot, { recursive: true });
+
+  for (const sourceRoot of existingRoots) {
+    const entries = await fs.readdir(sourceRoot, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "ja"))) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const sourceSkillPath = path.join(sourceRoot, entry.name);
+      const skillName = await readSkillName(sourceSkillPath, entry.name);
+
+      if (!skillName) {
+        continue;
+      }
+
+      const skillKey = normalizeAiSkillNameKey(skillName);
+
+      if (seenSkillNames.has(skillKey)) {
+        continue;
+      }
+
+      seenSkillNames.add(skillKey);
+      const destinationName = createUniqueSkillDirectoryName(entry.name, copiedDirectoryNames);
+      await fs.cp(sourceSkillPath, path.join(targetRoot, destinationName), { recursive: true });
+      copiedSkillCount += 1;
+    }
+  }
+
+  return copiedSkillCount > 0 ? targetRoot : null;
+}
+
+function createUniqueSkillDirectoryName(name: string, usedNames: Set<string>): string {
+  const normalizedName = name.trim().replace(/[^A-Za-z0-9._-]+/gu, "-") || "skill";
+  let candidate = normalizedName;
+  let suffix = 2;
+
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${normalizedName}-${suffix}`;
+    suffix += 1;
+  }
+
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+async function readSkillName(skillDirectoryPath: string, fallbackName: string): Promise<string | null> {
+  const skillFilePath = path.join(skillDirectoryPath, "SKILL.md");
+  const content = await fs.readFile(skillFilePath, "utf8").catch(() => null);
+
+  if (content === null) {
+    return null;
+  }
+
+  const frontmatterMatch = /^---\s*\n([\s\S]*?)\n---/u.exec(content);
+  const frontmatter = frontmatterMatch?.[1] ?? "";
+  const nameLine = frontmatter
+    .split(/\r?\n/u)
+    .map((line) => /^name:\s*(.*)$/u.exec(line))
+    .find((match): match is RegExpExecArray => match !== null);
+  const name = nameLine?.[1]?.trim().replace(/^["']|["']$/gu, "") || fallbackName;
+
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/u.test(name) ? name : null;
 }
 
 async function collectWorkspaceFiles(

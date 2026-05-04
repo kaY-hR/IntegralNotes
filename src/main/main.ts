@@ -11,7 +11,14 @@ import {
   type WebContents
 } from "electron";
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  promises as fs,
+  statSync
+} from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -62,11 +69,28 @@ import { AiChatService } from "./aiChatService";
 import { AiHostCommandService } from "./aiHostCommandService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
+import {
+  getIntegralLocalDataRootPath,
+  shortenPathWithTokens
+} from "./pathTokens";
 import { RelationGraphService } from "./relationGraphService";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
 const execFileAsync = promisify(execFile);
+const APP_NAME = "IntegralNotes";
+const DEV_USER_DATA_DIRECTORY_NAME = `${APP_NAME}-dev`;
+const LEGACY_ELECTRON_USER_DATA_DIRECTORY_NAME = "Electron";
+const LEGACY_USER_DATA_ENTRIES_TO_MIGRATE = [
+  "Local State",
+  "ai-chat-history.json",
+  "ai-chat-settings.json",
+  "app-settings.json",
+  "workspace-state.json",
+  "plugins",
+  ".plugin-install",
+  "logs"
+] as const;
 const WORKSPACE_SELECTION_CLIPBOARD_FORMAT = "application/x-integralnotes-workspace-selection";
 
 initializeNetworkProxyFromEnvironment();
@@ -173,17 +197,68 @@ function createAiChatStreamOptions(event: IpcMainInvokeEvent): {
   };
 }
 
-function configureAutomationUserDataPath(): void {
-  const configuredUserDataPath = process.env.INTEGRALNOTES_USER_DATA_DIR?.trim();
-
-  if (!configuredUserDataPath) {
+function copyLegacyUserDataEntry(sourcePath: string, destinationPath: string): void {
+  if (!existsSync(sourcePath) || existsSync(destinationPath)) {
     return;
   }
 
-  app.setPath("userData", path.resolve(configuredUserDataPath));
+  const sourceStats = statSync(sourcePath);
+
+  if (sourceStats.isDirectory()) {
+    cpSync(sourcePath, destinationPath, { recursive: true });
+    return;
+  }
+
+  if (sourceStats.isFile()) {
+    mkdirSync(path.dirname(destinationPath), { recursive: true });
+    copyFileSync(sourcePath, destinationPath);
+  }
 }
 
-configureAutomationUserDataPath();
+function migrateLegacyElectronUserData(appDataPath: string, targetUserDataPath: string): void {
+  const legacyUserDataPath = path.join(appDataPath, LEGACY_ELECTRON_USER_DATA_DIRECTORY_NAME);
+
+  if (path.resolve(legacyUserDataPath) === path.resolve(targetUserDataPath)) {
+    return;
+  }
+
+  for (const entryName of LEGACY_USER_DATA_ENTRIES_TO_MIGRATE) {
+    try {
+      copyLegacyUserDataEntry(
+        path.join(legacyUserDataPath, entryName),
+        path.join(targetUserDataPath, entryName)
+      );
+    } catch (error) {
+      console.warn(
+        `[Main] failed to migrate legacy Electron userData entry (${entryName}): ${toErrorMessage(error)}`
+      );
+    }
+  }
+}
+
+function configureUserDataPath(): void {
+  app.setName(APP_NAME);
+
+  const configuredUserDataPath = process.env.INTEGRALNOTES_USER_DATA_DIR?.trim();
+
+  if (configuredUserDataPath) {
+    const userDataPath = path.resolve(configuredUserDataPath);
+
+    mkdirSync(userDataPath, { recursive: true });
+    app.setPath("userData", userDataPath);
+    return;
+  }
+
+  const appDataPath = app.getPath("appData");
+  const userDataDirectoryName = app.isPackaged ? APP_NAME : DEV_USER_DATA_DIRECTORY_NAME;
+  const userDataPath = path.join(appDataPath, userDataDirectoryName);
+
+  mkdirSync(userDataPath, { recursive: true });
+  app.setPath("userData", userDataPath);
+  migrateLegacyElectronUserData(appDataPath, userDataPath);
+}
+
+configureUserDataPath();
 
 function resolveInitialWorkspacePath(): string | undefined {
   const configuredRootPath = process.env.INTEGRALNOTES_DEFAULT_WORKSPACE?.trim();
@@ -440,6 +515,29 @@ function sanitizeDatasetDialogDefaultName(value: string | undefined): string {
     .replace(/[. ]+$/gu, "");
 
   return normalized.length > 0 ? normalized : "dataset";
+}
+
+async function createUniqueFilePath(directoryPath: string, fileName: string): Promise<string> {
+  const extension = path.extname(fileName);
+  const stem = path.basename(fileName, extension) || "script";
+  let candidatePath = path.join(directoryPath, fileName);
+  let suffix = 2;
+
+  while (await pathExists(candidatePath)) {
+    candidatePath = path.join(directoryPath, `${stem}_${suffix}${extension}`);
+    suffix += 1;
+  }
+
+  return candidatePath;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.stat(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const workspaceService = new WorkspaceService({
@@ -988,6 +1086,40 @@ function registerIpcHandlers(): void {
   ipcMain.handle("workspace:copyExternalEntries", async (_event, request: CopyExternalEntriesRequest) =>
     workspaceService.copyExternalEntries(request)
   );
+  ipcMain.handle("workspace:addPythonScriptToUserStock", async (_event, relativePath: string) => {
+    const rootPath = getIntegralLocalDataRootPath();
+
+    if (!rootPath) {
+      throw new Error("%LocalAppData% を解決できません。");
+    }
+
+    const normalizedRelativePath =
+      typeof relativePath === "string" ? relativePath.trim().replace(/\\/gu, "/") : "";
+
+    if (path.posix.extname(normalizedRelativePath).toLowerCase() !== ".py") {
+      throw new Error("ユーザーストックに追加できるのは Python script だけです。");
+    }
+
+    const sourcePath = workspaceService.getAbsolutePath(normalizedRelativePath);
+    const sourceStats = await fs.stat(sourcePath);
+
+    if (!sourceStats.isFile()) {
+      throw new Error("ユーザーストックに追加できるのは file だけです。");
+    }
+
+    const stockDirectoryPath = path.join(rootPath, "analysis-stock");
+    await fs.mkdir(stockDirectoryPath, { recursive: true });
+    const destinationPath = await createUniqueFilePath(
+      stockDirectoryPath,
+      path.basename(normalizedRelativePath)
+    );
+    await fs.copyFile(sourcePath, destinationPath);
+
+    return {
+      fileName: path.basename(destinationPath),
+      stockPath: shortenPathWithTokens(destinationPath)
+    };
+  });
   ipcMain.on("workspace:writeWorkspaceSelectionToClipboard", (_event, relativePaths: string[]) => {
     writeWorkspaceSelectionToClipboard(relativePaths);
   });

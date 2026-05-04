@@ -60,6 +60,12 @@ import {
   serializeFrontmatterDocument,
   splitFrontmatterBlock
 } from "./frontmatter";
+import {
+  expandPathTokens,
+  getGlobalAnalysisScriptRootPaths,
+  shortenPathWithTokens,
+  toDisplayPath
+} from "./pathTokens";
 
 const execFileAsync = promisify(execFile);
 
@@ -210,7 +216,8 @@ interface PythonCallableSummary {
   inputSlots: IntegralSlotDefinition[];
   outputSlots: IntegralSlotDefinition[];
   paramsSchema?: IntegralParamsSchema;
-  relativePath: string;
+  scriptPath: string;
+  source: "external" | "workspace";
 }
 
 interface ExecFileError extends Error {
@@ -658,11 +665,17 @@ export class IntegralWorkspaceService {
     await this.ensureIntegralWorkspaceReady();
 
     const catalog = await this.listAssetCatalog();
-    const definition = catalog.blockTypes.find(
+    let definition = catalog.blockTypes.find(
       (candidate) =>
         candidate.pluginId === request.block.plugin &&
         candidate.blockType === request.block["block-type"]
     );
+
+    if (!definition && request.block.plugin === GENERAL_ANALYSIS_PLUGIN_ID) {
+      definition =
+        (await this.readPythonCallableDefinitionByBlockType(request.block["block-type"])) ??
+        undefined;
+    }
 
     if (!definition) {
       throw new Error(
@@ -884,11 +897,14 @@ export class IntegralWorkspaceService {
       throw new Error(`Python callable を解決できません: ${definition.blockType}`);
     }
 
-    const callableAbsolutePath = this.resolveWorkspacePath(callable.relativePath);
+    const callableAbsolutePath =
+      callable.source === "external"
+        ? callable.absolutePath ?? path.resolve(expandPathTokens(callable.scriptPath))
+        : this.resolveWorkspacePath(callable.scriptPath);
     const callableStats = await fs.stat(callableAbsolutePath).catch(() => null);
 
     if (!callableStats?.isFile()) {
-      throw new Error(`Python file が見つかりません: ${callable.relativePath}`);
+      throw new Error(`Python file が見つかりません: ${callable.scriptPath}`);
     }
 
     const executionBlockId = sourceBlock.id ?? resolvedBlock.id ?? createOpaqueId("BLK");
@@ -1857,16 +1873,29 @@ export class IntegralWorkspaceService {
 
   private async readPythonCallableSummaries(): Promise<PythonCallableSummary[]> {
     const rootPath = this.getRootPath();
-    const pythonRelativePaths = await collectWorkspacePythonRelativePaths(rootPath);
-    const callables = (
+    const [workspacePythonRelativePaths, externalPythonPaths] = await Promise.all([
+      collectWorkspacePythonRelativePaths(rootPath),
+      collectGlobalAnalysisPythonPaths()
+    ]);
+    const workspaceCallables = (
       await Promise.all(
-        pythonRelativePaths.map(async (relativePath) => {
+        workspacePythonRelativePaths.map(async (relativePath) => {
           const absolutePath = this.resolveWorkspacePath(relativePath);
           const content = await fs.readFile(absolutePath, "utf8");
-          return parsePythonCallableSource(relativePath, content);
+          return parsePythonCallableSource(relativePath, content, "workspace");
         })
       )
     ).flat();
+    const externalCallables = (
+      await Promise.all(
+        externalPythonPaths.map(async (absolutePath) => {
+          const scriptPath = shortenPathWithTokens(absolutePath);
+          const content = await fs.readFile(absolutePath, "utf8");
+          return parsePythonCallableSource(scriptPath, content, "external");
+        })
+      )
+    ).flat();
+    const callables = deduplicatePythonCallables([...workspaceCallables, ...externalCallables]);
 
     return callables.sort((left, right) =>
       `${left.displayName} ${left.blockType}`.localeCompare(
@@ -1874,6 +1903,33 @@ export class IntegralWorkspaceService {
         "ja"
       )
     );
+  }
+
+  private async readPythonCallableDefinitionByBlockType(
+    blockType: string
+  ): Promise<IntegralBlockTypeDefinition | null> {
+    const callable = parsePythonCallableBlockType(blockType);
+
+    if (!callable) {
+      return null;
+    }
+
+    const absolutePath =
+      callable.source === "external"
+        ? callable.absolutePath ?? path.resolve(expandPathTokens(callable.scriptPath))
+        : this.resolveWorkspacePath(callable.scriptPath);
+    const content = await fs.readFile(absolutePath, "utf8").catch(() => null);
+
+    if (content === null) {
+      return null;
+    }
+
+    const summaries = parsePythonCallableSource(callable.scriptPath, content, callable.source);
+    const summary =
+      summaries.find((candidate) => candidate.blockType === blockType) ??
+      summaries.find((candidate) => candidate.functionName === callable.functionName);
+
+    return summary ? buildPythonCallableBlockType(summary) : null;
   }
 
   private async readRenderableFile(
@@ -2993,12 +3049,15 @@ function buildPythonCallableBlockType(
     description:
       callable.description.trim().length > 0
         ? callable.description
-        : `${callable.relativePath}:${callable.functionName} を実行する Python block`,
+        : `${callable.scriptPath}:${callable.functionName} を実行する Python block`,
     executionMode: "manual",
     inputSlots: callable.inputSlots,
     outputSlots: callable.outputSlots,
     ...(callable.paramsSchema ? { paramsSchema: callable.paramsSchema } : {}),
-    pluginDescription: "workspace の .py を走査する汎用 Python 解析 plugin",
+    pluginDescription:
+      callable.source === "external"
+        ? "global / external の .py を走査する汎用 Python 解析 plugin"
+        : "workspace の .py を走査する汎用 Python 解析 plugin",
     pluginDisplayName: "General Analysis",
     pluginId: GENERAL_ANALYSIS_PLUGIN_ID,
     source: "python-callable",
@@ -3122,8 +3181,84 @@ async function collectWorkspacePythonRelativePaths(
   return pythonPaths;
 }
 
-function parsePythonCallableSource(relativePath: string, content: string): PythonCallableSummary[] {
+async function collectGlobalAnalysisPythonPaths(): Promise<string[]> {
+  const roots = getGlobalAnalysisScriptRootPaths();
+  const nestedPaths = await Promise.all(
+    roots.map(async (rootPath) => {
+      const stats = await fs.stat(rootPath).catch(() => null);
+      return stats?.isDirectory() ? collectPythonPaths(rootPath) : [];
+    })
+  );
+  const seen = new Set<string>();
+  const pythonPaths: string[] = [];
+
+  for (const absolutePath of nestedPaths.flat()) {
+    const resolvedPath = path.resolve(absolutePath);
+    const key = resolvedPath.toLowerCase();
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    pythonPaths.push(resolvedPath);
+  }
+
+  return pythonPaths;
+}
+
+async function collectPythonPaths(rootPath: string): Promise<string[]> {
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+  const pythonPaths: string[] = [];
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "ja"))) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const absolutePath = path.join(rootPath, entry.name);
+
+    if (entry.isDirectory()) {
+      pythonPaths.push(...(await collectPythonPaths(absolutePath)));
+      continue;
+    }
+
+    if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".py") {
+      pythonPaths.push(absolutePath);
+    }
+  }
+
+  return pythonPaths;
+}
+
+function deduplicatePythonCallables(
+  callables: readonly PythonCallableSummary[]
+): PythonCallableSummary[] {
+  const deduplicated: PythonCallableSummary[] = [];
+  const seenBlockTypes = new Set<string>();
+
+  for (const callable of callables) {
+    const key = callable.blockType.toLowerCase();
+
+    if (seenBlockTypes.has(key)) {
+      continue;
+    }
+
+    seenBlockTypes.add(key);
+    deduplicated.push(callable);
+  }
+
+  return deduplicated;
+}
+
+function parsePythonCallableSource(
+  scriptPath: string,
+  content: string,
+  source: "external" | "workspace"
+): PythonCallableSummary[] {
   const summaries: PythonCallableSummary[] = [];
+  const normalizedScriptPath =
+    source === "external" ? toDisplayPath(scriptPath.trim()) : normalizeRelativePath(scriptPath);
 
   for (const match of content.matchAll(PYTHON_CALLABLE_PATTERN)) {
     const decoratorSource = match[1] ?? "";
@@ -3151,14 +3286,15 @@ function parsePythonCallableSource(relativePath: string, content: string): Pytho
     );
 
     summaries.push({
-      blockType: `${relativePath}:${functionName}`,
+      blockType: `${normalizedScriptPath}:${functionName}`,
       description,
       displayName,
       functionName,
       inputSlots,
       outputSlots,
       ...(paramsSchema ? { paramsSchema } : {}),
-      relativePath
+      scriptPath: normalizedScriptPath,
+      source
     });
   }
 
@@ -3757,8 +3893,10 @@ function normalizeDiscoveredSlotNames(slotNames: string[]): string[] {
 function parsePythonCallableBlockType(
   blockType: string
 ): {
+  absolutePath?: string;
   functionName: string;
-  relativePath: string;
+  scriptPath: string;
+  source: "external" | "workspace";
 } | null {
   const separatorIndex = blockType.lastIndexOf(":");
 
@@ -3766,20 +3904,32 @@ function parsePythonCallableBlockType(
     return null;
   }
 
-  const relativePath = normalizeRelativePath(blockType.slice(0, separatorIndex));
+  const rawScriptPath = blockType.slice(0, separatorIndex).trim();
   const functionName = blockType.slice(separatorIndex + 1).trim();
+  const expandedScriptPath = expandPathTokens(rawScriptPath);
+  const isExternal = path.isAbsolute(expandedScriptPath);
+  const scriptPath = isExternal
+    ? toDisplayPath(rawScriptPath)
+    : normalizeRelativePath(rawScriptPath);
+  const pathToCheck = isExternal ? expandedScriptPath : scriptPath;
 
   if (
-    relativePath.length === 0 ||
-    path.extname(relativePath).toLowerCase() !== ".py" ||
+    scriptPath.length === 0 ||
+    path.extname(pathToCheck).toLowerCase() !== ".py" ||
     !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(functionName)
   ) {
     return null;
   }
 
+  if (!isExternal && scriptPath.includes(":")) {
+    return null;
+  }
+
   return {
+    ...(isExternal ? { absolutePath: path.resolve(expandedScriptPath) } : {}),
     functionName,
-    relativePath
+    scriptPath,
+    source: isExternal ? "external" : "workspace"
   };
 }
 

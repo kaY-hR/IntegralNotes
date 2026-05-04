@@ -209,6 +209,11 @@ export interface SaveNoteImageResult {
   snapshot: WorkspaceSnapshot;
 }
 
+export interface AddPythonScriptToUserStockResult {
+  fileName: string;
+  stockPath: string;
+}
+
 export interface WorkspaceSearchRequest {
   caseSensitive?: boolean;
   excludePattern?: string;
@@ -369,6 +374,9 @@ export interface IntegralNotesApi {
   copyEntries: (request: CopyEntriesRequest) => Promise<CopyEntriesResult>;
   moveEntries: (request: MoveEntriesRequest) => Promise<MoveEntriesResult>;
   copyExternalEntries: (request: CopyExternalEntriesRequest) => Promise<CopyEntriesResult>;
+  addPythonScriptToUserStock: (
+    relativePath: string
+  ) => Promise<AddPythonScriptToUserStockResult>;
   saveClipboardImage: (request: SaveClipboardImageRequest) => Promise<SaveClipboardImageResult>;
   saveNoteImage: (request: SaveNoteImageRequest, content: Uint8Array) => Promise<SaveNoteImageResult>;
   getPathForFile: (file: unknown) => string;

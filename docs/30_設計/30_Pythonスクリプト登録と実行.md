@@ -3,7 +3,7 @@
 ## 前提
 
 - plugin ID は `general-analysis`
-- block-type は `relative/path.py:function`
+- block-type は `relative/path.py:function` を基本とし、MVP では `%LocalAppData%/.../path.py:function` 形式の external path も許可する
 - decorator `params` schema は Python literal の JSON Schema subset
 - 実行時の `params` は decorator schema に沿って正規化した note source の object
 - `inputs` は internal normalized form では `Record<string, managedDataId | null>`
@@ -12,6 +12,7 @@
 ## 1. discovery
 
 app は workspace 内の `.py` を走査し、decorator 付き関数を block 候補として収集する。
+MVP では user/global stock と vendor plugin の入口として、`%LocalAppData%/IntegralNotes/analysis-stock` と `%LocalAppData%/IntegralNotes/plugins` 配下の `.py` も同じ候補一覧へ混ぜる。
 
 ### decorator 例
 
@@ -246,7 +247,8 @@ packaged app:
 
 - `process.resourcesPath/workspace-template/.integral-sdk/python/integral` を template source として保持し、workspace の `.integral-sdk/python/integral/` へ同期する
 
-詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
+external/global script と skill の扱いは `docs/30_設計/32_GlobalPwd解析スクリプトとSkill.md` を参照。
+Electron から Python を呼ぶ仕組みの詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
 
 ## 10. source of truth
 

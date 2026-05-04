@@ -4,11 +4,17 @@
 
 - `plugins/shimadzu-lc`
   - LC 系 block の sample plugin source
+- `plugins/dummy-vendor`
+  - `%LocalAppData%/IntegralNotes/plugins` へ `.py` を展開するだけの external Python discovery 確認用 sample
 - `plugins/dist`
   - zip / bat の配布物出力先
 
 app runtime はここを直接読みません。  
 plugin を動かすには `userData/plugins` へ install する必要があります。
+
+ただし `plugins/dummy-vendor` は runtime plugin ではなく、global 解析スクリプト探索の確認用です。
+`install-localappdata.bat` で `%LocalAppData%/IntegralNotes/plugins/dummy-vendor` へ展開した `.py`
+を、`>` popup が external Python block として拾うことを確認します。
 
 third-party plugin の最終形は、このディレクトリに入ること自体が必須ではありません。  
 別 repo / 別 build 環境で同じ artifact を作り、`userData/plugins/<plugin-dir>/` へ install できれば十分です。
