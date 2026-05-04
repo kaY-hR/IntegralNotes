@@ -23,6 +23,7 @@ import type {
   AppSettings,
   SaveAppSettingsRequest
 } from "../shared/appSettings";
+import { DEFAULT_LINK_PICKER_RANKING } from "../shared/appSettings";
 import type {
   CopyEntriesResult,
   CreateEntryResult,
@@ -3587,6 +3588,7 @@ export function App(): JSX.Element {
           isActive={selectedTabPath === relativePath}
           key={`${relativePath}:${tab.editorMode}:${pluginCatalogRevision}`}
           analysisResultDirectory={appSettings?.analysisResultDirectory ?? null}
+          linkPickerRanking={appSettings?.linkPickerRanking ?? DEFAULT_LINK_PICKER_RANKING}
           onChange={(markdown) => {
             updateTabContent(relativePath, markdown);
           }}

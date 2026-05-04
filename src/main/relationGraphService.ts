@@ -14,6 +14,8 @@ import type {
   RelationGraphNeighborhood,
   RelationGraphNeighborhoodRequest,
   RelationGraphNode,
+  RelationGraphPathDistances,
+  RelationGraphPathDistanceRequest,
   RelationGraphSnapshot,
   RelationJsonValue,
   RelationNodeKind
@@ -62,6 +64,14 @@ const DATA_NOTE_DIRECTORY = "data-notes";
 const INTEGRAL_BLOCK_LANGUAGE = "itg-notes";
 const GENERAL_ANALYSIS_PLUGIN_ID = "general-analysis";
 const MAX_NEIGHBORHOOD_HOPS = 6;
+const PATH_KIND_PRIORITY: Record<RelationNodeKind, number> = {
+  note: 0,
+  "data-note": 1,
+  file: 2,
+  folder: 3,
+  "python-callable": 4,
+  block: 5
+};
 const INDEXED_TEXT_EXTENSIONS = new Set([".idts", ".md", ".py"]);
 const WORKSPACE_SCAN_EXCLUDED_SEGMENTS = new Set([
   ".git",
@@ -234,6 +244,46 @@ export class RelationGraphService {
           .map((nodeId) => nodeById.get(nodeId))
           .filter((node): node is RelationGraphNode => node !== undefined),
         originNodeId
+      };
+    });
+  }
+
+  async getPathDistances(
+    request: RelationGraphPathDistanceRequest
+  ): Promise<RelationGraphPathDistances | null> {
+    return this.enqueue(async () => {
+      const rootPath = this.workspaceService.currentRootPath;
+
+      if (!rootPath) {
+        return null;
+      }
+
+      await this.synchronizeInternal(rootPath);
+      const database = (await this.getDatabase(rootPath)).database;
+      const nodes = this.readNodes(database);
+      const edges = this.readEdges(database);
+      const originPath = normalizeRelativePath(request.originPath);
+      const maxHops = clampInteger(request.maxHops ?? 3, 0, MAX_NEIGHBORHOOD_HOPS);
+      const originNodeId = findNodeIdByPath(nodes, originPath);
+
+      if (!originNodeId) {
+        return {
+          distances: [],
+          maxHops,
+          originNodeId: null,
+          originPath
+        };
+      }
+
+      return {
+        distances: collectPathDistances(
+          nodes,
+          collectNodeHopDistances(originNodeId, edges, maxHops),
+          originPath
+        ),
+        maxHops,
+        originNodeId,
+        originPath
       };
     });
   }
@@ -1835,6 +1885,143 @@ function collectNeighborhoodNodeIds(
   return included;
 }
 
+function collectNodeHopDistances(
+  originNodeId: string,
+  edges: readonly RelationGraphEdge[],
+  maxHops: number
+): Map<string, number> {
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const edge of edges) {
+    addAdjacentNode(adjacency, edge.sourceId, edge.targetId);
+    addAdjacentNode(adjacency, edge.targetId, edge.sourceId);
+  }
+
+  const distances = new Map<string, number>([[originNodeId, 0]]);
+  let frontier = new Set([originNodeId]);
+
+  for (let hop = 1; hop <= maxHops; hop += 1) {
+    const next = new Set<string>();
+
+    for (const nodeId of frontier) {
+      for (const adjacentNodeId of adjacency.get(nodeId) ?? []) {
+        if (!distances.has(adjacentNodeId)) {
+          next.add(adjacentNodeId);
+        }
+      }
+    }
+
+    if (next.size === 0) {
+      break;
+    }
+
+    for (const nodeId of next) {
+      distances.set(nodeId, hop);
+    }
+
+    frontier = next;
+  }
+
+  return distances;
+}
+
+function collectPathDistances(
+  nodes: readonly RelationGraphNode[],
+  nodeDistances: ReadonlyMap<string, number>,
+  originPath: string
+): RelationGraphPathDistances["distances"] {
+  const pathDistances = new Map<string, { hop: number; nodeIds: string[]; path: string }>();
+  const normalizedOriginPath = normalizeRelativePath(originPath);
+
+  for (const node of nodes) {
+    const hop = nodeDistances.get(node.id);
+
+    if (hop === undefined) {
+      continue;
+    }
+
+    for (const nodePath of collectNodePathAliases(node)) {
+      if (nodePath === normalizedOriginPath) {
+        continue;
+      }
+
+      const current = pathDistances.get(nodePath);
+
+      if (!current) {
+        pathDistances.set(nodePath, {
+          hop,
+          nodeIds: [node.id],
+          path: nodePath
+        });
+        continue;
+      }
+
+      if (hop < current.hop) {
+        current.hop = hop;
+        current.nodeIds = [node.id];
+        continue;
+      }
+
+      if (hop === current.hop && !current.nodeIds.includes(node.id)) {
+        current.nodeIds.push(node.id);
+      }
+    }
+  }
+
+  return [...pathDistances.values()]
+    .map((distance) => ({
+      ...distance,
+      nodeIds: [...distance.nodeIds].sort((left, right) => left.localeCompare(right, "ja"))
+    }))
+    .sort((left, right) => left.hop - right.hop || left.path.localeCompare(right.path, "ja"));
+}
+
+function collectNodePathAliases(node: RelationGraphNode): string[] {
+  const aliases = new Set<string>();
+
+  for (const value of [node.path, metadataString(node.metadata, "dataNotePath")]) {
+    const normalized = normalizeRelativePath(value ?? "");
+
+    if (normalized.length > 0) {
+      aliases.add(normalized);
+    }
+  }
+
+  return [...aliases];
+}
+
+function findNodeIdByPath(
+  nodes: readonly RelationGraphNode[],
+  relativePath: string
+): string | null {
+  const normalizedPath = normalizeRelativePath(relativePath);
+
+  if (normalizedPath.length === 0) {
+    return null;
+  }
+
+  const exactPathNode = nodes
+    .filter((node) => node.path === normalizedPath)
+    .sort(
+      (left, right) =>
+        PATH_KIND_PRIORITY[left.kind] - PATH_KIND_PRIORITY[right.kind] ||
+        left.label.localeCompare(right.label, "ja") ||
+        left.id.localeCompare(right.id)
+    )[0];
+
+  return (
+    exactPathNode?.id ??
+    nodes.find((node) => metadataString(node.metadata, "dataNotePath") === normalizedPath)?.id ??
+    null
+  );
+}
+
+function addAdjacentNode(adjacency: Map<string, Set<string>>, fromNodeId: string, toNodeId: string): void {
+  const adjacent = adjacency.get(fromNodeId) ?? new Set<string>();
+  adjacent.add(toNodeId);
+  adjacency.set(fromNodeId, adjacent);
+}
+
 function normalizeRelativePath(relativePath: string): string {
   return relativePath
     .trim()
@@ -1867,6 +2054,14 @@ function parseMetadata(value: unknown): Record<string, RelationJsonValue> {
   } catch {
     return {};
   }
+}
+
+function metadataString(
+  metadata: Readonly<Record<string, RelationJsonValue>>,
+  key: string
+): string | null {
+  const value = metadata[key];
+  return typeof value === "string" ? value : null;
 }
 
 function isJsonRecord(value: unknown): value is Record<string, RelationJsonValue> {

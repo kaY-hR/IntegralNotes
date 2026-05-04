@@ -48,6 +48,8 @@ import type {
 import type {
   RelationGraphNeighborhood,
   RelationGraphNeighborhoodRequest,
+  RelationGraphPathDistanceRequest,
+  RelationGraphPathDistances,
   RelationGraphSnapshot
 } from "./relationGraph";
 
@@ -335,6 +337,9 @@ export interface IntegralNotesApi {
   getRelationNeighborhood: (
     request: RelationGraphNeighborhoodRequest
   ) => Promise<RelationGraphNeighborhood | null>;
+  getRelationPathDistances: (
+    request: RelationGraphPathDistanceRequest
+  ) => Promise<RelationGraphPathDistances | null>;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;

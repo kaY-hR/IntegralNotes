@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   DEFAULT_ANALYSIS_RESULT_DIRECTORY,
   DEFAULT_DATA_REGISTRATION_DIRECTORY,
+  DEFAULT_LINK_PICKER_RANKING,
   DEFAULT_USER_ID,
   type AppSettings,
   type SaveAppSettingsRequest
@@ -29,6 +30,18 @@ export function AppSettingsDialog({
   const [dataRegistrationDirectoryInput, setDataRegistrationDirectoryInput] = useState(
     settings?.dataRegistrationDirectory ?? DEFAULT_DATA_REGISTRATION_DIRECTORY
   );
+  const [normalLinkExtensionsInput, setNormalLinkExtensionsInput] = useState(
+    formatExtensionPriorityInput(
+      settings?.linkPickerRanking.normalLinkExtensions ??
+        DEFAULT_LINK_PICKER_RANKING.normalLinkExtensions
+    )
+  );
+  const [embedLinkExtensionsInput, setEmbedLinkExtensionsInput] = useState(
+    formatExtensionPriorityInput(
+      settings?.linkPickerRanking.embedLinkExtensions ??
+        DEFAULT_LINK_PICKER_RANKING.embedLinkExtensions
+    )
+  );
   const [userIdInput, setUserIdInput] = useState(settings?.userId ?? DEFAULT_USER_ID);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -38,6 +51,18 @@ export function AppSettingsDialog({
     );
     setDataRegistrationDirectoryInput(
       settings?.dataRegistrationDirectory ?? DEFAULT_DATA_REGISTRATION_DIRECTORY
+    );
+    setNormalLinkExtensionsInput(
+      formatExtensionPriorityInput(
+        settings?.linkPickerRanking.normalLinkExtensions ??
+          DEFAULT_LINK_PICKER_RANKING.normalLinkExtensions
+      )
+    );
+    setEmbedLinkExtensionsInput(
+      formatExtensionPriorityInput(
+        settings?.linkPickerRanking.embedLinkExtensions ??
+          DEFAULT_LINK_PICKER_RANKING.embedLinkExtensions
+      )
     );
     setUserIdInput(settings?.userId ?? DEFAULT_USER_ID);
   }, [settings]);
@@ -49,6 +74,10 @@ export function AppSettingsDialog({
       await onSave({
         analysisResultDirectory: analysisResultDirectoryInput,
         dataRegistrationDirectory: dataRegistrationDirectoryInput,
+        linkPickerRanking: {
+          embedLinkExtensions: parseExtensionPriorityInput(embedLinkExtensionsInput),
+          normalLinkExtensions: parseExtensionPriorityInput(normalLinkExtensionsInput)
+        },
         userId: userIdInput
       });
     } catch (error) {
@@ -127,6 +156,42 @@ export function AppSettingsDialog({
           </section>
 
           <section className="app-settings-dialog__section">
+            <label className="dialog-field">
+              <span>通常リンク優先拡張子</span>
+              <input
+                disabled={pending}
+                onChange={(event) => {
+                  setNormalLinkExtensionsInput(event.target.value);
+                }}
+                spellCheck={false}
+                type="text"
+                value={normalLinkExtensionsInput}
+              />
+            </label>
+            <p className="app-settings-dialog__note">
+              link picker で graph hop が同じ候補を並べるとき、左から順に優先します。
+            </p>
+          </section>
+
+          <section className="app-settings-dialog__section">
+            <label className="dialog-field">
+              <span>埋め込みリンク優先拡張子</span>
+              <input
+                disabled={pending}
+                onChange={(event) => {
+                  setEmbedLinkExtensionsInput(event.target.value);
+                }}
+                spellCheck={false}
+                type="text"
+                value={embedLinkExtensionsInput}
+              />
+            </label>
+            <p className="app-settings-dialog__note">
+              画像と HTML など、embed で上に出したい拡張子を指定します。
+            </p>
+          </section>
+
+          <section className="app-settings-dialog__section">
             <div className="app-settings-dialog__section-header">
               <strong>AI関連設定</strong>
               <button
@@ -169,4 +234,15 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function formatExtensionPriorityInput(extensions: readonly string[]): string {
+  return extensions.join(", ");
+}
+
+function parseExtensionPriorityInput(value: string): string[] {
+  return value
+    .split(/[,\s]+/u)
+    .map((extension) => extension.trim())
+    .filter(Boolean);
 }

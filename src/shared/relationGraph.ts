@@ -66,3 +66,21 @@ export interface RelationGraphNeighborhood {
   nodes: RelationGraphNode[];
   originNodeId: string;
 }
+
+export interface RelationGraphPathDistanceRequest {
+  maxHops?: number;
+  originPath: string;
+}
+
+export interface RelationGraphPathDistance {
+  hop: number;
+  nodeIds: string[];
+  path: string;
+}
+
+export interface RelationGraphPathDistances {
+  distances: RelationGraphPathDistance[];
+  maxHops: number;
+  originNodeId: string | null;
+  originPath: string;
+}

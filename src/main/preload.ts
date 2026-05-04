@@ -50,6 +50,8 @@ const api: IntegralNotesApi = {
   getRelationGraphSnapshot: () => ipcRenderer.invoke("relation-graph:getSnapshot"),
   getRelationNeighborhood: (request) =>
     ipcRenderer.invoke("relation-graph:getNeighborhood", request),
+  getRelationPathDistances: (request) =>
+    ipcRenderer.invoke("relation-graph:getPathDistances", request),
   zoomIn: () => adjustZoomLevel("in"),
   zoomOut: () => adjustZoomLevel("out"),
   resetZoom: () => adjustZoomLevel("reset"),

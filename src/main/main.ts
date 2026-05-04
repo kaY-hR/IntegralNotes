@@ -29,7 +29,10 @@ import type {
   UndoIntegralBlockRequest
 } from "../shared/integral";
 import { normalizeIntegralSlotExtensions } from "../shared/integral";
-import type { RelationGraphNeighborhoodRequest } from "../shared/relationGraph";
+import type {
+  RelationGraphNeighborhoodRequest,
+  RelationGraphPathDistanceRequest
+} from "../shared/relationGraph";
 import type {
   CopyEntriesRequest,
   CopyExternalEntriesRequest,
@@ -668,6 +671,11 @@ function registerIpcHandlers(): void {
     "relation-graph:getNeighborhood",
     async (_event, request: RelationGraphNeighborhoodRequest) =>
       getRelationGraphService().getNeighborhood(request)
+  );
+  ipcMain.handle(
+    "relation-graph:getPathDistances",
+    async (_event, request: RelationGraphPathDistanceRequest) =>
+      getRelationGraphService().getPathDistances(request)
   );
     ipcMain.handle("workspace:selectDirectory", async (_event, initialRelativePath?: string | null) => {
       if (!mainWindow) {
