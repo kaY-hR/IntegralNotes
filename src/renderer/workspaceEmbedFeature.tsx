@@ -26,6 +26,7 @@ import {
   withWorkspaceEmbedHeight
 } from "../shared/workspaceLinks";
 import { ExternalPluginFileViewer } from "./ExternalPluginFileViewer";
+import { CollapseToggleButton } from "./CollapseToggleButton";
 import {
   requestOpenManagedDataNote,
   requestOpenWorkspaceFile
@@ -340,6 +341,7 @@ function WorkspaceEmbedPanel({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [draftSource, setDraftSource] = useState(source);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [resolution, setResolution] = useState<WorkspaceEmbedResolution>(createLoadingResolution());
   const [surfaceHeight, setSurfaceHeight] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -378,6 +380,7 @@ function WorkspaceEmbedPanel({
   const rootClassName = [
     "editor-workspace-embed",
     mode === "inline" ? "editor-workspace-embed--inline" : "editor-workspace-embed--block",
+    isCollapsed ? "editor-workspace-embed--collapsed" : "",
     selected ? "editor-workspace-embed--selected" : ""
   ]
     .filter(Boolean)
@@ -543,96 +546,115 @@ function WorkspaceEmbedPanel({
 
   return (
     <div className={rootClassName}>
-      {openTarget ? <WorkspaceEmbedOpenAction openTarget={openTarget} /> : null}
-      <div
-        className="editor-workspace-embed__surface"
-        ref={surfaceRef}
-        style={{
-          height: currentSurfaceHeight === null ? undefined : `${currentSurfaceHeight}px`
+      <WorkspaceEmbedToolbar
+        collapsed={isCollapsed}
+        onToggleCollapsed={() => {
+          setIsCollapsed((current) => !current);
         }}
-      >
-        {resolution.kind === "loading" ? (
-          <div className="editor-workspace-embed__status">読み込み中...</div>
-        ) : null}
-
-        {resolution.kind === "image" ? (
-          <img alt={resolution.alt} className="editor-workspace-embed__image" src={resolution.src} />
-        ) : null}
-
-        {resolution.kind === "frame" ? (
-          <iframe
-            className="editor-workspace-embed__frame"
-            sandbox={resolution.sandbox}
-            src={resolution.src}
-            srcDoc={resolution.srcDoc}
-            title={resolution.title}
-          />
-        ) : null}
-
-        {resolution.kind === "markdown" ? (
-          <ReadonlyMarkdownPreview
-            className="editor-workspace-embed__markdown"
-            content={resolution.markdown}
-            proxyDomURL={proxyWorkspaceEmbedImageUrl}
-          />
-        ) : null}
-
-        {resolution.kind === "plugin" ? (
-          <div className="editor-workspace-embed__plugin">
-            <ExternalPluginFileViewer
-              file={{
-                content: resolution.content,
-                name: resolution.title,
-                pluginViewer: resolution.pluginViewer,
-                relativePath: resolution.relativePath
-              }}
-              presentation="embed"
-              source={{
-                kind: "workspace-file"
-              }}
-            />
-          </div>
-        ) : null}
-
-        {resolution.kind === "unsupported" ? (
-          <div className="editor-workspace-embed__status">{resolution.message}</div>
-        ) : null}
-
-        {resolution.kind === "error" ? (
-          <div className="editor-workspace-embed__status editor-workspace-embed__status--error">
-            {resolution.message}
-          </div>
-        ) : null}
-
+        openTarget={openTarget}
+      />
+      {isCollapsed ? null : (
         <div
-          className="editor-workspace-embed__resize-handle"
-          onPointerDown={handleResizePointerDown}
-          title="縦方向にリサイズ"
-        />
-      </div>
+          className="editor-workspace-embed__surface"
+          ref={surfaceRef}
+          style={{
+            height: currentSurfaceHeight === null ? undefined : `${currentSurfaceHeight}px`
+          }}
+        >
+          {resolution.kind === "loading" ? (
+            <div className="editor-workspace-embed__status">読み込み中...</div>
+          ) : null}
+
+          {resolution.kind === "image" ? (
+            <img alt={resolution.alt} className="editor-workspace-embed__image" src={resolution.src} />
+          ) : null}
+
+          {resolution.kind === "frame" ? (
+            <iframe
+              className="editor-workspace-embed__frame"
+              sandbox={resolution.sandbox}
+              src={resolution.src}
+              srcDoc={resolution.srcDoc}
+              title={resolution.title}
+            />
+          ) : null}
+
+          {resolution.kind === "markdown" ? (
+            <ReadonlyMarkdownPreview
+              className="editor-workspace-embed__markdown"
+              content={resolution.markdown}
+              proxyDomURL={proxyWorkspaceEmbedImageUrl}
+            />
+          ) : null}
+
+          {resolution.kind === "plugin" ? (
+            <div className="editor-workspace-embed__plugin">
+              <ExternalPluginFileViewer
+                file={{
+                  content: resolution.content,
+                  name: resolution.title,
+                  pluginViewer: resolution.pluginViewer,
+                  relativePath: resolution.relativePath
+                }}
+                presentation="embed"
+                source={{
+                  kind: "workspace-file"
+                }}
+              />
+            </div>
+          ) : null}
+
+          {resolution.kind === "unsupported" ? (
+            <div className="editor-workspace-embed__status">{resolution.message}</div>
+          ) : null}
+
+          {resolution.kind === "error" ? (
+            <div className="editor-workspace-embed__status editor-workspace-embed__status--error">
+              {resolution.message}
+            </div>
+          ) : null}
+
+          <div
+            className="editor-workspace-embed__resize-handle"
+            onPointerDown={handleResizePointerDown}
+            title="縦方向にリサイズ"
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function WorkspaceEmbedOpenAction({
+function WorkspaceEmbedToolbar({
+  collapsed,
+  onToggleCollapsed,
   openTarget
 }: {
-  openTarget: WorkspaceEmbedOpenTarget;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  openTarget: WorkspaceEmbedOpenTarget | null;
 }): JSX.Element {
   return (
     <div className="editor-workspace-embed__toolbar">
-      <button
-        className="button button--ghost button--xs editor-workspace-embed__open-button"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openWorkspaceEmbedTarget(openTarget);
-        }}
-        title={getWorkspaceEmbedOpenActionTitle(openTarget)}
-        type="button"
-      >
-        別タブで開く
-      </button>
+      <CollapseToggleButton
+        className="editor-workspace-embed__collapse-button"
+        collapsed={collapsed}
+        onToggle={onToggleCollapsed}
+      />
+      {openTarget ? (
+        <button
+          className="button button--ghost button--xs editor-workspace-embed__open-button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openWorkspaceEmbedTarget(openTarget);
+          }}
+          title={getWorkspaceEmbedOpenActionTitle(openTarget)}
+          type="button"
+        >
+          別タブで開く
+        </button>
+      ) : null}
     </div>
   );
 }
