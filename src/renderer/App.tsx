@@ -102,6 +102,25 @@ interface TreeContextMenuState {
   y: number;
 }
 
+type AppMenuId = "file" | "settings" | "tools";
+
+interface AppMenuCommand {
+  disabled?: boolean;
+  label: string;
+  onSelect: () => void;
+  title?: string;
+}
+
+interface AppMenuSection {
+  commands: AppMenuCommand[];
+}
+
+interface AppMenuDefinition {
+  id: AppMenuId;
+  label: string;
+  sections: AppMenuSection[];
+}
+
 interface DatasetCreationDialogState {
   defaultName: string;
   relativePaths: string[];
@@ -1048,6 +1067,7 @@ export function App(): JSX.Element {
   const [inlineEditor, setInlineEditor] = useState<FileTreeInlineEditorState | null>(null);
   const [inlineEditorPending, setInlineEditorPending] = useState(false);
   const [contextMenu, setContextMenu] = useState<TreeContextMenuState | null>(null);
+  const [activeAppMenuId, setActiveAppMenuId] = useState<AppMenuId | null>(null);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const [datasetCreationDialog, setDatasetCreationDialog] = useState<DatasetCreationDialogState | null>(null);
   const [datasetCreationPending, setDatasetCreationPending] = useState(false);
@@ -2173,6 +2193,42 @@ export function App(): JSX.Element {
       document.removeEventListener("scroll", closeContextMenu, true);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!activeAppMenuId) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null;
+
+      if (target?.closest(".app-menubar")) {
+        return;
+      }
+
+      setActiveAppMenuId(null);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setActiveAppMenuId(null);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [activeAppMenuId]);
+
+  useEffect(() => {
+    if (hasBlockingDialog) {
+      setActiveAppMenuId(null);
+    }
+  }, [hasBlockingDialog]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -3985,70 +4041,148 @@ export function App(): JSX.Element {
     }
   }, [activeSidebarViewId, sidebarViewDefinitions]);
 
+  const runAppMenuCommand = (command: AppMenuCommand): void => {
+    if (command.disabled) {
+      return;
+    }
+
+    setActiveAppMenuId(null);
+    command.onSelect();
+  };
+
+  const appMenuDefinitions: AppMenuDefinition[] = [
+    {
+      id: "file",
+      label: "ファイル",
+      sections: [
+        {
+          commands: [
+            {
+              label: "フォルダを開く",
+              onSelect: () => {
+                void openWorkspaceFolder();
+              }
+            },
+            {
+              disabled: !workspace,
+              label: "VSCodeで開く",
+              onSelect: () => {
+                void openWorkspaceInVSCode();
+              },
+              title: workspace ? `${workspace.rootPath} をVSCodeで開きます` : "ワークスペースフォルダを開いてください"
+            }
+          ]
+        },
+        {
+          commands: [
+            {
+              disabled: !workspace || loadingWorkspace,
+              label: "初期化/更新",
+              onSelect: () => {
+                void applyWorkspaceTemplate();
+              },
+              title: workspace ? "workspace template を強制上書き展開します" : "ワークスペースフォルダを開いてください"
+            },
+            {
+              label: "データ登録",
+              onSelect: openDataRegistrationDialog
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "tools",
+      label: "ツール",
+      sections: [
+        {
+          commands: [
+            {
+              label: "Plugins",
+              onSelect: openPluginManager
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "settings",
+      label: "設定",
+      sections: [
+        {
+          commands: [
+            {
+              label: "本体設定",
+              onSelect: openAppSettingsDialog
+            },
+            {
+              disabled: !workspace,
+              label: "Inline Actions",
+              onSelect: openInlineActionSettingsDialog,
+              title: workspace ? ".inline-action を編集します" : "ワークスペースフォルダを開いてください"
+            }
+          ]
+        }
+      ]
+    }
+  ];
+
   return (
     <div className="app-shell" data-dialog-open={hasBlockingDialog ? "true" : "false"}>
-      <header className="app-menubar">
-        <button
-          className="button button--ghost button--menu"
-          onClick={() => {
-            void openWorkspaceFolder();
-          }}
-          type="button"
-        >
-          Open Folder
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          disabled={!workspace}
-          onClick={() => {
-            void openWorkspaceInVSCode();
-          }}
-          title={workspace ? `${workspace.rootPath} をVSCodeで開きます` : "ワークスペースフォルダを開いてください"}
-          type="button"
-        >
-          VSCodeで開く
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          disabled={!workspace || loadingWorkspace}
-          onClick={() => {
-            void applyWorkspaceTemplate();
-          }}
-          title={workspace ? "workspace template を強制上書き展開します" : "ワークスペースフォルダを開いてください"}
-          type="button"
-        >
-          初期化/更新
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          onClick={openDataRegistrationDialog}
-          type="button"
-        >
-          データ登録
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          onClick={openAppSettingsDialog}
-          type="button"
-        >
-          設定
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          disabled={!workspace}
-          onClick={openInlineActionSettingsDialog}
-          title={workspace ? ".inline-action を編集します" : "ワークスペースフォルダを開いてください"}
-          type="button"
-        >
-          Inline Actions
-        </button>
-        <button
-          className="button button--ghost button--menu"
-          onClick={openPluginManager}
-          type="button"
-        >
-          Plugins
-        </button>
+      <header aria-label="Application menu" className="app-menubar">
+        {appMenuDefinitions.map((menu) => {
+          const isOpen = activeAppMenuId === menu.id;
+
+          return (
+            <div className="app-menubar__menu" key={menu.id}>
+              <button
+                aria-expanded={isOpen}
+                aria-haspopup="menu"
+                className={`button button--ghost button--menu app-menubar__button${isOpen ? " is-active" : ""}`}
+                onClick={() => {
+                  setActiveAppMenuId(isOpen ? null : menu.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setActiveAppMenuId(menu.id);
+                  }
+                }}
+                onMouseEnter={() => {
+                  if (activeAppMenuId) {
+                    setActiveAppMenuId(menu.id);
+                  }
+                }}
+                type="button"
+              >
+                {menu.label}
+              </button>
+              {isOpen ? (
+                <div className="app-menubar__dropdown" role="menu">
+                  {menu.sections.map((section, sectionIndex) => (
+                    <div className="app-menubar__section" key={`${menu.id}-${sectionIndex}`}>
+                      {section.commands.map((command) => (
+                        <button
+                          className="app-menubar__item"
+                          disabled={command.disabled}
+                          key={command.label}
+                          onClick={() => {
+                            runAppMenuCommand(command);
+                          }}
+                          role="menuitem"
+                          title={command.title}
+                          type="button"
+                        >
+                          {command.label}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </header>
 
       <ActivityBar

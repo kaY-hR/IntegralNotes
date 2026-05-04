@@ -290,6 +290,73 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 
+.app-menubar__menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-menubar__button.is-active,
+.app-menubar__button:hover {
+  background: #e8edf3;
+  color: var(--text-0);
+}
+
+.app-menubar__dropdown {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 10px 24px rgba(30, 41, 59, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+.app-menubar__section + .app-menubar__section {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.app-menubar__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 0.78rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.app-menubar__item:hover,
+.app-menubar__item:focus-visible {
+  background: #e8f0fb;
+  color: var(--text-0);
+}
+
+.app-menubar__item:disabled {
+  color: var(--text-2);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.app-menubar__item:disabled:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+
 .workspace__layout {
   position: relative;
   flex: 1;
