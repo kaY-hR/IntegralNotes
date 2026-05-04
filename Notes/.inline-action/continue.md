@@ -7,7 +7,7 @@ canEditWorkspaceFiles: true
 canRunShellCommand: true
 canCreatePythonBlockDraft: true
 canAnswerOnly: false
-readScope: "current-document-and-selected-files"
+readScope: "entire-workspace"
 readDirs: []
 ---
 

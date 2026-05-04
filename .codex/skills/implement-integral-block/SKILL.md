@@ -8,6 +8,7 @@ IntegralNotes の Python 解析 block は、workspace 内の `.py` file に `@in
 必須ルール:
 
 - `from integral import integral_block` を使う。
+- `integral` SDK は hidden な `.integral-sdk/python/` 配下にある system-managed package として扱い、block 実装時に作成・変更しない。
 - `@integral_block(...)` は `def main(inputs, outputs, params) -> None:` の直上に置く。
 - `inputs` と `outputs` は slot 名から path への dict として扱う。
 - 出力は必ず `outputs` で渡された path に書く。

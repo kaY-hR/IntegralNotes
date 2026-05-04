@@ -145,9 +145,9 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 
 定義場所:
 
-- `scripts/integral/__init__.py`
+- `.integral-sdk/python/integral/__init__.py`
 
-app は必要に応じて workspace template 内のこの package を workspace の `scripts/integral/` へ同期し、runner は `scripts/` を `sys.path` の先頭へ追加して import を成立させる。
+app は必要に応じて workspace template 内のこの package を workspace の `.integral-sdk/python/integral/` へ同期し、runner は `.integral-sdk/python/` を `sys.path` の先頭へ追加して import を成立させる。SDK directory は hidden/system-managed path とし、managed file metadata の自動登録対象にはしない。
 
 ## 成功判定
 

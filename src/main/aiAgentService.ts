@@ -67,6 +67,12 @@ const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
 ]);
 const TOOL_LOOP_MAX_STEPS = 8;
 const WORKSPACE_MOUNT_PATH = "/workspace";
+const AGENTS_INSTRUCTION_FILE_PROMPT = [
+  "# AGENTS.md Instructions",
+  "If an AGENTS.md file exists in the workspace root, read it before answering or acting on workspace files, then follow its instructions.",
+  "Before creating, editing, or deleting a workspace file, check for AGENTS.md files in the target file's directory and every ancestor directory up to the workspace root. Read every applicable AGENTS.md before making the change.",
+  "When multiple AGENTS.md files apply, treat the deeper file as more specific for files under that directory."
+].join("\n");
 
 interface AiHostCommandExecutor {
   execute(
@@ -472,6 +478,8 @@ function buildAgentInstructions(
 ): string {
   const lines = [
     normalizeSystemPrompt(systemPrompt, DEFAULT_AI_CHAT_SYSTEM_PROMPTS.chatPanel),
+    "",
+    AGENTS_INSTRUCTION_FILE_PROMPT,
     ""
   ];
 
@@ -491,6 +499,8 @@ function buildTaskInstructions(
 ): string {
   return [
     instructions.trim(),
+    "",
+    AGENTS_INSTRUCTION_FILE_PROMPT,
     "",
     buildWorkspaceContextInstructions(context, toolContext)
   ]

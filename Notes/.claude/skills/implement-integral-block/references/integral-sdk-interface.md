@@ -2,8 +2,8 @@
 
 Source of truth:
 
-- `../../../scripts/integral/__init__.py`
-- `../../../scripts/integral/README.md`
+- `../../../.integral-sdk/python/integral/__init__.py`
+- `../../../.integral-sdk/python/integral/README.md`
 
 Use this reference when you need to know what the shipped `integral` module actually supports.
 
@@ -27,7 +27,7 @@ The current decorator accepts only these keyword arguments:
 - `outputs`
 - `params`
 
-Do not invent additional decorator fields unless the task explicitly changes `scripts/integral/__init__.py`.
+Do not invent additional decorator fields unless the task explicitly changes `.integral-sdk/python/integral/__init__.py`.
 
 ## Slot Forms
 

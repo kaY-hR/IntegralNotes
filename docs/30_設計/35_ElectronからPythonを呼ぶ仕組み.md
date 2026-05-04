@@ -139,7 +139,7 @@ runner の責務:
 
 正式な Python SDK は次に置く。
 
-- `scripts/integral/__init__.py`
+- `.integral-sdk/python/integral/__init__.py`
 
 この package が提供する主 API:
 
@@ -151,17 +151,17 @@ runner の責務:
 
 app / runner は workspace の import root を次で解決する。
 
-- `scripts/`
-- app は authoring 補助として `cwd/.vscode/settings.json` に `python.analysis.extraPaths = ["./scripts"]` と `python.autoComplete.extraPaths = ["./scripts"]` を補助設定してよい
+- `.integral-sdk/python/`
+- app は authoring 補助として `cwd/.vscode/settings.json` に `python.analysis.extraPaths = ["./.integral-sdk/python"]` と `python.autoComplete.extraPaths = ["./.integral-sdk/python"]` を補助設定してよい
 
 ### packaged app
 
 packaging 時に `Notes/` の中身を app resource の workspace template として同梱する。  
-app はその中の `scripts/integral` を template source として使い、workspace の `scripts/integral/` へ同期する。
+app はその中の `.integral-sdk/python/integral` を template source として使い、workspace の `.integral-sdk/python/integral/` へ同期する。
 
-- `process.resourcesPath/workspace-template/scripts/integral`
+- `process.resourcesPath/workspace-template/.integral-sdk/python/integral`
 
-runner 自体は同期後の workspace `scripts/` を `sys.path` へ追加する。
+runner 自体は同期後の workspace `.integral-sdk/python/` を `sys.path` へ追加する。
 
 Python executable 自体は次で上書きできる。
 
@@ -178,7 +178,7 @@ Python executable 自体は次で上書きできる。
 
 workspace package 同期方式にすると:
 
-- `integral` package の実体が workspace の `scripts/integral/` に見える
+- `integral` package の実体を workspace 内の hidden `.integral-sdk/python/integral/` として持てる
 - user script が app 実装詳細ではなく SDK を import できる
 - app 実行時と authoring 時で同じ import 先を見られる
 
