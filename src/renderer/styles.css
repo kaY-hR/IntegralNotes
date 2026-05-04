@@ -28,6 +28,135 @@
   --danger-muted: rgba(188, 63, 31, 0.12);
 }
 
+.relation-graph {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  background: #f4f6f8;
+}
+
+.relation-graph__toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.relation-graph__summary,
+.relation-graph__controls,
+.relation-graph__edge-filters,
+.relation-graph__edge-filter {
+  display: flex;
+  align-items: center;
+}
+
+.relation-graph__summary {
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #51667c;
+  font-size: 0.82rem;
+}
+
+.relation-graph__summary strong {
+  color: #17324c;
+  font-size: 1rem;
+}
+
+.relation-graph__summary span {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid #cfd9e3;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.relation-graph__controls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: min(620px, 100%);
+}
+
+.relation-graph__search {
+  width: 220px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #bdcad7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17324c;
+  font: inherit;
+}
+
+.relation-graph__edge-filters {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.relation-graph__edge-filter {
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 1px solid #d3dde7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #41586f;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.relation-graph__edge-filter input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.relation-graph__edge-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.relation-graph__surface {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #c5d1dc;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(190, 202, 214, 0.18) 1px, transparent 1px),
+    linear-gradient(rgba(190, 202, 214, 0.18) 1px, transparent 1px),
+    #ffffff;
+  background-size: 32px 32px;
+}
+
+.relation-graph__sigma {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.relation-graph__message {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  max-width: min(420px, calc(100% - 28px));
+  padding: 8px 10px;
+  border: 1px solid #cbd6e1;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #41586f;
+  font-size: 0.84rem;
+}
+
 html,
 body,
 #root {

@@ -4,6 +4,7 @@ import type { IntegralAssetCatalog } from "../shared/integral";
 import type { WorkspaceEntry } from "../shared/workspace";
 import { AIChatPanel } from "./AIChatPanel";
 import { ProcessChainViewer } from "./ProcessChainViewer";
+import { RelationGraphView } from "./RelationGraphView";
 
 export interface WorkspaceToolPluginRenderContext {
   assetCatalog: IntegralAssetCatalog;
@@ -51,6 +52,21 @@ function AIChatToolIcon(): JSX.Element {
   );
 }
 
+function RelationGraphToolIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
+      <circle cx="3.2" cy="4" r="1.35" />
+      <circle cx="12.8" cy="4" r="1.35" />
+      <circle cx="5" cy="12" r="1.35" />
+      <circle cx="11" cy="10.6" r="1.35" />
+      <path d="M4.45 4h7.1" />
+      <path d="m3.65 5.25 1.55 5.4" />
+      <path d="m6.35 11.7 3.3-.75" />
+      <path d="m12.35 5.25-1 4.05" />
+    </svg>
+  );
+}
+
 const processChainToolPlugin: WorkspaceToolPluginDefinition = {
   activityIcon: <ProcessChainToolIcon />,
   description: "現在の note / file を起点に、関連する block と file の chain を辿って表示します。",
@@ -69,8 +85,18 @@ const aiChatToolPlugin: WorkspaceToolPluginDefinition = {
   title: "AI Chat"
 };
 
+const relationGraphToolPlugin: WorkspaceToolPluginDefinition = {
+  activityIcon: <RelationGraphToolIcon />,
+  description: "workspace 全体の relation graph を表示します。",
+  id: "builtin:relation-graph",
+  render: (context) => <RelationGraphView {...context} />,
+  tabTitle: "Relation Graph",
+  title: "Relation Graph"
+};
+
 export const workspaceToolPlugins: readonly WorkspaceToolPluginDefinition[] = [
   aiChatToolPlugin,
+  relationGraphToolPlugin,
   processChainToolPlugin
 ];
 
