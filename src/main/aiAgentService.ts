@@ -99,6 +99,11 @@ interface AiAgentReadAccess {
   description: string;
 }
 
+interface AiProviderBuiltInToolInfo {
+  instructions: string[];
+  tools: ToolSet;
+}
+
 export interface AiAgentStreamCallbacks {
   onTextDelta?: (textDelta: string) => void;
   onTextReset?: () => void;
@@ -149,14 +154,23 @@ export class AiAgentService {
     diagnostics: AiChatMessageDiagnostics;
     text: string;
   }> {
-    const { model, providerOptions } = this.createLanguageModel(runtime);
+    const { model, providerBuiltInTools, providerOptions } = this.createLanguageModel(runtime);
     const toolContext = await this.createToolContext(context, hostCommand);
+    const tools = {
+      ...toolContext.tools,
+      ...(providerBuiltInTools?.tools ?? {})
+    };
     const agent = new ToolLoopAgent({
-      instructions: buildAgentInstructions(context, toolContext, systemPrompt),
+      instructions: buildAgentInstructions(
+        context,
+        toolContext,
+        systemPrompt,
+        providerBuiltInTools
+      ),
       model,
       providerOptions: providerOptions as any,
       stopWhen: stepCountIs(TOOL_LOOP_MAX_STEPS),
-      tools: toolContext.tools
+      tools
     });
     const messages = history.map(toModelMessage).filter(isDefined);
 
@@ -222,7 +236,7 @@ export class AiAgentService {
     diagnostics: AiChatMessageDiagnostics;
     text: string;
   }> {
-    const { model, providerOptions } = this.createLanguageModel(runtime);
+    const { model, providerBuiltInTools, providerOptions } = this.createLanguageModel(runtime);
     const toolContext = useWorkspaceTools
       ? await this.createToolContext(context, hostCommand, workspaceToolPolicy)
       : {
@@ -233,6 +247,7 @@ export class AiAgentService {
         };
     const tools = {
       ...toolContext.tools,
+      ...(providerBuiltInTools?.tools ?? {}),
       ...(extraTools ?? {})
     };
     const stopWhen =
@@ -240,7 +255,12 @@ export class AiAgentService {
         ? [stepCountIs(maxSteps), ...terminalToolNames.map((toolName) => hasToolCall(toolName))]
         : stepCountIs(maxSteps);
     const agent = new ToolLoopAgent({
-      instructions: buildTaskInstructions(instructions, context, toolContext),
+      instructions: buildTaskInstructions(
+        instructions,
+        context,
+        toolContext,
+        providerBuiltInTools
+      ),
       model,
       providerOptions: providerOptions as any,
       stopWhen,
@@ -361,6 +381,7 @@ export class AiAgentService {
     runtime: AiAgentExecutionRuntime
   ): {
     model: LanguageModel;
+    providerBuiltInTools?: AiProviderBuiltInToolInfo;
     providerOptions?: Record<string, unknown>;
   } {
     switch (runtime.mode) {
@@ -381,7 +402,8 @@ export class AiAgentService {
         });
 
         return {
-          model: anthropic(runtime.modelId as any)
+          model: anthropic(runtime.modelId as any),
+          providerBuiltInTools: buildAnthropicBuiltInTools(anthropic)
         };
       }
 
@@ -391,7 +413,8 @@ export class AiAgentService {
         });
 
         return {
-          model: openai(runtime.modelId as any)
+          model: openai(runtime.modelId as any),
+          providerBuiltInTools: buildOpenAiBuiltInTools(openai)
         };
       }
     }
@@ -474,7 +497,8 @@ function buildAgentInstructions(
     skillCount: number;
     workspaceMounted: boolean;
   },
-  systemPrompt?: string | null
+  systemPrompt?: string | null,
+  providerBuiltInTools?: AiProviderBuiltInToolInfo
 ): string {
   const lines = [
     normalizeSystemPrompt(systemPrompt, DEFAULT_AI_CHAT_SYSTEM_PROMPTS.chatPanel),
@@ -484,6 +508,7 @@ function buildAgentInstructions(
   ];
 
   lines.push(buildWorkspaceContextInstructions(context, toolContext));
+  lines.push(...buildProviderBuiltInToolInstructionLines(providerBuiltInTools));
 
   return lines.join("\n");
 }
@@ -495,17 +520,29 @@ function buildTaskInstructions(
     readScopeDescription?: string;
     skillCount: number;
     workspaceMounted: boolean;
-  }
+  },
+  providerBuiltInTools?: AiProviderBuiltInToolInfo
 ): string {
   return [
     instructions.trim(),
     "",
     AGENTS_INSTRUCTION_FILE_PROMPT,
     "",
-    buildWorkspaceContextInstructions(context, toolContext)
+    buildWorkspaceContextInstructions(context, toolContext),
+    ...buildProviderBuiltInToolInstructionLines(providerBuiltInTools)
   ]
     .filter((part) => part.trim().length > 0)
     .join("\n");
+}
+
+function buildProviderBuiltInToolInstructionLines(
+  providerBuiltInTools?: AiProviderBuiltInToolInfo
+): string[] {
+  if (!providerBuiltInTools || providerBuiltInTools.instructions.length === 0) {
+    return [];
+  }
+
+  return ["", ...providerBuiltInTools.instructions];
 }
 
 function buildWorkspaceContextInstructions(
@@ -567,6 +604,37 @@ function buildBashToolInstructions(skillInstructions?: string): string {
   }
 
   return lines.join("\n");
+}
+
+function buildOpenAiBuiltInTools(openai: ReturnType<typeof createOpenAI>): AiProviderBuiltInToolInfo {
+  return {
+    instructions: [
+      "Provider built-in web_search is available through OpenAI. Use it only when the user asks for current public web information or when an answer materially depends on external facts that may have changed.",
+      "Do not use web_search for workspace/source-code questions unless the user explicitly asks for external web evidence."
+    ],
+    tools: {
+      web_search: openai.tools.webSearch({
+        externalWebAccess: true,
+        searchContextSize: "medium"
+      })
+    }
+  };
+}
+
+function buildAnthropicBuiltInTools(
+  anthropic: ReturnType<typeof createAnthropic>
+): AiProviderBuiltInToolInfo {
+  return {
+    instructions: [
+      "Provider built-in web_search is available through Anthropic. Use it only when the user asks for current public web information or when an answer materially depends on external facts that may have changed.",
+      "Do not use web_search for workspace/source-code questions unless the user explicitly asks for external web evidence."
+    ],
+    tools: {
+      web_search: anthropic.tools.webSearch_20250305({
+        maxUses: 5
+      })
+    }
+  };
 }
 
 async function directoryExists(targetPath: string): Promise<boolean> {
@@ -1170,6 +1238,14 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     return truncateTraceText(input.command);
   }
 
+  if (toolName === "web_search") {
+    if (isRecord(input) && typeof input.query === "string" && input.query.trim().length > 0) {
+      return truncateTraceText(input.query.trim());
+    }
+
+    return "provider web search";
+  }
+
   if (toolName === "skill" && isRecord(input)) {
     const skillName = ["skillName", "skill", "name", "id"]
       .map((key) => input[key])
@@ -1283,6 +1359,10 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
     return [exitCode, stdout, stderr].filter(isDefined).join(" | ");
   }
 
+  if (toolName === "web_search") {
+    return summarizeProviderWebSearchOutput(output);
+  }
+
   if (toolName === "skill") {
     return summarizeSkillToolOutput(output);
   }
@@ -1384,6 +1464,54 @@ function summarizeSkillToolOutput(output: unknown): string {
       .filter((value): value is string => typeof value === "string")
       .map((value) => truncateTraceText(value))
       .join(" | ") || summarizeUnknownValue(output);
+  }
+
+  return summarizeUnknownValue(output);
+}
+
+function summarizeProviderWebSearchOutput(output: unknown): string {
+  if (Array.isArray(output)) {
+    const sources = output
+      .map((item) => {
+        if (!isRecord(item)) {
+          return null;
+        }
+
+        const title = typeof item.title === "string" ? item.title.trim() : "";
+        const url = typeof item.url === "string" ? item.url.trim() : "";
+
+        return [title, url].filter(Boolean).join(" ");
+      })
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .slice(0, 3);
+
+    return truncateTraceText(
+      [`${output.length} search result(s)`, ...sources].filter(Boolean).join(" | ")
+    );
+  }
+
+  if (isRecord(output)) {
+    const action = isRecord(output.action)
+      ? [
+          typeof output.action.type === "string" ? output.action.type : null,
+          typeof output.action.query === "string" ? output.action.query : null,
+          typeof output.action.url === "string" ? output.action.url : null
+        ]
+          .filter(isDefined)
+          .join(": ")
+      : null;
+    const sources = Array.isArray(output.sources)
+      ? output.sources
+          .map((source) =>
+            isRecord(source) && typeof source.url === "string" ? source.url.trim() : null
+          )
+          .filter((value): value is string => typeof value === "string" && value.length > 0)
+          .slice(0, 3)
+      : [];
+
+    const summary = [action, ...sources].filter(isDefined).join(" | ");
+
+    return summary.length > 0 ? truncateTraceText(summary) : summarizeUnknownValue(output);
   }
 
   return summarizeUnknownValue(output);
