@@ -3206,6 +3206,17 @@ export function App(): JSX.Element {
     }
   };
 
+  const addPythonScriptToUserStock = async (relativePath: string): Promise<void> => {
+    try {
+      const result = await window.integralNotes.addPythonScriptToUserStock(relativePath);
+      setContextMenu(null);
+      setStatusMessage(`${result.fileName} をユーザーストックに追加しました: ${result.stockPath}`);
+      await refreshAssetCatalog();
+    } catch (error) {
+      setStatusMessage(toErrorMessage(error));
+    }
+  };
+
   const submitInlineEditor = async (value: string): Promise<void> => {
     if (!inlineEditor) {
       return;
@@ -4681,6 +4692,18 @@ export function App(): JSX.Element {
               >
                 DataSetに追加
               </button>
+              {contextMenu.entry.kind === "file" &&
+              contextMenu.entry.name.toLowerCase().endsWith(".py") ? (
+                <button
+                  className="tree-context-menu__item"
+                  onClick={() => {
+                    void addPythonScriptToUserStock(contextMenu.entry?.relativePath ?? "");
+                  }}
+                  type="button"
+                >
+                  ユーザーストックに追加
+                </button>
+              ) : null}
               <button
                 className="tree-context-menu__item tree-context-menu__item--danger"
                 onClick={() => {

@@ -57,6 +57,10 @@ import {
 } from "../shared/integral";
 import type { AppSettingsService } from "./appSettingsService";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
+import {
+  getGlobalSkillRootPaths,
+  shortenPathWithTokens
+} from "./pathTokens";
 import { WorkspaceService } from "./workspaceService";
 
 interface PersistedAiChatSettings {
@@ -248,7 +252,7 @@ export class AiChatService {
       selectedModelId,
       availableSkills,
       skillsDirectoryPath:
-        workspaceRootPath === null ? null : path.join(workspaceRootPath, ".codex", "skills"),
+        workspaceRootPath === null ? "global skills" : "project/global skills",
       shellExecutablePath: normalizeNullableString(settings.shellExecutablePath),
       systemPrompts,
       workspaceRootPath
@@ -1376,7 +1380,7 @@ function appendExplicitSkillInstructions(
     instructions.trim(),
     "",
     "# Explicitly Requested Skills",
-    "The user explicitly selected these workspace skills for this turn.",
+    "The user explicitly selected these project/global skills for this turn.",
     "If the `skill` tool is available, call it for each listed skill name before completing the task, then follow the loaded instructions.",
     "If the `skill` tool is unavailable, still treat the listed skill names as explicit user intent.",
     ...requestedSkills.map((skill) => {
@@ -2317,7 +2321,10 @@ function formatInlinePythonBlockTranscript(messages: readonly AiChatMessage[]): 
 async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string): Promise<string> {
   const candidateRoots = [
     path.join(workspaceRootPath, "Notes", ".codex", "skills", "implement-integral-block"),
-    path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block")
+    path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block"),
+    ...getGlobalSkillRootPaths().map((rootPath) =>
+      path.join(rootPath, "implement-integral-block")
+    )
   ];
 
   for (const skillRootPath of candidateRoots) {
@@ -2377,17 +2384,25 @@ async function readTextIfExists(filePath: string): Promise<string | null> {
 async function listWorkspaceAiSkills(
   workspaceRootPath: string | null
 ): Promise<AiChatSkillSummary[]> {
-  if (!workspaceRootPath) {
-    return [];
-  }
-
+  const workspaceSkillRootPaths = workspaceRootPath
+    ? [
+        path.join(workspaceRootPath, ".codex", "skills"),
+        path.join(workspaceRootPath, "Notes", ".codex", "skills")
+      ]
+    : [];
   const skillRootPaths = [
-    path.join(workspaceRootPath, ".codex", "skills"),
-    path.join(workspaceRootPath, "Notes", ".codex", "skills")
+    ...workspaceSkillRootPaths.map((rootPath) => ({
+      kind: "project" as const,
+      rootPath
+    })),
+    ...getGlobalSkillRootPaths().map((rootPath) => ({
+      kind: "global" as const,
+      rootPath
+    }))
   ];
   const skillsByKey = new Map<string, AiChatSkillSummary>();
 
-  for (const skillRootPath of skillRootPaths) {
+  for (const { kind, rootPath: skillRootPath } of skillRootPaths) {
     const entries = await fs.readdir(skillRootPath, { withFileTypes: true }).catch(() => []);
 
     for (const entry of entries) {
@@ -2407,12 +2422,15 @@ async function listWorkspaceAiSkills(
       const key = normalizeAiSkillNameKey(metadata.name);
 
       if (!skillsByKey.has(key)) {
+        const displayPath =
+          kind === "project" && workspaceRootPath
+            ? normalizeWorkspaceDisplayPath(path.relative(workspaceRootPath, skillFilePath))
+            : shortenPathWithTokens(skillFilePath);
+
         skillsByKey.set(key, {
           description: metadata.description,
           name: metadata.name,
-          relativePath: normalizeWorkspaceDisplayPath(
-            path.relative(workspaceRootPath, skillFilePath)
-          )
+          relativePath: `${kind}: ${normalizeWorkspaceDisplayPath(displayPath)}`
         });
       }
     }
