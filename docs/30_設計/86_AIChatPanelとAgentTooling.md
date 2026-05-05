@@ -161,7 +161,7 @@ main process 起動時に proxy を初期化する。
 ### 基本
 
 - `AiAgentService` が `ToolLoopAgent.stream()` を呼ぶ
-- stop 条件は `stepCountIs(8)`
+- stop 条件は `stepCountIs(50)`
 - renderer には
   - live text delta
   - live step-level tool trace

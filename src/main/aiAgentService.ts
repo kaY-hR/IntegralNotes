@@ -69,7 +69,7 @@ const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
   "node_modules",
   "out"
 ]);
-const TOOL_LOOP_MAX_STEPS = 8;
+const TOOL_LOOP_MAX_STEPS = 50;
 const WORKSPACE_MOUNT_PATH = "/workspace";
 const AGENTS_INSTRUCTION_FILE_PROMPT = [
   "# AGENTS.md Instructions",
