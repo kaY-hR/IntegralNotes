@@ -26,17 +26,12 @@ export function getGlobalAnalysisScriptRootPaths(): string[] {
   return roots;
 }
 
-export function getGlobalSkillRootPaths(): string[] {
+export function getIntegralNotesGlobalSkillRootPaths(): string[] {
   const roots: string[] = [];
   const localRootPath = getIntegralLocalDataRootPath();
-  const userProfilePath = resolveUserProfilePath();
 
   if (localRootPath) {
     roots.push(path.join(localRootPath, "skills"));
-  }
-
-  if (userProfilePath) {
-    roots.push(path.join(userProfilePath, ".codex", "skills"));
   }
 
   return roots;

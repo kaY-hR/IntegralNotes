@@ -58,7 +58,7 @@ import {
 import type { AppSettingsService } from "./appSettingsService";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import {
-  getGlobalSkillRootPaths,
+  getIntegralNotesGlobalSkillRootPaths,
   shortenPathWithTokens
 } from "./pathTokens";
 import { WorkspaceService } from "./workspaceService";
@@ -252,7 +252,7 @@ export class AiChatService {
       selectedModelId,
       availableSkills,
       skillsDirectoryPath:
-        workspaceRootPath === null ? "global skills" : "project/global skills",
+        workspaceRootPath === null ? "IntegralNotes global skills" : "project/IntegralNotes global skills",
       shellExecutablePath: normalizeNullableString(settings.shellExecutablePath),
       systemPrompts,
       workspaceRootPath
@@ -1380,7 +1380,7 @@ function appendExplicitSkillInstructions(
     instructions.trim(),
     "",
     "# Explicitly Requested Skills",
-    "The user explicitly selected these project/global skills for this turn.",
+    "The user explicitly selected these project or IntegralNotes global skills for this turn.",
     "If the `skill` tool is available, call it for each listed skill name before completing the task, then follow the loaded instructions.",
     "If the `skill` tool is unavailable, still treat the listed skill names as explicit user intent.",
     ...requestedSkills.map((skill) => {
@@ -2322,7 +2322,7 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
   const candidateRoots = [
     path.join(workspaceRootPath, "Notes", ".codex", "skills", "implement-integral-block"),
     path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block"),
-    ...getGlobalSkillRootPaths().map((rootPath) =>
+    ...getIntegralNotesGlobalSkillRootPaths().map((rootPath) =>
       path.join(rootPath, "implement-integral-block")
     )
   ];
@@ -2395,7 +2395,7 @@ async function listWorkspaceAiSkills(
       kind: "project" as const,
       rootPath
     })),
-    ...getGlobalSkillRootPaths().map((rootPath) => ({
+    ...getIntegralNotesGlobalSkillRootPaths().map((rootPath) => ({
       kind: "global" as const,
       rootPath
     }))

@@ -29,7 +29,7 @@ import {
 } from "../shared/aiChat";
 import { normalizeAiSkillNameKey } from "../shared/aiChatSkills";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
-import { getGlobalSkillRootPaths } from "./pathTokens";
+import { getIntegralNotesGlobalSkillRootPaths } from "./pathTokens";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
@@ -654,7 +654,7 @@ async function prepareAgentSkillsDirectory(workspaceRootPath: string): Promise<s
   const sourceRoots = [
     path.join(workspaceRootPath, ".codex", "skills"),
     path.join(workspaceRootPath, "Notes", ".codex", "skills"),
-    ...getGlobalSkillRootPaths()
+    ...getIntegralNotesGlobalSkillRootPaths()
   ];
   const existingRoots: string[] = [];
 
