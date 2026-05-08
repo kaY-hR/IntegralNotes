@@ -73,6 +73,7 @@ const PATH_KIND_PRIORITY: Record<RelationNodeKind, number> = {
   block: 5
 };
 const INDEXED_TEXT_EXTENSIONS = new Set([".idts", ".md", ".py"]);
+const RELATION_GRAPH_MUTATION_DEBOUNCE_MS = 250;
 const WORKSPACE_SCAN_EXCLUDED_SEGMENTS = new Set([
   ".git",
   "dist",
@@ -177,6 +178,9 @@ interface ParsedIntegralBlock {
 export class RelationGraphService {
   private databaseHandle: DatabaseHandle | null = null;
   private operationQueue: Promise<void> = Promise.resolve();
+  private pendingMutationFlushPromise: Promise<void> | null = null;
+  private pendingMutationFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingMutations: WorkspaceMutation[] = [];
   private readonly getAssetCatalog: () => Promise<IntegralAssetCatalog>;
   private readonly workspaceService: WorkspaceService;
 
@@ -186,6 +190,8 @@ export class RelationGraphService {
   }
 
   async getSnapshot(): Promise<RelationGraphSnapshot | null> {
+    await this.prepareForFullSynchronization();
+
     return this.enqueue(async () => {
       const rootPath = this.workspaceService.currentRootPath;
 
@@ -213,6 +219,8 @@ export class RelationGraphService {
   async getNeighborhood(
     request: RelationGraphNeighborhoodRequest
   ): Promise<RelationGraphNeighborhood | null> {
+    await this.prepareForFullSynchronization();
+
     return this.enqueue(async () => {
       const rootPath = this.workspaceService.currentRootPath;
 
@@ -251,6 +259,8 @@ export class RelationGraphService {
   async getPathDistances(
     request: RelationGraphPathDistanceRequest
   ): Promise<RelationGraphPathDistances | null> {
+    await this.prepareForFullSynchronization();
+
     return this.enqueue(async () => {
       const rootPath = this.workspaceService.currentRootPath;
 
@@ -288,51 +298,18 @@ export class RelationGraphService {
     });
   }
 
-  async handleWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
+  handleWorkspaceMutations(mutations: readonly WorkspaceMutation[]): void {
     if (mutations.length === 0) {
       return;
     }
 
-    await this.enqueue(async () => {
-      const rootPath = this.workspaceService.currentRootPath;
-
-      if (!rootPath) {
-        return;
-      }
-
-      const handle = await this.getDatabase(rootPath);
-      const affectedPaths = collectAffectedOriginPaths(mutations);
-
-      handle.database.run("BEGIN TRANSACTION");
-      try {
-        for (const mutation of mutations) {
-          if (mutation.kind === "delete" || mutation.kind === "move") {
-            this.deletePathSubtree(handle.database, normalizeRelativePath(mutation.path));
-          }
-        }
-
-        handle.database.run("COMMIT");
-      } catch (error) {
-        handle.database.run("ROLLBACK");
-        throw error;
-      }
-
-      const plan = await this.createScanPlan(rootPath);
-      const affectedOrigins = plan.origins.filter(
-        (origin) =>
-          affectedPaths.has(origin.path) ||
-          (origin.relativePath !== null && isPathInAffectedSet(origin.relativePath, affectedPaths))
-      );
-
-      await this.applyScanPlan(handle.database, plan, {
-        forceOriginPaths: new Set(affectedOrigins.map((origin) => origin.path)),
-        removeStaleOrigins: false
-      });
-      await this.persistDatabase(handle);
-    });
+    this.pendingMutations.push(...mutations);
+    this.schedulePendingMutationFlush();
   }
 
   async synchronize(): Promise<void> {
+    await this.prepareForFullSynchronization();
+
     await this.enqueue(async () => {
       const rootPath = this.workspaceService.currentRootPath;
 
@@ -362,6 +339,48 @@ export class RelationGraphService {
     await this.applyScanPlan(handle.database, plan, {
       forceOriginPaths: rebuild ? plan.currentOriginPaths : new Set<string>(),
       removeStaleOrigins: true
+    });
+    await this.persistDatabase(handle);
+  }
+
+  private async applyWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
+    if (mutations.length === 0) {
+      return;
+    }
+
+    const rootPath = this.workspaceService.currentRootPath;
+
+    if (!rootPath) {
+      return;
+    }
+
+    const handle = await this.getDatabase(rootPath);
+    const affectedPaths = collectAffectedOriginPaths(mutations);
+
+    handle.database.run("BEGIN TRANSACTION");
+    try {
+      for (const mutation of mutations) {
+        if (mutation.kind === "delete" || mutation.kind === "move") {
+          this.deletePathSubtree(handle.database, normalizeRelativePath(mutation.path));
+        }
+      }
+
+      handle.database.run("COMMIT");
+    } catch (error) {
+      handle.database.run("ROLLBACK");
+      throw error;
+    }
+
+    const plan = await this.createScanPlan(rootPath);
+    const affectedOrigins = plan.origins.filter(
+      (origin) =>
+        affectedPaths.has(origin.path) ||
+        (origin.relativePath !== null && isPathInAffectedSet(origin.relativePath, affectedPaths))
+    );
+
+    await this.applyScanPlan(handle.database, plan, {
+      forceOriginPaths: new Set(affectedOrigins.map((origin) => origin.path)),
+      removeStaleOrigins: false
     });
     await this.persistDatabase(handle);
   }
@@ -622,6 +641,59 @@ export class RelationGraphService {
   private async persistDatabase(handle: DatabaseHandle): Promise<void> {
     await fs.mkdir(path.dirname(handle.filePath), { recursive: true });
     await fs.writeFile(handle.filePath, Buffer.from(handle.database.export()));
+  }
+
+  private schedulePendingMutationFlush(): void {
+    if (this.pendingMutationFlushTimer) {
+      return;
+    }
+
+    this.pendingMutationFlushTimer = setTimeout(() => {
+      this.pendingMutationFlushTimer = null;
+      void this.flushPendingMutationsNow();
+    }, RELATION_GRAPH_MUTATION_DEBOUNCE_MS);
+  }
+
+  private async prepareForFullSynchronization(): Promise<void> {
+    if (this.pendingMutationFlushTimer) {
+      clearTimeout(this.pendingMutationFlushTimer);
+      this.pendingMutationFlushTimer = null;
+    }
+
+    this.pendingMutations = [];
+
+    while (this.pendingMutationFlushPromise) {
+      await this.pendingMutationFlushPromise;
+    }
+
+    if (this.pendingMutationFlushTimer) {
+      clearTimeout(this.pendingMutationFlushTimer);
+      this.pendingMutationFlushTimer = null;
+    }
+
+    this.pendingMutations = [];
+  }
+
+  private flushPendingMutationsNow(): Promise<void> {
+    if (this.pendingMutations.length === 0) {
+      return this.pendingMutationFlushPromise ?? Promise.resolve();
+    }
+
+    const mutations = this.pendingMutations;
+    this.pendingMutations = [];
+
+    const flushPromise = this.enqueue(() => this.applyWorkspaceMutations(mutations))
+      .catch((error) => {
+        console.error("[RelationGraphService] relation graph mutation indexing failed", error);
+      })
+      .finally(() => {
+        if (this.pendingMutationFlushPromise === flushPromise) {
+          this.pendingMutationFlushPromise = null;
+        }
+      });
+
+    this.pendingMutationFlushPromise = flushPromise;
+    return flushPromise;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

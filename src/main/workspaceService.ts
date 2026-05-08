@@ -153,12 +153,20 @@ export type WorkspaceMutationListener = (
   mutations: readonly WorkspaceMutation[]
 ) => Promise<void> | void;
 
+type WorkspaceMutationDispatchMode = "await" | "background";
+type WorkspaceFileStats = Awaited<ReturnType<typeof fs.stat>>;
+
+interface EmitWorkspaceMutationOptions {
+  dispatch?: WorkspaceMutationDispatchMode;
+}
+
 export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
   private readonly managedDataNotesSyncedRootPaths = new Set<string>();
   private readonly templateAutoCheckedRootPaths = new Set<string>();
   private readonly mutationListeners = new Set<WorkspaceMutationListener>();
+  private backgroundMutationQueue: Promise<void> = Promise.resolve();
   private pluginRegistry: PluginRegistry | null = null;
   private readonly stateFilePath: string;
 
@@ -265,6 +273,7 @@ export class WorkspaceService {
       return null;
     }
 
+    await this.flushBackgroundWorkspaceMutations();
     await this.ensureWorkspaceReady({ managedDataNoteSync: "always" });
 
     return {
@@ -348,16 +357,23 @@ export class WorkspaceService {
 
     if (existingContent !== nextContent) {
       await fs.writeFile(absolutePath, nextContent, "utf8");
-      await this.emitWorkspaceMutations([
-        {
-          kind: "modify",
-          path: relativePath,
-          targetKind: "file"
-        }
-      ]);
+      await this.emitWorkspaceMutations(
+        [
+          {
+            kind: "modify",
+            path: relativePath,
+            targetKind: "file"
+          }
+        ],
+        { dispatch: "background" }
+      );
     }
 
-    return this.readNote(relativePath);
+    return this.buildNoteDocumentFromContent(
+      absolutePath,
+      nextContent,
+      existingContent === nextContent ? stats : await fs.stat(absolutePath)
+    );
   }
 
   async searchWorkspaceText(request: WorkspaceSearchRequest): Promise<WorkspaceSearchResult> {
@@ -1085,22 +1101,14 @@ export class WorkspaceService {
 
   private async readWorkspaceFileDocument(
     absolutePath: string,
-    stats: Awaited<ReturnType<typeof fs.stat>>
+    stats: WorkspaceFileStats
   ): Promise<WorkspaceFileDocument> {
     const relativePath = this.toRelativePath(absolutePath);
     const extension = path.extname(absolutePath).toLowerCase();
 
     if (extension === ".md") {
       const markdownContent = await fs.readFile(absolutePath, "utf8");
-      const managedDataNoteTabName = resolveManagedDataNoteTabName(markdownContent);
-
-      return {
-        content: extractFrontmatterBody(markdownContent),
-        kind: "markdown",
-        modifiedAt: stats.mtime.toISOString(),
-        name: managedDataNoteTabName ?? path.basename(absolutePath),
-        relativePath
-      };
+      return this.buildNoteDocumentFromContent(absolutePath, markdownContent, stats);
     }
 
     const pluginViewer = await this.resolvePluginViewer(extension);
@@ -1182,7 +1190,26 @@ export class WorkspaceService {
     return findInstalledPluginViewerByExtension(installedPlugins, extension);
   }
 
-  private async emitWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
+  private buildNoteDocumentFromContent(
+    absolutePath: string,
+    markdownContent: string,
+    stats: WorkspaceFileStats
+  ): NoteDocument {
+    const managedDataNoteTabName = resolveManagedDataNoteTabName(markdownContent);
+
+    return {
+      content: extractFrontmatterBody(markdownContent),
+      kind: "markdown",
+      modifiedAt: stats.mtime.toISOString(),
+      name: managedDataNoteTabName ?? path.basename(absolutePath),
+      relativePath: this.toRelativePath(absolutePath)
+    };
+  }
+
+  private async emitWorkspaceMutations(
+    mutations: readonly WorkspaceMutation[],
+    options: EmitWorkspaceMutationOptions = {}
+  ): Promise<void> {
     if (mutations.length === 0 || this.mutationListeners.size === 0) {
       return;
     }
@@ -1193,8 +1220,55 @@ export class WorkspaceService {
       path: normalizeRelativePath(mutation.path)
     }));
 
-    for (const listener of this.mutationListeners) {
-      await listener(normalizedMutations);
+    if (options.dispatch === "background") {
+      this.queueBackgroundWorkspaceMutations(normalizedMutations);
+      return;
+    }
+
+    await this.runWorkspaceMutationListeners(normalizedMutations);
+  }
+
+  private runWorkspaceMutationListeners(mutations: readonly WorkspaceMutation[]): Promise<void> {
+    return (async () => {
+      for (const listener of this.mutationListeners) {
+        await listener(mutations);
+      }
+    })();
+  }
+
+  private queueBackgroundWorkspaceMutations(mutations: readonly WorkspaceMutation[]): void {
+    const rootPathAtDispatch = this.rootPath;
+
+    this.backgroundMutationQueue = this.backgroundMutationQueue.then(
+      () =>
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            if (rootPathAtDispatch !== this.rootPath) {
+              resolve();
+              return;
+            }
+
+            void this.runWorkspaceMutationListeners(mutations)
+              .catch((error) => {
+                console.error("[WorkspaceService] background workspace mutation listener failed", error);
+              })
+              .finally(() => resolve());
+          }, 0);
+        })
+    );
+  }
+
+  private async flushBackgroundWorkspaceMutations(): Promise<void> {
+    let pendingQueue = this.backgroundMutationQueue;
+
+    while (true) {
+      await pendingQueue;
+
+      if (pendingQueue === this.backgroundMutationQueue) {
+        return;
+      }
+
+      pendingQueue = this.backgroundMutationQueue;
     }
   }
 

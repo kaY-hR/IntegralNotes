@@ -2672,7 +2672,6 @@ export function App(): JSX.Element {
 
       syncTabLabel(relativePath, savedNote.name, isStillDirty);
       setStatusMessage(`${savedNote.name} を保存しました`);
-      await refreshWorkspace();
     } catch (error) {
       setOpenTabs((currentTabs) => {
         const currentTab = currentTabs[relativePath];
