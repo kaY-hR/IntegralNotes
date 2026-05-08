@@ -208,6 +208,17 @@ interface ReservedManagedPath {
   representation: DatasetRepresentation | ManagedFileRepresentation;
 }
 
+interface RegisterCreatedMetadataResult {
+  metadataList: ManagedDataMetadata[];
+  shouldSyncManagedDataNotes: boolean;
+}
+
+interface RefreshModifiedMetadataResult {
+  handledMetadataIds: Set<string>;
+  metadataList: ManagedDataMetadata[];
+  shouldSyncManagedDataNotes: boolean;
+}
+
 interface PythonCallableSummary {
   blockType: string;
   description: string;
@@ -336,6 +347,14 @@ export class IntegralWorkspaceService {
     }));
   }
 
+  async synchronizeManagedDataMetadata(): Promise<void> {
+    await this.ensureIntegralWorkspaceReady();
+
+    if (await this.reconcileManagedDataMetadata()) {
+      await this.workspaceService.syncManagedDataNotes();
+    }
+  }
+
   async handleWorkspaceMutations(mutations: readonly WorkspaceMutation[]): Promise<void> {
     if (mutations.length === 0) {
       return;
@@ -344,10 +363,11 @@ export class IntegralWorkspaceService {
     await this.workspaceService.ensureWorkspaceReady();
 
     let metadataList = await this.readManagedDataMetadataList();
-
-    if (metadataList.length === 0) {
-      return;
-    }
+    const createdMetadataResult = await this.registerCreatedManagedDataFromWorkspaceMutations(
+      mutations,
+      metadataList
+    );
+    metadataList = [...metadataList, ...createdMetadataResult.metadataList];
 
     const deletedManagedData = collectManagedDataDeletedByWorkspaceMutations(
       mutations,
@@ -376,7 +396,31 @@ export class IntegralWorkspaceService {
       }
     }
 
-    if (!this.shouldReconcileManagedDataMetadata(mutations, metadataList)) {
+    if (createdMetadataResult.shouldSyncManagedDataNotes) {
+      await this.workspaceService.syncManagedDataNotes();
+    }
+
+    if (metadataList.length === 0) {
+      return;
+    }
+
+    const modifiedMetadataResult = await this.refreshModifiedManagedDataFromWorkspaceMutations(
+      mutations,
+      metadataList
+    );
+    metadataList = modifiedMetadataResult.metadataList;
+
+    if (modifiedMetadataResult.shouldSyncManagedDataNotes) {
+      await this.workspaceService.syncManagedDataNotes();
+    }
+
+    if (
+      !this.shouldReconcileManagedDataMetadata(
+        mutations,
+        metadataList,
+        modifiedMetadataResult.handledMetadataIds
+      )
+    ) {
       return;
     }
 
@@ -533,25 +577,38 @@ export class IntegralWorkspaceService {
       throw new Error("dataset に追加するファイルまたはフォルダを選択してください。");
     }
 
-    const managedFileIds: string[] = [];
+    const managedFileMetadataByPath = await this.readManagedFileMetadataByPathMap();
+    const pathsToImport: string[] = [];
 
     for (const relativePath of relativePaths) {
-      const managedFileMetadata = await this.findManagedFileMetadataByPath(relativePath);
-
-      if (managedFileMetadata) {
-        managedFileIds.push(managedFileMetadata.id);
-        continue;
+      if (!managedFileMetadataByPath.has(normalizeRelativePath(relativePath))) {
+        pathsToImport.push(relativePath);
       }
+    }
 
-      const importResult = await this.importManagedFilePaths([this.resolveWorkspacePath(relativePath)]);
-      const importedManagedFileId = importResult.managedFiles[0]?.id;
+    if (pathsToImport.length > 0) {
+      const importResult = await this.importManagedFilePaths(
+        pathsToImport.map((relativePath) => this.resolveWorkspacePath(relativePath))
+      );
 
-      if (!importedManagedFileId) {
+      for (const managedFile of importResult.managedFiles) {
+        const metadata = await this.readManagedFileMetadata(managedFile.id);
+
+        if (metadata) {
+          managedFileMetadataByPath.set(normalizeRelativePath(metadata.path), metadata);
+        }
+      }
+    }
+
+    const managedFileIds = relativePaths.map((relativePath) => {
+      const managedFileId = managedFileMetadataByPath.get(normalizeRelativePath(relativePath))?.id;
+
+      if (!managedFileId) {
         throw new Error(`${relativePath} を managed file として登録できませんでした。`);
       }
 
-      managedFileIds.push(importedManagedFileId);
-    }
+      return managedFileId;
+    });
 
     return this.createDataset({
       datatype: request.datatype,
@@ -789,10 +846,6 @@ export class IntegralWorkspaceService {
     await this.workspaceService.ensureWorkspaceReady();
     await this.ensureWorkspacePythonSdkReady();
     await this.ensureWorkspacePythonEditorSettingsReady();
-
-    if (await this.reconcileManagedDataMetadata()) {
-      await this.workspaceService.syncManagedDataNotes();
-    }
   }
 
   private resolveWorkspacePath(relativePath: string): string {
@@ -1584,6 +1637,257 @@ export class IntegralWorkspaceService {
     }
   }
 
+  private async refreshModifiedManagedDataFromWorkspaceMutations(
+    mutations: readonly WorkspaceMutation[],
+    metadataList: readonly ManagedDataMetadata[]
+  ): Promise<RefreshModifiedMetadataResult> {
+    const modifiedRelativePaths = Array.from(
+      new Set(
+        mutations
+          .filter((mutation) => mutation.kind === "modify" && mutation.targetKind === "file")
+          .map((mutation) => normalizeRelativePath(mutation.path))
+      )
+    );
+
+    if (modifiedRelativePaths.length === 0) {
+      return {
+        handledMetadataIds: new Set(),
+        metadataList: [...metadataList],
+        shouldSyncManagedDataNotes: false
+      };
+    }
+
+    const metadataByPath = new Map(
+      metadataList.map((metadata) => [normalizeRelativePath(metadata.path), metadata])
+    );
+    const nextMetadataList = [...metadataList];
+    const handledMetadataIds = new Set<string>();
+    let shouldSyncManagedDataNotes = false;
+
+    for (const relativePath of modifiedRelativePaths) {
+      const metadata = metadataByPath.get(relativePath);
+
+      if (
+        !metadata ||
+        (metadata.entityType === "managed-file" && metadata.representation !== "file") ||
+        (metadata.entityType === "dataset" && metadata.representation !== "dataset-json")
+      ) {
+        continue;
+      }
+
+      const absolutePath = await this.resolveIfExists(relativePath);
+
+      if (!absolutePath) {
+        continue;
+      }
+
+      const stats = await fs.stat(absolutePath).catch(() => null);
+
+      if (!stats?.isFile()) {
+        continue;
+      }
+
+      if (metadata.entityType === "dataset") {
+        const nextMetadata: DatasetMetadata = {
+          ...metadata,
+          hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
+          visibility: inferVisibilityFromPath(relativePath, metadata.representation)
+        };
+        await this.refreshDatasetManifestFields(nextMetadata);
+
+        if (!areDatasetMetadataEqual(metadata, nextMetadata)) {
+          await this.writeDatasetMetadata(nextMetadata.datasetId, nextMetadata);
+          replaceManagedDataMetadata(nextMetadataList, nextMetadata);
+          shouldSyncManagedDataNotes = true;
+        }
+
+        handledMetadataIds.add(metadata.id);
+        continue;
+      }
+
+      const nextMetadata: ManagedFileMetadata = {
+        ...metadata,
+        hash: await this.computeManagedDataHash(absolutePath, metadata.representation),
+        visibility: inferVisibilityFromPath(relativePath, metadata.representation)
+      };
+
+      if (!areManagedFileMetadataEqual(metadata, nextMetadata)) {
+        await this.writeManagedFileMetadata(nextMetadata.id, nextMetadata);
+        replaceManagedDataMetadata(nextMetadataList, nextMetadata);
+
+        if (supportsManagedFileDataNote(nextMetadata.path, nextMetadata.representation)) {
+          shouldSyncManagedDataNotes = true;
+        }
+      }
+
+      handledMetadataIds.add(metadata.id);
+    }
+
+    return {
+      handledMetadataIds,
+      metadataList: nextMetadataList,
+      shouldSyncManagedDataNotes
+    };
+  }
+
+  private async registerCreatedManagedDataFromWorkspaceMutations(
+    mutations: readonly WorkspaceMutation[],
+    metadataList: readonly ManagedDataMetadata[]
+  ): Promise<RegisterCreatedMetadataResult> {
+    const createdRelativePaths = Array.from(
+      new Set(
+        mutations
+          .filter((mutation) => mutation.kind === "create" && mutation.targetKind === "file")
+          .map((mutation) => normalizeRelativePath(mutation.path))
+          .filter((relativePath) => {
+            const extension = path.posix.extname(relativePath).toLowerCase();
+            return extension === ".md" || extension === DATASET_JSON_EXTENSION;
+          })
+      )
+    );
+
+    if (createdRelativePaths.length === 0) {
+      return {
+        metadataList: [],
+        shouldSyncManagedDataNotes: false
+      };
+    }
+
+    const existingMetadataIds = new Set(metadataList.map((metadata) => metadata.id));
+    const existingMetadataPaths = new Set(
+      metadataList.map((metadata) => normalizeRelativePath(metadata.path))
+    );
+    const reservedManagedPaths: ReservedManagedPath[] = [];
+    const registeredMetadata: ManagedDataMetadata[] = [];
+    let shouldSyncManagedDataNotes = false;
+
+    for (const metadata of metadataList) {
+      reserveManagedPath(reservedManagedPaths, metadata.path, metadata.representation);
+
+      if (metadata.entityType === "dataset" && metadata.dataPath) {
+        reserveManagedPath(reservedManagedPaths, metadata.dataPath, "directory");
+      }
+    }
+
+    for (const relativePath of createdRelativePaths) {
+      if (
+        existingMetadataPaths.has(relativePath) ||
+        isSystemManagedPythonSdkPath(relativePath)
+      ) {
+        continue;
+      }
+
+      const absolutePath = await this.resolveIfExists(relativePath);
+
+      if (!absolutePath) {
+        continue;
+      }
+
+      const stats = await fs.stat(absolutePath).catch(() => null);
+
+      if (!stats?.isFile()) {
+        continue;
+      }
+
+      if (path.posix.extname(relativePath).toLowerCase() === DATASET_JSON_EXTENSION) {
+        const metadata = await this.createDatasetMetadataFromExistingManifest(
+          relativePath,
+          absolutePath,
+          existingMetadataIds
+        );
+
+        if (!metadata) {
+          continue;
+        }
+
+        await this.writeDatasetMetadata(metadata.datasetId, metadata);
+        registeredMetadata.push(metadata);
+        existingMetadataIds.add(metadata.datasetId);
+        existingMetadataPaths.add(relativePath);
+        reserveManagedPath(reservedManagedPaths, metadata.path, metadata.representation);
+        shouldSyncManagedDataNotes = true;
+        continue;
+      }
+
+      const hash = await computeFileHash(absolutePath);
+      const trackableEntry: TrackableWorkspaceEntry = {
+        absolutePath,
+        hash,
+        kind: "file",
+        relativePath
+      };
+
+      if (!isAutoRegisterableManagedFileEntry(trackableEntry, reservedManagedPaths)) {
+        continue;
+      }
+
+      const metadata: ManagedFileMetadata = {
+        createdAt: new Date().toISOString(),
+        createdByBlockId: null,
+        datatype: null,
+        displayName: path.posix.basename(relativePath),
+        entityType: "managed-file",
+        hash,
+        id: createOpaqueId("FL"),
+        path: relativePath,
+        representation: "file",
+        visibility: inferVisibilityFromPath(relativePath, "file")
+      };
+
+      await this.writeManagedFileMetadata(metadata.id, metadata);
+      registeredMetadata.push(metadata);
+      existingMetadataIds.add(metadata.id);
+      existingMetadataPaths.add(relativePath);
+      reserveManagedPath(reservedManagedPaths, metadata.path, metadata.representation);
+    }
+
+    return {
+      metadataList: registeredMetadata,
+      shouldSyncManagedDataNotes
+    };
+  }
+
+  private async createDatasetMetadataFromExistingManifest(
+    relativePath: string,
+    absolutePath: string,
+    existingMetadataIds: ReadonlySet<string>
+  ): Promise<DatasetMetadata | null> {
+    const manifest = await this.readDatasetManifest(relativePath);
+
+    if (
+      !manifest ||
+      manifest.datasetId.trim().length === 0 ||
+      existingMetadataIds.has(manifest.datasetId)
+    ) {
+      return null;
+    }
+
+    const datasetName = normalizeDatasetName(manifest.name, manifest.datasetId);
+    const noteTargetId = normalizeManagedDataNoteTargetId(
+      manifest.noteTargetId,
+      manifest.datasetId
+    );
+
+    return {
+      createdAt: new Date().toISOString(),
+      createdByBlockId: null,
+      dataPath: manifest.dataPath,
+      datatype: manifest.datatype ?? null,
+      datasetId: manifest.datasetId,
+      displayName: datasetName,
+      entityType: "dataset",
+      hash: await this.computeManagedDataHash(absolutePath, "dataset-json"),
+      id: manifest.datasetId,
+      memberIds: manifest.memberIds,
+      name: datasetName,
+      noteTargetId,
+      path: relativePath,
+      provenance: "source",
+      representation: "dataset-json",
+      visibility: inferVisibilityFromPath(relativePath, "dataset-json")
+    };
+  }
+
   private async autoRegisterWorkspaceManagedFiles(
     workspaceEntries: readonly TrackableWorkspaceEntry[],
     reservedManagedPaths: ReservedManagedPath[]
@@ -1766,11 +2070,16 @@ export class IntegralWorkspaceService {
 
   private shouldReconcileManagedDataMetadata(
     mutations: readonly WorkspaceMutation[],
-    metadataList: readonly ManagedDataMetadata[]
+    metadataList: readonly ManagedDataMetadata[],
+    handledMetadataIds: ReadonlySet<string> = new Set()
   ): boolean {
     if (
       mutations.some((mutation) =>
-        metadataList.some((metadata) => doesWorkspaceMutationAffectManagedData(mutation, metadata))
+        mutation.kind !== "create" &&
+        metadataList.some((metadata) =>
+          !handledMetadataIds.has(metadata.id) &&
+          doesWorkspaceMutationAffectManagedData(mutation, metadata)
+        )
       )
     ) {
       return true;
@@ -1802,6 +2111,19 @@ export class IntegralWorkspaceService {
     }
 
     return null;
+  }
+
+  private async readManagedFileMetadataByPathMap(): Promise<Map<string, ManagedFileMetadata>> {
+    const metadataList = await this.readManagedDataMetadataList();
+    const metadataByPath = new Map<string, ManagedFileMetadata>();
+
+    for (const metadata of metadataList) {
+      if (metadata.entityType === "managed-file") {
+        metadataByPath.set(normalizeRelativePath(metadata.path), metadata);
+      }
+    }
+
+    return metadataByPath;
   }
 
   private async readDatasetMetadata(datasetId: string): Promise<DatasetMetadata | null> {
@@ -2282,22 +2604,20 @@ export class IntegralWorkspaceService {
       throw new Error(`input managed data が見つかりません: ${inputReference}`);
     }
 
-    if (metadata.entityType === "dataset") {
-      return this.resolveDatasetReadablePath(metadata);
-    }
-
-    const absolutePath = this.resolveManagedFileContentPath(metadata);
-    const stats = await fs.stat(absolutePath).catch(() => null);
-
-    if (!stats) {
-      throw new Error(`input path が見つかりません: ${metadata.path}`);
-    }
-
     const allowedExtensions = normalizeIntegralSlotExtensions(inputSlot.extensions);
     const directExtension = normalizeIntegralSlotExtension(inputSlot.extension);
     const expectedExtensions = Array.from(
       new Set([...(allowedExtensions ?? []), ...(directExtension ? [directExtension] : [])])
     );
+    const absolutePath =
+      metadata.entityType === "dataset"
+        ? this.resolveWorkspacePath(metadata.path)
+        : this.resolveManagedFileContentPath(metadata);
+    const stats = await fs.stat(absolutePath).catch(() => null);
+
+    if (!stats) {
+      throw new Error(`input path が見つかりません: ${metadata.path}`);
+    }
 
     if (expectedExtensions.length > 0 && stats.isFile()) {
       const actualExtension = path.extname(absolutePath).toLowerCase();
@@ -4428,6 +4748,17 @@ function areDatasetMetadataEqual(left: DatasetMetadata, right: DatasetMetadata):
 
 function areManagedFileMetadataEqual(left: ManagedFileMetadata, right: ManagedFileMetadata): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function replaceManagedDataMetadata(
+  metadataList: ManagedDataMetadata[],
+  nextMetadata: ManagedDataMetadata
+): void {
+  const index = metadataList.findIndex((metadata) => metadata.id === nextMetadata.id);
+
+  if (index >= 0) {
+    metadataList[index] = nextMetadata;
+  }
 }
 
 function inferVisibilityFromPath(

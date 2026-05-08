@@ -1,6 +1,6 @@
 ---
 name: implement-integral-block
-description: "Use when implementing or revising a Python analysis block built on `from integral import integral_block`, or when explaining the shipped `integral` SDK contract for `main(inputs, outputs, params)`, slot definitions, path-based file I/O, and optional `.idts` bundle directory handling."
+description: "Use when implementing or revising a Python analysis block built on `from integral import integral_block`, or when explaining the shipped `integral` SDK contract for `main(inputs, outputs, params)`, slot definitions, path-based file I/O, and optional `.idts` dataset helper handling."
 ---
 
 # Implement Integral Block
@@ -30,7 +30,8 @@ Do not rely on repository-level product docs, architecture docs, development his
 - Treat slot I/O as path-based.
 - Non-`.idts` inputs are file paths.
 - Non-`.idts` outputs are file paths.
-- `.idts` inputs and outputs are directory paths for bundle contents.
+- `.idts` inputs are manifest file paths. Use SDK helpers such as `resolve_dataset_files(inputs["source"])` to iterate member files, or `resolve_dataset_input(inputs["source"])` only when a readable directory is needed.
+- `.idts` outputs are directory paths for bundle contents. Use `prepare_dataset_output(outputs["report"])` when convenient.
 - Keep the callable top-level and keep `@integral_block(...)` immediately above `def ...(`.
 - Keep the callable signature `main(inputs, outputs, params)` unless the task explicitly changes the runtime contract.
 - Derive decorator capabilities from `../../../.integral-sdk/python/integral/__init__.py`. Do not invent unsupported fields.
@@ -47,6 +48,7 @@ Do not rely on repository-level product docs, architecture docs, development his
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
 - Use slot `datatype` as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as `{user-id}/peak-table` when the app prompt provides a user ID.
 - If an input slot should accept a `.idts` dataset, always declare `extensions=[".idts"]` in addition to any `datatype`. `.idts` is the bundle representation, and the input picker uses extensions to find dataset candidates.
+- For `.idts` inputs, do not parse `.store/.integral` metadata directly in block scripts. Use the shipped SDK helpers instead.
 - Do not group files with different roles or user intent into one `.idts` output just for convenience.
 - Use a `.idts` output only when multiple files of the same nature are generated as one set, such as per-input files or repeated artifacts with the same datatype and role.
 - If the user is meant to inspect an output directly, make it its own output slot. This includes HTML reports, plots, images, SVG/PNG/JPEG/WebP files, readable Markdown/text reports, and other renderable artifacts.

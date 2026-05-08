@@ -139,14 +139,14 @@ outputs=[
 ## `.idts` の扱い
 
 `.idts` は見た目は普通の workspace file にする。  
-ただし workspace file として開いたときは manifest viewer ではなく dataset の data-note を開く。runtime では dataset ID から readable directory path に resolve する。
+ただし workspace file として開いたときは manifest viewer ではなく dataset の data-note を開く。Python runtime では dataset ID から `.idts` manifest file path に resolve し、SDK helper で member files や readable directory を得る。
 
 ### input
 
 - ユーザーが指定するのは `/Data/samples.idts`
 - 保存時または実行前に dataset ID へ解決する
-- Python に渡すのは readable directory path
-- source dataset は必要に応じて `.store/.integral/runtime/` 配下の staging directory へ materialize してよい
+- Python に渡すのは `.idts` manifest file path
+- source dataset は必要に応じて SDK helper が staging directory へ materialize してよい
 
 ### output
 

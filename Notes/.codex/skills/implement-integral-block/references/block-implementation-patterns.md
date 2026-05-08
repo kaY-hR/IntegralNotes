@@ -20,7 +20,7 @@ def main(
 Interpret the arguments like this:
 
 - non-`.idts` `inputs[slot]`: a file path or `None`
-- `.idts` `inputs[slot]`: a readable directory path or `None`
+- `.idts` `inputs[slot]`: a `.idts` manifest file path or `None`; use `resolve_dataset_files()` or `resolve_dataset_input()` from the SDK
 - non-`.idts` `outputs[slot]`: a file path reserved for the output file or `None`
 - `.idts` `outputs[slot]`: a writable directory path reserved for bundle contents or `None`
 - `params`: a value object normalized from the decorator `params` schema, or `None`
@@ -77,9 +77,8 @@ report_path.write_text("...", encoding="utf-8")
 Bundle input to bundle output:
 
 ```python
-source_root = require_existing_directory(inputs, "source")
-report_root = require_output_directory(outputs, "report")
-report_root.mkdir(parents=True, exist_ok=True)
+source_files = resolve_dataset_files(inputs["source"])
+report_root = prepare_dataset_output(outputs["report"])
 (report_root / "index.html").write_text("...", encoding="utf-8")
 ```
 
@@ -130,6 +129,7 @@ Do not bundle files with different roles or user intent into one `.idts` output.
 ## Common Mistakes
 
 - expecting dataset IDs instead of resolved paths
+- treating `.idts` inputs as directories instead of resolving the manifest through SDK helpers
 - using legacy `params=[{"name": ...}]` instead of the object schema
 - using `display_name` inside params properties instead of `title`
 - reading `analysis-args.json` inside the user script

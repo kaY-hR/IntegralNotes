@@ -178,7 +178,7 @@ app は実行前に次を行う。
 {
   "inputs": {
     "samples": "C:\\Workspace\\Data\\samples.csv",
-    "bundle": "C:\\Workspace\\.store\\.integral\\runtime\\materialized-datasets\\DTS-7K2M9Q4D"
+    "bundle": "C:\\Workspace\\Data\\bundle.idts"
   },
   "outputs": {
     "score": "C:\\Workspace\\Results\\score.csv",
@@ -194,7 +194,7 @@ app は実行前に次を行う。
 
 - 値は絶対パスまたは `null`
 - 非 `.idts` input / output は current path をそのまま使う
-- `.idts` input は readable directory path を渡す。source dataset は staging directory へ materialize してよい
+- `.idts` input は `.idts` manifest file path を渡す。Python script は SDK helper で member files や readable directory を得る
 - `.idts` output は visible output folder path を渡す
 - `params` は decorator schema に沿って正規化した note source の object を渡す
 - decorator schema に無い param、未対応型 param、schema 外 key は実行 payload から削除する

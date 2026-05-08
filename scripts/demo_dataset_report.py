@@ -11,7 +11,7 @@ SDK_IMPORT_ROOT = Path(__file__).resolve().parents[1] / ".integral-sdk" / "pytho
 if SDK_IMPORT_ROOT.exists():
     sys.path.insert(0, str(SDK_IMPORT_ROOT))
 
-from integral import integral_block
+from integral import integral_block, prepare_dataset_output, resolve_dataset_files
 
 
 @integral_block(
@@ -25,7 +25,8 @@ from integral import integral_block
     ],
 )
 def main(inputs: dict[str, str | None], outputs: dict[str, str | None], params: dict[str, Any] | None) -> None:
-    source_root = require_existing_directory(inputs, "source")
+    source_path = require_slot_path(inputs, "source", "Input")
+    source_files = resolve_dataset_files(source_path)
     report_root = require_output_directory(outputs, "report")
     options = params or {}
     title = str(options.get("title") or "Dataset Report")
@@ -34,8 +35,8 @@ def main(inputs: dict[str, str | None], outputs: dict[str, str | None], params: 
     files: list[dict[str, Any]] = []
     total_bytes = 0
 
-    for file_path in sorted(candidate for candidate in source_root.rglob("*") if candidate.is_file()):
-        relative_path = file_path.relative_to(source_root).as_posix()
+    for file_path in source_files:
+        relative_path = file_path.name
         size = file_path.stat().st_size
         total_bytes += size
         files.append(
@@ -50,7 +51,7 @@ def main(inputs: dict[str, str | None], outputs: dict[str, str | None], params: 
 
     summary = {
         "title": title,
-        "input_root": str(source_root),
+        "input_manifest": str(source_path),
         "file_count": len(files),
         "total_bytes": total_bytes,
         "params": options,
@@ -71,30 +72,17 @@ def main(inputs: dict[str, str | None], outputs: dict[str, str | None], params: 
     )
 
 
-def require_existing_directory(values: dict[str, str | None], slot_name: str) -> Path:
+def require_slot_path(values: dict[str, str | None], slot_name: str, label: str) -> Path:
     candidate = (values or {}).get(slot_name)
 
     if not candidate:
-        raise ValueError(f"Input slot '{slot_name}' is required.")
+        raise ValueError(f"{label} slot '{slot_name}' is required.")
 
-    directory = Path(candidate)
-
-    if not directory.exists():
-        raise FileNotFoundError(f"Input path does not exist: {directory}")
-
-    if not directory.is_dir():
-        raise NotADirectoryError(f"Input path is not a directory: {directory}")
-
-    return directory
+    return Path(candidate)
 
 
 def require_output_directory(values: dict[str, str | None], slot_name: str) -> Path:
-    candidate = (values or {}).get(slot_name)
-
-    if not candidate:
-        raise ValueError(f"Output slot '{slot_name}' is required.")
-
-    return Path(candidate)
+    return prepare_dataset_output(require_slot_path(values, slot_name, "Output"))
 
 
 def coerce_positive_int(value: Any, default: int) -> int:
@@ -124,7 +112,7 @@ def build_text_report(
     lines = [
         title,
         "=" * len(title),
-        f"Input root: {summary['input_root']}",
+        f"Input manifest: {summary['input_manifest']}",
         f"File count: {summary['file_count']}",
         f"Total bytes: {summary['total_bytes']}",
         "",
@@ -255,7 +243,7 @@ def build_html_report(
     <main class="card">
       <p><code>scripts/demo_dataset_report.py:main</code></p>
       <h1>{html.escape(title)}</h1>
-      <p>{html.escape(str(summary["input_root"]))}</p>
+      <p>{html.escape(str(summary["input_manifest"]))}</p>
 
       <section class="stats">
         <div class="stat">

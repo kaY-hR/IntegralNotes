@@ -219,8 +219,9 @@
 - app は実行前 `outputs` の path を出力先として確定する
 - `inputs / outputs` には Python がそのまま使える絶対 path を渡す
 - 非 `.idts` input は、ID から解決した current file path を渡す
-- `.idts` input は readable folder path へ resolve した path を渡す
-- source dataset は必要に応じて app が staging folder を materialize してよい
+- `.idts` input は `.idts` manifest file path を渡す
+- Python script は SDK helper (`resolve_dataset_files` / `resolve_dataset_input`) を使って dataset の member files や readable folder を得る
+- source dataset は必要に応じて SDK helper が staging folder を materialize してよい
 - 非 `.idts` output は、指定された output file path をそのまま渡す
 - `.idts` output は、指定された output folder を app 側で事前に確保し、Python にはその folder path を渡す
 - `.idts` output の実行成功後、app は output folder 内に `{folder名}.idts` manifest を作成する

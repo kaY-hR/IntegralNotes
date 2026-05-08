@@ -705,6 +705,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("workspace:sync", async () => {
     const snapshot = await workspaceService.syncWorkspace();
+    await getIntegralWorkspaceService().synchronizeManagedDataMetadata();
     await getRelationGraphService().synchronize();
     mainWindow?.setTitle(formatWindowTitle(snapshot));
     return snapshot;
@@ -759,6 +760,7 @@ function registerIpcHandlers(): void {
     }
 
     const snapshot = await workspaceService.setRootPath(result.filePaths[0]);
+    await getIntegralWorkspaceService().synchronizeManagedDataMetadata();
     await getRelationGraphService().synchronize();
     mainWindow.setTitle(formatWindowTitle(snapshot));
 
@@ -1276,6 +1278,7 @@ if (!hasSingleInstanceLock) {
       pluginRegistry,
       appSettingsService
     );
+    await integralWorkspaceService.synchronizeManagedDataMetadata();
     relationGraphService = new RelationGraphService({
       getAssetCatalog: () => getIntegralWorkspaceService().listAssetCatalog(),
       workspaceService

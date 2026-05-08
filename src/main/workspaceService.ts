@@ -75,6 +75,7 @@ interface PersistedWorkspaceState {
 }
 
 interface EnsureWorkspaceReadyOptions {
+  managedDataNoteSync?: "always" | "once" | "skip";
   skipTemplateAutoInitialize?: boolean;
 }
 
@@ -155,6 +156,7 @@ export type WorkspaceMutationListener = (
 export class WorkspaceService {
   private rootPath: string | undefined;
   private readonly initialRootPath: string | undefined;
+  private readonly managedDataNotesSyncedRootPaths = new Set<string>();
   private readonly templateAutoCheckedRootPaths = new Set<string>();
   private readonly mutationListeners = new Set<WorkspaceMutationListener>();
   private pluginRegistry: PluginRegistry | null = null;
@@ -205,6 +207,7 @@ export class WorkspaceService {
 
   async ensureWorkspaceReady(options: EnsureWorkspaceReadyOptions = {}): Promise<void> {
     const rootPath = this.getConfiguredRootPath();
+    const managedDataNoteSync = options.managedDataNoteSync ?? "once";
 
     await fs.mkdir(rootPath, { recursive: true });
     await Promise.all([
@@ -216,11 +219,19 @@ export class WorkspaceService {
     if (options.skipTemplateAutoInitialize !== true) {
       await this.ensureWorkspaceTemplateAutoInitialized(rootPath);
     }
-    await this.syncManagedDataNotesInternal(rootPath);
+    if (
+      managedDataNoteSync === "always" ||
+      (managedDataNoteSync === "once" && !this.managedDataNotesSyncedRootPaths.has(rootPath))
+    ) {
+      await this.syncManagedDataNotesInternal(rootPath);
+      this.managedDataNotesSyncedRootPaths.add(rootPath);
+    }
   }
 
   async syncManagedDataNotes(): Promise<void> {
-    await this.syncManagedDataNotesInternal(this.getConfiguredRootPath());
+    const rootPath = this.getConfiguredRootPath();
+    await this.syncManagedDataNotesInternal(rootPath);
+    this.managedDataNotesSyncedRootPaths.add(rootPath);
   }
 
   addMutationListener(listener: WorkspaceMutationListener): () => void {
@@ -254,7 +265,7 @@ export class WorkspaceService {
       return null;
     }
 
-    await this.ensureWorkspaceReady();
+    await this.ensureWorkspaceReady({ managedDataNoteSync: "always" });
 
     return {
       rootName: path.basename(rootPath) || rootPath,

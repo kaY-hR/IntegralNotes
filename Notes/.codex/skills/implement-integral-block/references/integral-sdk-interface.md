@@ -15,7 +15,7 @@ Use:
 from integral import integral_block
 ```
 
-The module also exports `get_integral_block_spec`, `IntegralBlockSpec`, and `IntegralSlotSpec`, but a normal block script usually only needs `integral_block`.
+The module also exports `get_integral_block_spec`, `IntegralBlockSpec`, `IntegralSlotSpec`, and dataset helpers. A normal single-file block usually only needs `integral_block`; a `.idts` dataset block should import the helper it needs.
 
 ## Decorator Surface
 
@@ -142,9 +142,27 @@ def main(
 
 The `integral` module does not define:
 
-- dataset ID handling
+- manual dataset ID tracking
 - CLI argument parsing
 - runtime log handling
 - note-writing behavior inside Python
 
 Those concerns belong to the runner or to the block implementation, not to the decorator itself.
+
+## Dataset Helpers
+
+For a `.idts` input slot, the runtime passes the `.idts` manifest file path. Use the SDK instead of parsing `.store/.integral` metadata directly:
+
+```python
+from integral import integral_block, resolve_dataset_files
+
+
+def main(inputs, outputs, params) -> None:
+    files = resolve_dataset_files(inputs["source"])
+```
+
+Available helpers:
+
+- `resolve_dataset_files(path)`: returns member files as `tuple[Path, ...]`
+- `resolve_dataset_input(path)`: returns a readable directory for the dataset, materializing source datasets when needed
+- `prepare_dataset_output(path)`: creates and returns a `.idts` output directory

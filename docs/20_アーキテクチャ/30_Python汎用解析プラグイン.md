@@ -112,7 +112,7 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 {
   "inputs": {
     "samples": "C:\\Workspace\\Data\\samples.csv",
-    "source": "C:\\Workspace\\.store\\.integral\\runtime\\materialized-datasets\\DTS-1A2B3C4D"
+    "source": "C:\\Workspace\\Data\\source.idts"
   },
   "outputs": {
     "score": "C:\\Workspace\\Results\\score.csv",
@@ -130,7 +130,7 @@ Python へ渡す実行情報は `analysis-args.json` にまとめる。
 - `outputs` は絶対 path または `null`
 - note source 上の `in:` は managed data ID を正とし、実行時に current path へ解決する
 - 非 `.idts` input は ID から解決した current file path を渡す
-- `.idts` input は dataset ID から readable directory path に resolve して渡す。source dataset は必要に応じて staging directory へ materialize してよい
+- `.idts` input は dataset ID から `.idts` manifest file path に resolve して渡す。Python script は SDK helper で member files や readable directory を得る
 - note source 上の `out:` は実行前 target path、実行後 output managed data ID とする
 - 非 `.idts` output は実行前 `out:` の target file path をそのまま渡す
 - `.idts` output は実行前 `out:` の output folder path を渡し、実行成功後に app がその folder 内へ `{folder名}.idts` manifest を作る
