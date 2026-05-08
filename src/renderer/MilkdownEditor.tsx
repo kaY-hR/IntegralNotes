@@ -1109,9 +1109,9 @@ export function MilkdownEditor({
   const resolveInlineActionForTrigger = (
     trigger: InlineAiTriggerState
   ): InlineActionDefinition | null => {
-    const actionName =
-      trigger.actionName ??
-      (trigger.marker === "??" ? "continue" : trigger.marker === ">>" ? "mkpy" : null);
+  const actionName =
+    trigger.actionName ??
+      (trigger.marker === "??" ? "auto-continue" : trigger.marker === ">>" ? "make-python-block" : null);
 
     if (!actionName) {
       return null;
@@ -2227,7 +2227,8 @@ export function MilkdownEditor({
                 placeholder={
                   inlineAiPrompt.messages.length > 0
                     ? "追加の指示や回答を入力"
-                    : inlineAiPrompt.action?.name === "mkpy"
+                    : inlineAiPrompt.action?.name === "make-python-block" ||
+                        inlineAiPrompt.action?.name === "amend-python-block"
                       ? "実装したい解析 block を指示"
                       : "実行したい内容を指示"
                 }

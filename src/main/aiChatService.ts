@@ -925,13 +925,25 @@ export class AiChatService {
 
       const relativePath = normalizeWorkspaceDisplayPath(path.join(INLINE_ACTION_DIRECTORY, entry.name));
       const absolutePath = path.join(actionDirectoryPath, entry.name);
+      const fallbackName = path.basename(entry.name, ".md");
+
+      if (REMOVED_STANDARD_INLINE_ACTION_NAMES.has(fallbackName)) {
+        continue;
+      }
+
       const content = await fs.readFile(absolutePath, "utf8").catch(() => null);
 
       if (content === null) {
         continue;
       }
 
-      actions.push(parseInlineActionDefinition(content, relativePath, path.basename(entry.name, ".md")));
+      const action = parseInlineActionDefinition(content, relativePath, fallbackName);
+
+      if (REMOVED_STANDARD_INLINE_ACTION_NAMES.has(action.name)) {
+        continue;
+      }
+
+      actions.push(action);
     }
 
     return mergeFallbackInlineActions(actions).sort((left, right) =>
@@ -1656,6 +1668,8 @@ const INLINE_ACTION_READ_SCOPES: readonly InlineActionReadScope[] = [
   "entire-workspace"
 ];
 
+const REMOVED_STANDARD_INLINE_ACTION_NAMES = new Set(["continue", "write", "mkpy"]);
+
 const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
   {
     canAnswerOnly: false,
@@ -1664,11 +1678,11 @@ const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
     canInsertMarkdown: true,
     canRunShellCommand: true,
     description: "文脈から次の内容を自動で書き足します",
-    name: "continue",
+    name: "auto-continue",
     promptRequired: false,
     readDirs: [],
     readScope: "entire-workspace",
-    relativePath: ".inline-action/continue.md",
+    relativePath: ".inline-action/auto-continue.md",
     systemPrompt: [
       "You are continuing a Markdown note directly at the cursor.",
       "Infer the user's intent from the current document and surrounding context.",
@@ -1682,14 +1696,14 @@ const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
     canEditWorkspaceFiles: false,
     canInsertMarkdown: true,
     canRunShellCommand: true,
-    description: "指示に従ってMarkdownを書き込みます",
-    name: "write",
+    description: "AIに指示してMarkdownを作成します",
+    name: "request",
     promptRequired: true,
     readDirs: [],
     readScope: "entire-workspace",
-    relativePath: ".inline-action/write.md",
+    relativePath: ".inline-action/request.md",
     systemPrompt: [
-      "You are writing Markdown into the current note.",
+      "You are fulfilling a user request by drafting Markdown for the current note.",
       "Use the user's instruction and workspace context to produce useful note content.",
       "Commit by inserting Markdown at the cursor. Do not only answer in chat unless the action explicitly permits it."
     ].join("\n")
@@ -1700,15 +1714,36 @@ const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
     canEditWorkspaceFiles: true,
     canInsertMarkdown: true,
     canRunShellCommand: true,
-    description: "Python解析ブロックを作成して挿入します",
-    name: "mkpy",
+    description: "Python解析ブロックを新規作成して挿入します",
+    name: "make-python-block",
     promptRequired: true,
     readDirs: [],
     readScope: "entire-workspace",
-    relativePath: ".inline-action/mkpy.md",
+    relativePath: ".inline-action/make-python-block.md",
     systemPrompt: [
-      "You are creating a Python analysis block for Integral Notes.",
-      "Prefer creating or updating a Python file when implementation is needed, then create a Python block draft and insert the final Markdown.",
+      "You are creating a new Python analysis block for IntegralNotes.",
+      "Prefer creating a Python file when implementation is needed, then create a Python block draft and insert the final Markdown.",
+      "Write inputs and outputs slot objects as literal Python dictionaries; do not use dict(...), variables, helper functions, or class instances for slot definitions.",
+      "The final commit must be Markdown insertion at the cursor."
+    ].join("\n")
+  },
+  {
+    canAnswerOnly: false,
+    canCreatePythonBlockDraft: true,
+    canEditWorkspaceFiles: true,
+    canInsertMarkdown: true,
+    canRunShellCommand: true,
+    description: "既存のPython解析ブロックを修正して挿入します",
+    name: "amend-python-block",
+    promptRequired: true,
+    readDirs: [],
+    readScope: "entire-workspace",
+    relativePath: ".inline-action/amend-python-block.md",
+    systemPrompt: [
+      "You are amending an existing Python analysis block for IntegralNotes.",
+      "Identify the existing block, script path, and function from the current note context or the user's instruction.",
+      "Modify the existing workspace Python file when needed, then create a Python block draft and insert the amended final Markdown.",
+      "Write inputs and outputs slot objects as literal Python dictionaries; do not use dict(...), variables, helper functions, or class instances for slot definitions.",
       "The final commit must be Markdown insertion at the cursor."
     ].join("\n")
   },

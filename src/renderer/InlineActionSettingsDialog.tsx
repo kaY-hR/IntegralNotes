@@ -171,7 +171,10 @@ export function InlineActionSettingsDialog({
         <div className="dialog-card__header">
           <p className="dialog-card__eyebrow">Inline Action</p>
           <h2>Inline Action Settings</h2>
-          <p>.inline-action/*.md をGUIから編集します。@@ でpicker、?? は @@continue、&gt;&gt; は @@mkpy です。</p>
+          <p>
+            .inline-action/*.md をGUIから編集します。@@ でpicker、?? は @@auto-continue、
+            &gt;&gt; は @@make-python-block です。
+          </p>
         </div>
 
         <div className="dialog-card__body dialog-card__body--inline-action-settings">

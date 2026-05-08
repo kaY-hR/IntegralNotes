@@ -1,5 +1,5 @@
 ---
-name: "continue"
+name: "auto-continue"
 description: "文脈から次の内容を自動で書き足します"
 promptRequired: false
 canInsertMarkdown: true
