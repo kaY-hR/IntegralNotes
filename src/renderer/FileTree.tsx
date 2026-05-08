@@ -1,6 +1,16 @@
-import { type DragEvent, type MouseEvent, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type DragEvent,
+  type MouseEvent,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 
 import type { WorkspaceEntry, WorkspaceEntryKind } from "../shared/workspace";
+
+const TREE_STICKY_ROW_HEIGHT = 25;
+const TREE_STICKY_BASE_Z_INDEX = 30;
 
 export type FileTreeInlineEditorState =
   | {
@@ -189,6 +199,7 @@ export function FileTree({
           editingState={editingState}
           entry={entry}
           expandedPaths={expandedPaths}
+          depth={0}
           key={entry.relativePath}
           primarySelectedPath={primarySelectedPath}
           selectedPaths={selectedPaths}
@@ -208,10 +219,12 @@ export function FileTree({
 }
 
 interface FileTreeNodeProps extends FileTreeProps {
+  depth: number;
   entry: WorkspaceEntry;
 }
 
 function FileTreeNode({
+  depth,
   dropTargetPath,
   editingPending,
   editingState,
@@ -244,6 +257,23 @@ function FileTreeNode({
   const isDropTarget = dropTargetPath === entry.relativePath;
   const shouldRenderChildren =
     isExpanded && ((entry.children?.length ?? 0) > 0 || childCreateState !== null);
+  const isStickyParent = shouldRenderChildren;
+  const rowClassName = [
+    "tree-row",
+    isSelected ? "is-selected" : "",
+    isPrimarySelected ? "is-primary-selected" : "",
+    renameState ? "is-editing" : "",
+    isDropTarget ? "is-drop-target" : "",
+    isStickyParent ? "is-sticky-parent" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const rowStyle = isStickyParent
+    ? ({
+        "--tree-sticky-top": `${depth * TREE_STICKY_ROW_HEIGHT}px`,
+        "--tree-sticky-z-index": TREE_STICKY_BASE_Z_INDEX - depth
+      } as CSSProperties)
+    : undefined;
 
   const handleContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
@@ -261,8 +291,9 @@ function FileTreeNode({
       }}
     >
       <div
-        className={`tree-row${isSelected ? " is-selected" : ""}${isPrimarySelected ? " is-primary-selected" : ""}${renameState ? " is-editing" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+        className={rowClassName}
         onContextMenu={handleContextMenu}
+        style={rowStyle}
       >
         {renameState ? (
           <div className="tree-row__main tree-row__main--editing">
@@ -313,6 +344,7 @@ function FileTreeNode({
           {entry.children?.map((child) => (
             <FileTreeNode
               dropTargetPath={dropTargetPath}
+              depth={depth + 1}
               editingPending={editingPending}
               editingState={editingState}
               entry={child}

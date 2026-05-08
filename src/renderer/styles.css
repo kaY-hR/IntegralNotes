@@ -729,6 +729,18 @@ textarea:focus-visible {
   background: #ebf1f7;
 }
 
+.tree-row.is-sticky-parent {
+  position: sticky;
+  top: var(--tree-sticky-top, 0);
+  z-index: var(--tree-sticky-z-index, 1);
+  background: #fafbfd;
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.tree-row.is-sticky-parent:hover {
+  background: #ebf1f7;
+}
+
 .tree-row.is-selected {
   background: #cfe8ff;
   color: #16324f;

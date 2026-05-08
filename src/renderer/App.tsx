@@ -193,6 +193,21 @@ function ExplorerVisibilityIcon({
   );
 }
 
+function ExplorerCollapseAllIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="sidebar__action-icon-svg"
+      viewBox="0 0 18 16"
+    >
+      <path d="M4 4.5h10" />
+      <path d="M4 11.5h10" />
+      <path d="m6 8 3-3 3 3" />
+      <path d="m6 14 3-3 3 3" />
+    </svg>
+  );
+}
+
 function ExplorerSidebarIcon(): JSX.Element {
   return (
     <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
@@ -1972,6 +1987,14 @@ export function App(): JSX.Element {
     setStatusMessage(
       nextShowHiddenEntries ? "hidden フォルダを表示しました。" : "hidden フォルダを非表示にしました。"
     );
+  };
+
+  const collapseAllExplorerEntries = (): void => {
+    setInlineEditor(null);
+    setContextMenu(null);
+    setDropTargetPath(null);
+    setExpandedPaths(new Set());
+    setStatusMessage("Explorer のフォルダを全て畳みました。");
   };
 
   const replaceSelection = (relativePaths: Iterable<string>, primaryPath = ""): void => {
@@ -3914,6 +3937,16 @@ export function App(): JSX.Element {
               type="button"
             >
               <ExplorerVisibilityIcon showHiddenEntries={showHiddenEntries} />
+            </button>
+            <button
+              aria-label="全て畳む"
+              className="button button--icon"
+              disabled={expandedPaths.size === 0}
+              onClick={collapseAllExplorerEntries}
+              title="全て畳む"
+              type="button"
+            >
+              <ExplorerCollapseAllIcon />
             </button>
             <button
               className="button button--ghost sidebar__action-text"
