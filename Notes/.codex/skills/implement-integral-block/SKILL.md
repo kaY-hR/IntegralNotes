@@ -35,6 +35,8 @@ Do not rely on repository-level product docs, architecture docs, development his
 - Keep the callable top-level and keep `@integral_block(...)` immediately above `def ...(`.
 - Keep the callable signature `main(inputs, outputs, params)` unless the task explicitly changes the runtime contract.
 - Derive decorator capabilities from `../../../.integral-sdk/python/integral/__init__.py`. Do not invent unsupported fields.
+- Write `inputs` / `outputs` slot objects as Python dict literals like `{"name": "report", "extension": ".html"}` so IntegralNotes discovery can statically read them. Do not use `dict(name="report", ...)`, helper functions, variables, or class instances for slot definitions.
+- For single-file output slots, prefer the canonical `extension` key. Use `extensions` mainly for input candidate filtering or when an input accepts multiple suffixes.
 - For single-file outputs, create `output_path.parent`.
 - For `.idts` outputs, create the assigned directory itself.
 - Validate required input paths clearly before doing the real work.
@@ -66,7 +68,11 @@ Do not rely on repository-level product docs, architecture docs, development his
 
 Before finishing, verify:
 
+- run the static validator when Python is available:
+  - from an IntegralNotes workspace root: `python .codex/skills/implement-integral-block/scripts/validate_integral_block.py scripts/path/to/block.py`
+  - from this repository root while editing the template: `python Notes/.codex/skills/implement-integral-block/scripts/validate_integral_block.py Notes/scripts/path/to/block.py`
 - the decorator uses only fields supported by the shipped `integral` module
+- each slot object is a literal `{...}` mapping, not `dict(...)`
 - decorator `params`, if present, uses the supported object schema shape
 - the callable keeps the expected signature
 - slot names in code match the decorator

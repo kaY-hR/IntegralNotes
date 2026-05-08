@@ -6,6 +6,14 @@ Use `../../../.integral-sdk/python/integral/__init__.py` as the SDK source of tr
 
 ## Runtime Contract
 
+Before finishing a block, run the skill-local static validator when Python is available:
+
+```bash
+python .codex/skills/implement-integral-block/scripts/validate_integral_block.py scripts/path/to/block.py
+```
+
+The validator does not import or execute the block. It checks whether the source is shaped so IntegralNotes discovery can populate `in`, `out`, and `params` YAML.
+
 Implement the callable as:
 
 ```python
@@ -53,6 +61,22 @@ Declare user-editable params in the decorator, not only in the YAML block:
 def main(inputs, outputs, params) -> None:
     options = params or {}
     threshold = float(options.get("threshold") or 0.5)
+```
+
+Declare input and output slot objects as literal `{...}` mappings. IntegralNotes discovery reads the source statically, so this works:
+
+```python
+outputs=[
+    {"name": "report", "extension": ".html", "datatype": "user-id/html-report"},
+]
+```
+
+Do not write slots with `dict(...)`, variables, helper functions, or class instances when the block should produce populated `in` / `out` YAML:
+
+```python
+outputs=[
+    dict(name="report", extension=".html")
+]
 ```
 
 Do not use legacy list-shaped params:
@@ -131,6 +155,7 @@ Do not bundle files with different roles or user intent into one `.idts` output.
 - expecting dataset IDs instead of resolved paths
 - treating `.idts` inputs as directories instead of resolving the manifest through SDK helpers
 - using legacy `params=[{"name": ...}]` instead of the object schema
+- using `dict(...)` or helper-built slot definitions, which discovery cannot statically read into `in` / `out` YAML
 - using `display_name` inside params properties instead of `title`
 - reading `analysis-args.json` inside the user script
 - assuming every slot is a directory

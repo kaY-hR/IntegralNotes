@@ -159,6 +159,8 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "Prefer a new file under scripts/ai_blocks/ with a descriptive snake_case name unless the user asks for a specific path.",
     "Do not modify the active note. The app will insert the itg-notes block after you return.",
     "The script must expose a top-level @integral_block-decorated callable, normally def main(inputs, outputs, params) -> None.",
+    "Write inputs and outputs slot objects as literal Python dictionaries like {\"name\": \"report\", \"extension\": \".html\"}; do not use dict(...), variables, helper functions, or class instances for slot definitions because discovery must statically read them.",
+    "For single-file output slots, prefer the canonical extension key. Use extensions mainly for input candidate filtering or inputs that accept multiple suffixes.",
     "Define user-editable Python block parameters only in the decorator with params={...}, using a Python literal JSON Schema subset.",
     "The supported params schema is root type object with properties whose type is string, number, integer, or boolean. Supported UI metadata: title, description, default, enum, minimum, maximum.",
     "Do not rely on hand-written YAML params that are not declared in the decorator. The app treats the decorator schema as the source of truth and removes schema-external params.",
@@ -188,6 +190,7 @@ export const DEFAULT_AI_CHAT_SYSTEM_PROMPTS: AiChatSystemPrompts = {
     "Choose exactly one commit path.",
     "For normal Markdown continuation, call insertMarkdownAtCursor with exactly the Markdown that belongs at the cursor.",
     "For a Python analysis block, first save a real workspace Python file with writeWorkspaceFile, then call insertPythonBlock with the saved scriptPath and functionName.",
+    "When implementing a Python analysis block, write inputs and outputs slot objects as literal Python dictionaries; do not use dict(...), variables, helper functions, or class instances for slot definitions.",
     "Do not ask follow-up questions in @@ mode. If uncertain, make a conservative continuation that fits the surrounding note.",
     "Do not answer with the inserted text as plain assistant prose. The insertion must be delivered through insertMarkdownAtCursor or insertPythonBlock.",
     "Do not include greetings, explanations, labels, surrounding quotes, or code fences unless they are literally part of the inserted Markdown or Python block content."

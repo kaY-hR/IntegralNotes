@@ -34,7 +34,9 @@ Do not invent additional decorator fields unless the task explicitly changes `.i
 Each item inside `inputs` or `outputs` may be either:
 
 - a string shorthand such as `"source"`
-- an object with supported keys
+- a Python dict literal object with supported keys, such as `{"name": "source", "extensions": [".csv"]}`
+
+IntegralNotes discovery is static. Even though the runtime SDK accepts any mapping object, author block files with literal `{...}` slot objects. Do not use `dict(name="source", ...)`, variables, helper functions, or class instances for slot definitions if the block should appear with populated `in` / `out` YAML.
 
 Supported object keys:
 
@@ -51,6 +53,7 @@ Notes:
 - `extension` is normalized to lowercase and gets a leading `.` if missing.
 - `extension` is merged into `extensions`.
 - `extensions` may be one string or a sequence of strings.
+- For single-file output slots, prefer the canonical `extension` key. Use `extensions` mainly for input candidate filtering or inputs that accept multiple suffixes.
 - `datatype` is a semantic I/O compatibility label. Prefer namespaced values such as `{user-id}/peak-table` when a user ID is available.
 - duplicate slot names are rejected case-insensitively.
 - boolean fields must be real booleans, not `"true"` or `"false"` strings.

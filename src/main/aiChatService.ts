@@ -2356,6 +2356,8 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
     "The integral SDK lives under the hidden .integral-sdk/python/ import root and is system-managed. Do not create or modify files under .integral-sdk when implementing a block.",
     "The decorator supports display_name, description, inputs, outputs, and params.",
     "Slot objects support name, extension/extensions, datatype, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
+    "Write inputs and outputs slot objects as literal Python dictionaries like {\"name\": \"report\", \"extension\": \".html\"}; do not use dict(...), variables, helper functions, or class instances for slot definitions because discovery must statically read them.",
+    "For single-file output slots, prefer the canonical extension key. Use extensions mainly for input candidate filtering or inputs that accept multiple suffixes.",
     "Before creating a new script, inspect existing workspace scripts such as scripts/**/*.py; if a suitable @integral_block callable already exists, prefer reusing or minimally updating it.",
     "Use datatype as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as {user-id}/peak-table when a user ID is available.",
     "Define user-editable parameters with params={...}, using a Python literal JSON Schema subset.",
