@@ -1,3 +1,4 @@
+import { nativeImage } from "electron";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
@@ -71,6 +72,34 @@ const SKIPPED_WORKSPACE_DIRECTORIES = new Set([
 ]);
 const TOOL_LOOP_MAX_STEPS = 50;
 const WORKSPACE_MOUNT_PATH = "/workspace";
+const MODEL_IMAGE_THUMBNAIL_MAX_EDGE = 512;
+const MODEL_IMAGE_THUMBNAIL_MAX_BYTES = 120_000;
+const MODEL_IMAGE_THUMBNAIL_MIN_EDGE = 160;
+const MODEL_IMAGE_THUMBNAIL_QUALITIES = [72, 60, 48, 36] as const;
+const IMAGE_CROP_INPUT_SCHEMA = z
+  .object({
+    height: z
+      .number()
+      .int()
+      .min(1)
+      .describe("Crop rectangle height in source image pixels."),
+    width: z
+      .number()
+      .int()
+      .min(1)
+      .describe("Crop rectangle width in source image pixels."),
+    x: z
+      .number()
+      .int()
+      .min(0)
+      .describe("Crop rectangle left coordinate in source image pixels."),
+    y: z
+      .number()
+      .int()
+      .min(0)
+      .describe("Crop rectangle top coordinate in source image pixels.")
+  })
+  .describe("Optional source-pixel crop rectangle to inspect details from the image.");
 const AGENTS_INSTRUCTION_FILE_PROMPT = [
   "# AGENTS.md Instructions",
   "If an AGENTS.md file exists in the workspace root, read it before answering or acting on workspace files, then follow its instructions.",
@@ -593,8 +622,8 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     "The bash runtime supports rg, find, grep, ls, head, tail, sed, jq, cat, and related Unix-style commands.",
     "When the user asks about files beyond the active excerpt, start with rg/find/ls/readFile instead of answering from memory.",
     "Workspace files are preloaded into the sandbox for this request. Text files include real content; binary or oversized files may appear as placeholder stubs so they remain discoverable via find/ls.",
-    "Use readWorkspaceImage when you need to inspect an image file in the real workspace by path.",
-    "Use renderWorkspaceDocument when you need a visual rendering of a markdown/html/text workspace file, including embedded HTML charts.",
+    `Use readWorkspaceImage when you need to inspect an image file in the real workspace by path. It sends a default thumbnail capped near ${MODEL_IMAGE_THUMBNAIL_MAX_EDGE}px; pass crop in source image pixels when you need details from a region.`,
+    `Use renderWorkspaceDocument when you need a visual rendering of a markdown/html/text workspace file, including embedded HTML charts. It sends a default screenshot thumbnail capped near ${MODEL_IMAGE_THUMBNAIL_MAX_EDGE}px; pass crop in rendered screenshot pixels when you need a region.`,
     "When markdown contains a linked or embedded .html/.htm path and visual content matters, call renderWorkspaceDocument on that HTML path rather than relying only on the markdown source.",
     "Any writes done through bash/writeFile are overlay-only preview changes. They do not persist to the real workspace yet.",
     "Use writeWorkspaceFile when you need to persist a real workspace text edit.",
@@ -1054,43 +1083,47 @@ function createPersistentWorkspaceTools(
     }),
     renderWorkspaceDocument: tool({
       description:
-        "Render a markdown/html/text workspace file in a hidden browser and return a screenshot for visual inspection. Use this when layout, charts, or rendered appearance matter.",
+        "Render a markdown/html/text workspace file in a hidden browser and return a thumbnail screenshot for visual inspection. Use this when layout, charts, or rendered appearance matter. Pass crop in rendered screenshot pixels to inspect details from a region.",
       inputSchema: z.object({
+        crop: IMAGE_CROP_INPUT_SCHEMA.optional(),
         path: z.string().min(1),
         waitMs: z.number().int().min(0).max(5000).optional(),
         width: z.number().int().min(640).max(2200).optional()
       }),
-      execute: async ({ path: targetPath, waitMs, width }) => {
+      execute: async ({ crop, path: targetPath, waitMs, width }) => {
         const relativePath = normalizeWorkspaceRelativePath(targetPath);
         assertCanReadWorkspacePath(readAccess, relativePath);
-
-        return workspaceVisualRenderService.renderWorkspaceDocument(relativePath, {
+        const renderedImage = await workspaceVisualRenderService.renderWorkspaceDocument(relativePath, {
           waitMs,
           width
         });
+        const imagePayload = createModelImagePayloadFromBase64(
+          renderedImage.base64Data,
+          renderedImage.mediaType,
+          crop
+        );
+
+        return {
+          ...renderedImage,
+          ...imagePayload,
+          mediaType: imagePayload.mediaType ?? renderedImage.mediaType,
+          sourceMediaType: renderedImage.mediaType
+        };
       },
-      toModelOutput: ({ output }) => ({
-        type: "content",
-        value: [
-          {
-            text: `Workspace document rendered: ${output.path} (${output.sourceKind}, ${output.width}x${output.height}, ${output.renderReadiness})`,
-            type: "text"
-          },
-          {
-            data: output.base64Data,
-            mediaType: output.mediaType,
-            type: "image-data"
-          }
-        ]
-      })
+      toModelOutput: ({ output }) => {
+        const text = `Workspace document rendered thumbnail: ${output.path} (${output.sourceKind}, source ${output.width}x${output.height}, ${output.renderReadiness})`;
+
+        return createImageToolModelOutput(text, output);
+      }
     }),
     readWorkspaceImage: tool({
       description:
-        "Load an image file from the real workspace and send it back to the model for visual inspection. Use this when you discover an image path and need to examine the image contents.",
+        "Load an image file from the real workspace and send a thumbnail to the model for visual inspection. Use this when you discover an image path and need to examine the image contents. Pass crop in source image pixels to inspect details from a region.",
       inputSchema: z.object({
+        crop: IMAGE_CROP_INPUT_SCHEMA.optional(),
         path: z.string().min(1)
       }),
-      execute: async ({ path: targetPath }) => {
+      execute: async ({ crop, path: targetPath }) => {
         const relativePath = normalizeWorkspaceRelativePath(targetPath);
         assertCanReadWorkspacePath(readAccess, relativePath);
         const absolutePath = resolveWorkspaceAbsolutePath(workspaceRootPath, relativePath);
@@ -1113,28 +1146,23 @@ function createPersistentWorkspaceTools(
         }
 
         const buffer = await fs.readFile(absolutePath);
+        const imagePayload = createModelImagePayloadFromBuffer(buffer, mediaType, crop);
 
         return {
-          base64Data: buffer.toString("base64"),
-          mediaType,
+          ...imagePayload,
+          mediaType: imagePayload.mediaType ?? mediaType,
           path: relativePath,
+          sourceMediaType: mediaType,
           sizeBytes: fileStats.size
         };
       },
-      toModelOutput: ({ output }) => ({
-        type: "content",
-        value: [
-          {
-            text: `Workspace image loaded: ${output.path} (${output.mediaType}, ${output.sizeBytes} bytes)`,
-            type: "text"
-          },
-          {
-            data: output.base64Data,
-            mediaType: output.mediaType,
-            type: "image-data"
-          }
-        ]
-      })
+      toModelOutput: ({ output }) => {
+        const sourceMediaType =
+          typeof output.sourceMediaType === "string" ? output.sourceMediaType : output.mediaType;
+        const text = `Workspace image thumbnail loaded: ${output.path} (source ${sourceMediaType}, ${output.sizeBytes} bytes)`;
+
+        return createImageToolModelOutput(text, output);
+      }
     }),
   };
 
@@ -1515,11 +1543,29 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
 
   if (toolName === "readWorkspaceImage" && isRecord(output) && typeof output.path === "string") {
     const mediaType =
-      typeof output.mediaType === "string" ? output.mediaType : "image/*";
+      typeof output.sourceMediaType === "string"
+        ? output.sourceMediaType
+        : typeof output.mediaType === "string"
+          ? output.mediaType
+          : "image/*";
     const sizeBytes =
       typeof output.sizeBytes === "number" ? `${output.sizeBytes} bytes` : "size unknown";
+    const modelBytes =
+      typeof output.modelImageBytes === "number" ? ` | model ${output.modelImageBytes} bytes` : "";
+    const modelDimensions =
+      typeof output.modelImageWidth === "number" && typeof output.modelImageHeight === "number"
+        ? ` | ${output.modelImageWidth}x${output.modelImageHeight} thumbnail`
+        : "";
+    const crop =
+      isRecord(output.crop) &&
+      typeof output.crop.x === "number" &&
+      typeof output.crop.y === "number" &&
+      typeof output.crop.width === "number" &&
+      typeof output.crop.height === "number"
+        ? ` | crop ${output.crop.x},${output.crop.y},${output.crop.width}x${output.crop.height}`
+        : "";
 
-    return `${output.path} | ${mediaType} | ${sizeBytes}`;
+    return `${output.path} | ${mediaType} | ${sizeBytes}${modelBytes}${modelDimensions}${crop}`;
   }
 
   if (toolName === "renderWorkspaceDocument" && isRecord(output) && typeof output.path === "string") {
@@ -1533,8 +1579,22 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
       typeof output.renderReadiness === "string" && output.renderReadiness.trim().length > 0
         ? output.renderReadiness.trim()
         : "rendered";
+    const modelBytes =
+      typeof output.modelImageBytes === "number" ? ` | model ${output.modelImageBytes} bytes` : "";
+    const modelDimensions =
+      typeof output.modelImageWidth === "number" && typeof output.modelImageHeight === "number"
+        ? ` | ${output.modelImageWidth}x${output.modelImageHeight} thumbnail`
+        : "";
+    const crop =
+      isRecord(output.crop) &&
+      typeof output.crop.x === "number" &&
+      typeof output.crop.y === "number" &&
+      typeof output.crop.width === "number" &&
+      typeof output.crop.height === "number"
+        ? ` | crop ${output.crop.x},${output.crop.y},${output.crop.width}x${output.crop.height}`
+        : "";
 
-    return `${output.path} | ${sourceKind} | ${width}x${height} | ${renderReadiness}`;
+    return `${output.path} | ${sourceKind} | source ${width}x${height} | ${renderReadiness}${modelBytes}${modelDimensions}${crop}`;
   }
 
   if (
@@ -1685,6 +1745,224 @@ function buildFallbackAssistantText(
   }
 
   return lines.join("\n");
+}
+
+type ImageCropInput = z.infer<typeof IMAGE_CROP_INPUT_SCHEMA>;
+
+interface NormalizedImageCrop {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}
+
+interface ModelImagePayload {
+  base64Data: string | null;
+  crop?: NormalizedImageCrop;
+  mediaType: string | null;
+  modelImageBytes: number;
+  modelImageHeight?: number;
+  modelImageWidth?: number;
+  omittedReason?: string;
+  originalHeight?: number;
+  originalWidth?: number;
+  thumbnail: true;
+}
+
+function createModelImagePayloadFromBuffer(
+  buffer: Buffer,
+  mediaType: string,
+  crop?: ImageCropInput
+): ModelImagePayload {
+  const image = nativeImage.createFromBuffer(buffer);
+
+  if (image.isEmpty()) {
+    return {
+      base64Data: null,
+      mediaType: null,
+      modelImageBytes: 0,
+      omittedReason: `Could not decode ${mediaType} as a raster image for thumbnailing.`,
+      thumbnail: true
+    };
+  }
+
+  return createThumbnailModelImagePayload(image, crop);
+}
+
+function createModelImagePayloadFromBase64(
+  base64Data: string,
+  mediaType: string,
+  crop?: ImageCropInput
+): ModelImagePayload {
+  return createModelImagePayloadFromBuffer(Buffer.from(base64Data, "base64"), mediaType, crop);
+}
+
+function createThumbnailModelImagePayload(
+  sourceImage: ReturnType<typeof nativeImage.createFromBuffer>,
+  requestedCrop?: ImageCropInput
+): ModelImagePayload {
+  const sourceSize = sourceImage.getSize();
+  const originalWidth = Math.max(1, Math.round(sourceSize.width));
+  const originalHeight = Math.max(1, Math.round(sourceSize.height));
+  const crop = normalizeImageCrop(requestedCrop, originalWidth, originalHeight);
+
+  if (requestedCrop && !crop) {
+    return {
+      base64Data: null,
+      mediaType: null,
+      modelImageBytes: 0,
+      omittedReason: `Requested crop is outside the source image (${originalWidth}x${originalHeight}).`,
+      originalHeight,
+      originalWidth,
+      thumbnail: true
+    };
+  }
+
+  const image = crop ? sourceImage.crop(crop) : sourceImage;
+  const targetOriginalWidth = crop?.width ?? originalWidth;
+  const targetOriginalHeight = crop?.height ?? originalHeight;
+  const originalLongestEdge = Math.max(targetOriginalWidth, targetOriginalHeight);
+  const startingEdge = Math.min(MODEL_IMAGE_THUMBNAIL_MAX_EDGE, originalLongestEdge);
+  const minimumEdge = Math.min(MODEL_IMAGE_THUMBNAIL_MIN_EDGE, startingEdge);
+  let targetEdge = startingEdge;
+  let fallback: ModelImagePayload | null = null;
+
+  while (targetEdge >= minimumEdge) {
+    const scale = targetEdge / originalLongestEdge;
+    const width = Math.max(1, Math.round(targetOriginalWidth * scale));
+    const height = Math.max(1, Math.round(targetOriginalHeight * scale));
+    const resizedImage =
+      width === targetOriginalWidth && height === targetOriginalHeight
+        ? image
+        : image.resize({ height, quality: "good", width });
+
+    for (const quality of MODEL_IMAGE_THUMBNAIL_QUALITIES) {
+      const thumbnailBuffer = resizedImage.toJPEG(quality);
+      const payload: ModelImagePayload = {
+        base64Data: thumbnailBuffer.toString("base64"),
+        crop: crop ?? undefined,
+        mediaType: "image/jpeg",
+        modelImageBytes: thumbnailBuffer.length,
+        modelImageHeight: height,
+        modelImageWidth: width,
+        originalHeight,
+        originalWidth,
+        thumbnail: true
+      };
+      fallback = payload;
+
+      if (thumbnailBuffer.length <= MODEL_IMAGE_THUMBNAIL_MAX_BYTES) {
+        return payload;
+      }
+    }
+
+    if (targetEdge === minimumEdge) {
+      break;
+    }
+
+    targetEdge = Math.max(minimumEdge, Math.floor(targetEdge * 0.75));
+  }
+
+  return (
+    fallback ?? {
+      base64Data: null,
+      mediaType: null,
+      modelImageBytes: 0,
+      omittedReason: "Could not create an image thumbnail.",
+      originalHeight,
+      originalWidth,
+      thumbnail: true
+    }
+  );
+}
+
+function normalizeImageCrop(
+  crop: ImageCropInput | undefined,
+  sourceWidth: number,
+  sourceHeight: number
+): NormalizedImageCrop | null {
+  if (!crop) {
+    return null;
+  }
+
+  const left = Math.max(0, Math.min(sourceWidth, crop.x));
+  const top = Math.max(0, Math.min(sourceHeight, crop.y));
+  const right = Math.max(left, Math.min(sourceWidth, crop.x + crop.width));
+  const bottom = Math.max(top, Math.min(sourceHeight, crop.y + crop.height));
+  const width = right - left;
+  const height = bottom - top;
+
+  if (width < 1 || height < 1) {
+    return null;
+  }
+
+  return {
+    height,
+    width,
+    x: left,
+    y: top
+  };
+}
+
+function formatModelImagePayloadSummary(payload: ModelImagePayload): string {
+  const sourceDimensions =
+    typeof payload.originalWidth === "number" && typeof payload.originalHeight === "number"
+      ? `source ${payload.originalWidth}x${payload.originalHeight}`
+      : null;
+  const cropSummary = payload.crop
+    ? `crop x=${payload.crop.x}, y=${payload.crop.y}, w=${payload.crop.width}, h=${payload.crop.height}`
+    : null;
+
+  if (payload.omittedReason) {
+    return ["image omitted", payload.omittedReason, sourceDimensions, cropSummary]
+      .filter(isDefined)
+      .join("; ");
+  }
+
+  if (!payload.base64Data || !payload.mediaType) {
+    return ["image omitted", sourceDimensions, cropSummary].filter(isDefined).join("; ");
+  }
+
+  const modelDimensions =
+    typeof payload.modelImageWidth === "number" && typeof payload.modelImageHeight === "number"
+      ? `model ${payload.modelImageWidth}x${payload.modelImageHeight}`
+      : null;
+
+  return [
+    `thumbnail ${payload.mediaType}`,
+    modelDimensions,
+    `${payload.modelImageBytes} bytes`,
+    sourceDimensions,
+    cropSummary
+  ]
+    .filter(isDefined)
+    .join("; ");
+}
+
+function createImageToolModelOutput(text: string, payload: ModelImagePayload) {
+  const summary = formatModelImagePayloadSummary(payload);
+
+  if (!payload.base64Data || !payload.mediaType) {
+    return {
+      type: "text" as const,
+      value: `${text}. ${summary}`
+    };
+  }
+
+  return {
+    type: "content" as const,
+    value: [
+      {
+        text: `${text}. ${summary}`,
+        type: "text" as const
+      },
+      {
+        data: payload.base64Data,
+        mediaType: payload.mediaType,
+        type: "image-data" as const
+      }
+    ]
+  };
 }
 
 function isDefined<T>(value: T | null | undefined): value is T {
