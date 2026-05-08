@@ -11,6 +11,7 @@ import {
   type ModelMessage,
   type ToolSet
 } from "ai";
+import type { CommandResult } from "bash-tool";
 import { createHash } from "node:crypto";
 import { promises as fs, type Dirent } from "node:fs";
 import os from "node:os";
@@ -495,7 +496,12 @@ export class AiAgentService {
         ...workspaceFiles,
         ...(skillToolkit?.files ?? {})
       },
-      maxFiles: 0
+      maxFiles: 0,
+      onAfterBashCall: ({ command, result }) => {
+        const hintedResult = addHostCommandHintForUnsupportedBashFailure(command, result);
+
+        return hintedResult ? { result: hintedResult } : undefined;
+      }
     });
     const persistentWorkspaceTools = createPersistentWorkspaceTools(
       workspaceRootPath,
@@ -620,6 +626,7 @@ function buildBashToolInstructions(skillInstructions?: string): string {
     `The local workspace is mounted at ${WORKSPACE_MOUNT_PATH}.`,
     "Use relative paths from the current working directory unless an absolute mounted path is clearer.",
     "The bash runtime supports rg, find, grep, ls, head, tail, sed, jq, cat, and related Unix-style commands.",
+    "The bash runtime is a browser/sandbox environment. If bash says a command is unavailable or unsupported there, retry with runShellCommand instead of repeating bash.",
     "When the user asks about files beyond the active excerpt, start with rg/find/ls/readFile instead of answering from memory.",
     "Workspace files are preloaded into the sandbox for this request. Text files include real content; binary or oversized files may appear as placeholder stubs so they remain discoverable via find/ls.",
     `Use readWorkspaceImage when you need to inspect an image file in the real workspace by path. It sends a default thumbnail capped near ${MODEL_IMAGE_THUMBNAIL_MAX_EDGE}px; pass crop in source image pixels when you need details from a region.`,
@@ -637,6 +644,69 @@ function buildBashToolInstructions(skillInstructions?: string): string {
   }
 
   return lines.join("\n");
+}
+
+const BASH_UNSUPPORTED_HOST_COMMAND_HINT =
+  "hint: This bash sandbox cannot run some host executables. If this command requires the user's real machine, retry with runShellCommand so it runs through approved PowerShell.";
+
+function addHostCommandHintForUnsupportedBashFailure(
+  command: string,
+  result: CommandResult
+): CommandResult | null {
+  if (result.exitCode === 0 || !isUnsupportedBashCommandFailure(command, result)) {
+    return null;
+  }
+
+  if (bashResultAlreadyHasHostCommandHint(result)) {
+    return null;
+  }
+
+  return {
+    ...result,
+    stderr: appendLine(result.stderr, BASH_UNSUPPORTED_HOST_COMMAND_HINT)
+  };
+}
+
+function isUnsupportedBashCommandFailure(command: string, result: CommandResult): boolean {
+  const output = `${result.stderr}\n${result.stdout}`.toLowerCase();
+  const normalizedCommand = command.trim().toLowerCase();
+
+  if (/(^|\n|\s)(?:bash:\s*)?[^:\n]+:\s*command not found\b/u.test(output)) {
+    return true;
+  }
+
+  if (/not available in browser environments/u.test(output)) {
+    return true;
+  }
+
+  if (/exclude\s+['"`]?[\w.-]+['"`]?\s+from your commands or use the node\.js bundle/u.test(output)) {
+    return true;
+  }
+
+  if (/(browser|sandbox|just-bash).{0,80}(unsupported|not supported|unavailable|not available)/u.test(output)) {
+    return true;
+  }
+
+  if (/(unsupported|not supported|unavailable|not available).{0,80}(browser|sandbox|just-bash)/u.test(output)) {
+    return true;
+  }
+
+  return (
+    /\b(?:python|python3|py|pip|pip3|node|npm|pnpm|yarn|npx)\b/u.test(normalizedCommand) &&
+    /\b(?:command not found|not available|unsupported|not supported)\b/u.test(output)
+  );
+}
+
+function bashResultAlreadyHasHostCommandHint(result: CommandResult): boolean {
+  const output = `${result.stderr}\n${result.stdout}`.toLowerCase();
+
+  return output.includes(BASH_UNSUPPORTED_HOST_COMMAND_HINT.toLowerCase());
+}
+
+function appendLine(text: string, line: string): string {
+  const trimmedText = text.trimEnd();
+
+  return trimmedText.length > 0 ? `${trimmedText}\n${line}` : line;
 }
 
 function buildOpenAiBuiltInTools(openai: ReturnType<typeof createOpenAI>): AiProviderBuiltInToolInfo {
