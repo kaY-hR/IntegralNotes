@@ -9,7 +9,7 @@ import {
 
 import type { WorkspaceEntry, WorkspaceEntryKind } from "../shared/workspace";
 
-const TREE_STICKY_ROW_HEIGHT = 25;
+const TREE_STICKY_ROW_HEIGHT = 24;
 const TREE_STICKY_BASE_Z_INDEX = 30;
 
 export type FileTreeInlineEditorState =

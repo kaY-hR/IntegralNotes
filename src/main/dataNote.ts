@@ -462,7 +462,11 @@ function escapeMarkdownLinkLabel(value: string): string {
 function encodeMarkdownLinkTarget(value: string): string {
   const normalized = value.trim().replace(/\\/gu, "/");
   const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
-  return prefixed.replace(/\)/gu, "%29").replace(/\s/gu, "%20");
+  return prefixed
+    .replace(/%/gu, "%25")
+    .replace(/\s/gu, "%20")
+    .replace(/\(/gu, "%28")
+    .replace(/\)/gu, "%29");
 }
 
 function normalizeDatasetName(displayName: unknown, datasetId: string): string {

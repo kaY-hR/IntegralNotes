@@ -361,7 +361,7 @@ textarea:focus-visible {
   min-height: 0;
   flex: 1;
   overflow: auto;
-  padding: 10px 6px 12px;
+  padding: 0 6px 12px;
 }
 
 .sidebar__tree.is-drop-target {
@@ -710,6 +710,10 @@ textarea:focus-visible {
   gap: 1px;
 }
 
+.file-tree {
+  padding-top: 10px;
+}
+
 .tree-children {
   margin-left: 10px;
   padding-left: 10px;
@@ -733,8 +737,8 @@ textarea:focus-visible {
   position: sticky;
   top: var(--tree-sticky-top, 0);
   z-index: var(--tree-sticky-z-index, 1);
+  border-radius: 0;
   background: #fafbfd;
-  box-shadow: 0 1px 0 var(--border);
 }
 
 .tree-row.is-sticky-parent:hover {

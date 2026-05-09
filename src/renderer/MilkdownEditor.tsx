@@ -1,9 +1,13 @@
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx, parserCtx } from "@milkdown/kit/core";
 import { imageSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
-import { Slice } from "@milkdown/kit/prose/model";
+import { Slice, type Node as ProseNode, type ResolvedPos } from "@milkdown/kit/prose/model";
 import type { Selection } from "@milkdown/kit/prose/state";
-import { Selection as ProseSelection, TextSelection } from "@milkdown/kit/prose/state";
+import {
+  NodeSelection,
+  Selection as ProseSelection,
+  TextSelection
+} from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { insert, replaceAll } from "@milkdown/kit/utils";
 import {
@@ -956,6 +960,10 @@ export function MilkdownEditor({
       const completionState = linkCompletionRef.current;
 
       if (!completionState) {
+        if (handleEditorObjectDeletionKey(event)) {
+          return;
+        }
+
         return;
       }
 
@@ -1865,6 +1873,7 @@ export function MilkdownEditor({
       transaction.setSelection(
         TextSelection.create(transaction.doc, completionState.replaceFrom + label.length)
       );
+      transaction.setStoredMarks([]);
       view.dispatch(transaction.scrollIntoView());
       view.focus();
     });
@@ -1934,6 +1943,39 @@ export function MilkdownEditor({
     window.setTimeout(() => {
       focusInsertedIntegralBlockField(block.id ?? "");
     }, 0);
+  };
+
+  const handleEditorObjectDeletionKey = (event: KeyboardEvent): boolean => {
+    if (
+      (event.key !== "Backspace" && event.key !== "Delete") ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return false;
+    }
+
+    if (isEditableControlEventTarget(event.target)) {
+      return false;
+    }
+
+    let handled = false;
+
+    editorRef.current?.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      handled = deleteAdjacentEditorObject(
+        view,
+        event.key === "Backspace" ? "backward" : "forward"
+      );
+    });
+
+    if (!handled) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
   };
 
   const focusInsertedIntegralBlockField = (blockId: string, attempt = 0): void => {
@@ -2604,6 +2646,155 @@ function computeLinkCompletionState(
   } catch {
     return null;
   }
+}
+
+function deleteAdjacentEditorObject(
+  view: EditorView,
+  direction: "backward" | "forward"
+): boolean {
+  const { selection } = view.state;
+
+  if (selection instanceof NodeSelection) {
+    if (!isDeletableEditorObjectNode(selection.node)) {
+      return false;
+    }
+
+    view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
+    return true;
+  }
+
+  if (!selection.empty || !(selection instanceof TextSelection)) {
+    return false;
+  }
+
+  const adjacentInlineNode =
+    direction === "backward" ? selection.$head.nodeBefore : selection.$head.nodeAfter;
+
+  if (adjacentInlineNode && isDeletableEditorObjectNode(adjacentInlineNode)) {
+    const from =
+      direction === "backward" ? selection.$head.pos - adjacentInlineNode.nodeSize : selection.$head.pos;
+    const to =
+      direction === "backward" ? selection.$head.pos : selection.$head.pos + adjacentInlineNode.nodeSize;
+
+    view.dispatch(view.state.tr.delete(from, to).scrollIntoView());
+    return true;
+  }
+
+  const cut =
+    direction === "backward"
+      ? findObjectDeletionCutBefore(view)
+      : findObjectDeletionCutAfter(view);
+  const adjacentBlockNode = direction === "backward" ? cut?.nodeBefore : cut?.nodeAfter;
+
+  if (!cut || !adjacentBlockNode || !isDeletableEditorObjectNode(adjacentBlockNode)) {
+    return false;
+  }
+
+  const from =
+    direction === "backward" ? cut.pos - adjacentBlockNode.nodeSize : cut.pos;
+  const to =
+    direction === "backward" ? cut.pos : cut.pos + adjacentBlockNode.nodeSize;
+
+  view.dispatch(view.state.tr.delete(from, to).scrollIntoView());
+  return true;
+}
+
+function findObjectDeletionCutBefore(view: EditorView): ResolvedPos | null {
+  const { selection } = view.state;
+  const $head = selection.$head;
+
+  if ($head.parent.isTextblock) {
+    if (!view.endOfTextblock("backward", view.state)) {
+      return null;
+    }
+
+    return findCutBefore($head);
+  }
+
+  return $head;
+}
+
+function findObjectDeletionCutAfter(view: EditorView): ResolvedPos | null {
+  const { selection } = view.state;
+  const $head = selection.$head;
+
+  if ($head.parent.isTextblock) {
+    if (!view.endOfTextblock("forward", view.state)) {
+      return null;
+    }
+
+    return findCutAfter($head);
+  }
+
+  return $head;
+}
+
+function findCutBefore($position: ResolvedPos): ResolvedPos | null {
+  if ($position.parent.type.spec.isolating) {
+    return null;
+  }
+
+  for (let depth = $position.depth - 1; depth >= 0; depth -= 1) {
+    if ($position.index(depth) > 0) {
+      return $position.doc.resolve($position.before(depth + 1));
+    }
+
+    if ($position.node(depth).type.spec.isolating) {
+      break;
+    }
+  }
+
+  return null;
+}
+
+function findCutAfter($position: ResolvedPos): ResolvedPos | null {
+  if ($position.parent.type.spec.isolating) {
+    return null;
+  }
+
+  for (let depth = $position.depth - 1; depth >= 0; depth -= 1) {
+    const parent = $position.node(depth);
+
+    if ($position.index(depth) + 1 < parent.childCount) {
+      return $position.doc.resolve($position.after(depth + 1));
+    }
+
+    if (parent.type.spec.isolating) {
+      break;
+    }
+  }
+
+  return null;
+}
+
+function isDeletableEditorObjectNode(node: ProseNode): boolean {
+  const nodeName = node.type.name.toLowerCase();
+
+  return (
+    nodeName === "integral_notes_block" ||
+    nodeName.includes("image") ||
+    (node.attrs.src !== undefined && node.isInline)
+  );
+}
+
+function isEditableControlEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(
+      [
+        "button",
+        "input",
+        "label",
+        "textarea",
+        "select",
+        "[role='button']",
+        "[contenteditable='true']:not(.ProseMirror)"
+      ].join(", ")
+    )
+  );
 }
 
 function computeAnalysisCompletionState(
