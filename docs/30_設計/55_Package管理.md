@@ -179,6 +179,9 @@ copy 対象:
 - `integral-package.json`
 - `scripts/` subtree 全体
 
+Python block が import する package 内 helper は `scripts/` subtree に置く。
+`skills/` 配下の SDK / helper は Python block import 時には copy されないため、Python block から直接依存しない。
+
 copy しないもの:
 
 - `runtime-plugins/`

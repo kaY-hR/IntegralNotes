@@ -61,6 +61,7 @@ Segment Cells
 ### import / copy
 
 package script は依存する別 `.py` helper を持つことがあるため、export された `.py` 単体ではなく package の `scripts/` subtree をまとめて copy する。
+Python block が import する helper module は `scripts/` subtree に置く。`skills/` 配下の SDK / helper は copy 対象外なので、Python block から直接 import しない。
 
 copy 先:
 
