@@ -12,6 +12,10 @@ export const PLUGIN_RENDER_SET_SIDEBAR_VIEW_MESSAGE_TYPE = "integral:set-sidebar
 export const PLUGIN_RENDER_UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
 export const PLUGIN_RENDER_REQUEST_ACTION_MESSAGE_TYPE = "integral:request-action";
 export const PLUGIN_RENDER_ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
+export const PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_MESSAGE_TYPE =
+  "integral:viewer-resolve-workspace-file-url";
+export const PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_RESULT_MESSAGE_TYPE =
+  "integral:viewer-resolve-workspace-file-url-result";
 export const PLUGIN_RENDER_MESSAGE_TYPE = PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE;
 
 export type InstalledPluginOrigin = "external";
@@ -152,6 +156,29 @@ export interface PluginViewerRendererModel {
 export interface PluginRenderSetViewerMessage {
   payload: PluginViewerRendererModel;
   type: typeof PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE;
+}
+
+export interface PluginViewerResolveWorkspaceFileUrlPayload {
+  path: string;
+  requestId: string;
+}
+
+export interface PluginViewerResolveWorkspaceFileUrlMessage {
+  payload: PluginViewerResolveWorkspaceFileUrlPayload;
+  type: typeof PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_MESSAGE_TYPE;
+}
+
+export interface PluginViewerResolveWorkspaceFileUrlResultPayload {
+  error?: string;
+  path: string;
+  relativePath?: string;
+  requestId: string;
+  url?: string;
+}
+
+export interface PluginViewerResolveWorkspaceFileUrlResultMessage {
+  payload: PluginViewerResolveWorkspaceFileUrlResultPayload;
+  type: typeof PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_RESULT_MESSAGE_TYPE;
 }
 
 export interface PluginSidebarViewRendererModel {

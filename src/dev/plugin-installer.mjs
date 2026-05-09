@@ -11,9 +11,10 @@ import {
 
 async function main() {
   const { command, pluginPaths, targetRootPath, userDataPath } = parseArgs(process.argv.slice(2));
+  const effectiveUserDataPath = userDataPath ?? resolveDefaultDevUserDataPath();
 
   if (command === "where") {
-    await handleWhere(pluginPaths, { targetRootPath, userDataPath });
+    await handleWhere(pluginPaths, { targetRootPath, userDataPath: effectiveUserDataPath });
     return;
   }
 
@@ -26,7 +27,7 @@ async function main() {
       const result = await installLocalPlugin({
         pluginRootPath: pluginPath,
         targetRootPath,
-        userDataPath
+        userDataPath: effectiveUserDataPath
       });
 
       console.log(
@@ -42,7 +43,7 @@ async function main() {
       const result = await uninstallLocalPlugin({
         pluginRootPath: pluginPath,
         targetRootPath,
-        userDataPath
+        userDataPath: effectiveUserDataPath
       });
 
       console.log(
@@ -54,6 +55,19 @@ async function main() {
   }
 
   throw new Error(`未対応の command です: ${command}`);
+}
+
+function resolveDefaultDevUserDataPath() {
+  if (process.env.INTEGRALNOTES_USER_DATA_DIR?.trim()) {
+    return process.env.INTEGRALNOTES_USER_DATA_DIR.trim();
+  }
+
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA?.trim() || path.join(process.env.USERPROFILE || "", "AppData", "Roaming");
+    return path.join(appData, "IntegralNotes-dev");
+  }
+
+  return undefined;
 }
 
 async function handleWhere(pluginPaths, options) {

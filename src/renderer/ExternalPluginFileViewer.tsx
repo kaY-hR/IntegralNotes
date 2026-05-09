@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   PLUGIN_RENDER_SET_VIEWER_MESSAGE_TYPE,
+  PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_MESSAGE_TYPE,
+  PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_RESULT_MESSAGE_TYPE,
+  type PluginViewerResolveWorkspaceFileUrlMessage,
+  type PluginViewerResolveWorkspaceFileUrlResultMessage,
   type PluginViewerFileSource,
   type PluginViewerPresentation,
   type PluginViewerRendererModel,
@@ -74,6 +78,27 @@ export function ExternalPluginFileViewer({
     );
   }, [file, frameReadyToken, presentation, rendererDocument, source]);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent<unknown>): void => {
+      const frameWindow = iframeRef.current?.contentWindow;
+
+      if (!frameWindow || event.source !== frameWindow) {
+        return;
+      }
+
+      if (!isPluginViewerResolveWorkspaceFileUrlMessage(event.data)) {
+        return;
+      }
+
+      void resolvePluginViewerWorkspaceFileUrl(event.data, file.relativePath, frameWindow);
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [file.relativePath]);
+
   if (loadError) {
     return (
       <div className="integral-plugin-frame-shell integral-plugin-frame-shell--loading">
@@ -107,6 +132,45 @@ export function ExternalPluginFileViewer({
   );
 }
 
+async function resolvePluginViewerWorkspaceFileUrl(
+  message: PluginViewerResolveWorkspaceFileUrlMessage,
+  viewerFileRelativePath: string,
+  frameWindow: Window
+): Promise<void> {
+  const { path, requestId } = message.payload;
+
+  try {
+    const relativePath = resolveViewerRelativePath(path, viewerFileRelativePath);
+    const url = await window.integralNotes.resolveWorkspaceFileUrl(relativePath);
+
+    postPluginViewerWorkspaceFileUrlResult(frameWindow, {
+      path,
+      relativePath,
+      requestId,
+      url
+    });
+  } catch (error) {
+    postPluginViewerWorkspaceFileUrlResult(frameWindow, {
+      error: toErrorMessage(error),
+      path,
+      requestId
+    });
+  }
+}
+
+function postPluginViewerWorkspaceFileUrlResult(
+  frameWindow: Window,
+  payload: PluginViewerResolveWorkspaceFileUrlResultMessage["payload"]
+): void {
+  frameWindow.postMessage(
+    {
+      payload,
+      type: PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_RESULT_MESSAGE_TYPE
+    } satisfies PluginViewerResolveWorkspaceFileUrlResultMessage,
+    "*"
+  );
+}
+
 function toPluginViewerRendererModel(
   file: ExternalPluginFileViewerProps["file"],
   source: PluginViewerFileSource,
@@ -137,6 +201,62 @@ function toPluginViewerRendererModel(
       id: file.pluginViewer.viewerId
     }
   };
+}
+
+function resolveViewerRelativePath(requestedPath: string, viewerFileRelativePath: string): string {
+  const trimmedPath = requestedPath.trim();
+
+  if (trimmedPath.length === 0) {
+    throw new Error("path が空です。");
+  }
+
+  if (trimmedPath.startsWith("//") || /^[A-Za-z][A-Za-z\d+.-]*:/u.test(trimmedPath)) {
+    throw new Error("workspace file ではない path は解決できません。");
+  }
+
+  let normalizedPath = trimmedPath.replace(/\\/gu, "/");
+
+  try {
+    normalizedPath = decodeURI(normalizedPath);
+  } catch {
+    throw new Error("path を decode できません。");
+  }
+
+  if (normalizedPath.startsWith("/")) {
+    return normalizedPath.replace(/^\/+/u, "");
+  }
+
+  const baseDirectory = dirname(viewerFileRelativePath);
+  return [baseDirectory, normalizedPath].filter(Boolean).join("/");
+}
+
+function dirname(relativePath: string): string {
+  const parts = relativePath.replace(/\\/gu, "/").split("/").filter(Boolean);
+
+  if (parts.length <= 1) {
+    return "";
+  }
+
+  return parts.slice(0, -1).join("/");
+}
+
+function isPluginViewerResolveWorkspaceFileUrlMessage(
+  value: unknown
+): value is PluginViewerResolveWorkspaceFileUrlMessage {
+  if (!isRecord(value) || value.type !== PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_MESSAGE_TYPE) {
+    return false;
+  }
+
+  const payload = value.payload;
+  return (
+    isRecord(payload) &&
+    typeof payload.requestId === "string" &&
+    typeof payload.path === "string"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function toErrorMessage(error: unknown): string {
