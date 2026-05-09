@@ -176,7 +176,7 @@ function buildInstallBat({ pluginDirectoryName, pluginId, zipFileName }) {
     "setlocal",
     'set "SCRIPT_DIR=%~dp0"',
     `set "ZIP_PATH=%SCRIPT_DIR%${zipFileName}"`,
-    'set "INSTALL_ROOT=%APPDATA%\\IntegralNotes\\plugins"',
+    'set "INSTALL_ROOT=%LOCALAPPDATA%\\IntegralNotes\\runtime-plugins"',
     `set "TARGET_DIR=%INSTALL_ROOT%\\${pluginDirectoryName}"`,
     `set "PLUGIN_FOLDER=${pluginDirectoryName}"`,
     `set "PLUGIN_ID=${pluginId}"`,
@@ -198,7 +198,7 @@ function buildUninstallBat({ pluginDirectoryName, pluginId }) {
   return [
     "@echo off",
     "setlocal",
-    'set "INSTALL_ROOT=%APPDATA%\\IntegralNotes\\plugins"',
+    'set "INSTALL_ROOT=%LOCALAPPDATA%\\IntegralNotes\\runtime-plugins"',
     `set "TARGET_DIR=%INSTALL_ROOT%\\${pluginDirectoryName}"`,
     `set "PLUGIN_ID=${pluginId}"`,
     'echo Removing %PLUGIN_ID% from "%TARGET_DIR%"...',

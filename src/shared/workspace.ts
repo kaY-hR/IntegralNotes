@@ -291,6 +291,16 @@ export interface UninstallPluginResult {
   removed: boolean;
 }
 
+export interface ImportPackagePythonBlockRequest {
+  blockType: string;
+}
+
+export interface ImportPackagePythonBlockResult {
+  cancelled: boolean;
+  imported: boolean;
+  packageId: string | null;
+}
+
 export interface SelectWorkspaceFileRequest {
   extensions?: string[];
   initialRelativePath?: string | null;
@@ -358,6 +368,9 @@ export interface IntegralNotesApi {
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
+  importPackagePythonBlock: (
+    request: ImportPackagePythonBlockRequest
+  ) => Promise<ImportPackagePythonBlockResult>;
   loadPluginRendererDocument: (pluginId: string) => Promise<string>;
   loadPluginSidebarViewDocument: (pluginId: string, sidebarViewId: string) => Promise<string>;
   loadPluginViewerDocument: (pluginId: string, viewerId: string) => Promise<string>;

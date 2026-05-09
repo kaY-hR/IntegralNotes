@@ -18,9 +18,12 @@ import {
   type PluginHostModule,
   type PluginManifest
 } from "../shared/plugins";
+import { listExportedPackageRuntimePluginRootPaths } from "./packageService";
+import { getIntegralRuntimePluginRootPath } from "./pathTokens";
 
 interface PluginRegistryOptions {
   installRootPath: string;
+  packageRootPath?: string | null;
 }
 
 interface ResolvedInstalledPlugin {
@@ -35,9 +38,11 @@ interface ResolvedInstalledPlugin {
 
 export class PluginRegistry {
   private readonly installRootPath: string;
+  private readonly packageRootPath: string | null;
 
   constructor(options: PluginRegistryOptions) {
     this.installRootPath = path.resolve(options.installRootPath);
+    this.packageRootPath = options.packageRootPath ? path.resolve(options.packageRootPath) : null;
   }
 
   getInstallRootPath(): string {
@@ -200,8 +205,18 @@ export class PluginRegistry {
   }
 
   private async getResolvedPlugins(): Promise<ResolvedInstalledPlugin[]> {
-    const externalPlugins = await this.readPluginsFromRoot(this.installRootPath);
-    return this.mergeResolvedPlugins(externalPlugins);
+    const [externalPlugins, packagePlugins] = await Promise.all([
+      this.readPluginsFromRoot(this.installRootPath),
+      this.readPackageRuntimePlugins()
+    ]);
+    return this.mergeResolvedPlugins([...externalPlugins, ...packagePlugins]);
+  }
+
+  private async readPackageRuntimePlugins(): Promise<ResolvedInstalledPlugin[]> {
+    const rootPaths = await listExportedPackageRuntimePluginRootPaths(this.packageRootPath);
+    const plugins = await Promise.all(rootPaths.map((rootPath) => this.readPluginDirectory(rootPath)));
+
+    return plugins.filter((plugin): plugin is ResolvedInstalledPlugin => plugin !== null);
   }
 
   private async readPluginsFromRoot(rootPath: string): Promise<ResolvedInstalledPlugin[]> {
@@ -379,8 +394,14 @@ export class PluginRegistry {
   }
 }
 
-export function resolveInstalledPluginRootPath(userDataPath: string): string {
-  return path.join(userDataPath, "plugins");
+export function resolveInstalledPluginRootPath(_userDataPath?: string): string {
+  const runtimePluginRootPath = getIntegralRuntimePluginRootPath();
+
+  if (!runtimePluginRootPath) {
+    throw new Error("%LocalAppData% を解決できません。");
+  }
+
+  return runtimePluginRootPath;
 }
 
 async function resolveExtractedPluginRootPath(extractRootPath: string): Promise<string> {

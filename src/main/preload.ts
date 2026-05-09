@@ -66,6 +66,7 @@ const api: IntegralNotesApi = {
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
+  importPackagePythonBlock: (request) => ipcRenderer.invoke("packages:importPythonBlock", request),
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
   loadPluginSidebarViewDocument: (pluginId, sidebarViewId) =>
     ipcRenderer.invoke("plugins:loadSidebarViewDocument", pluginId, sidebarViewId),

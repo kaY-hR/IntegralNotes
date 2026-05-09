@@ -47,6 +47,7 @@ import type {
   DeleteEntriesRequest,
   DeleteEntryRequest,
   ExecuteIntegralActionRequest,
+  ImportPackagePythonBlockRequest,
   MoveEntriesRequest,
   RenameEntryRequest,
   RendererLogRequest,
@@ -70,7 +71,12 @@ import { AiHostCommandService } from "./aiHostCommandService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
 import {
-  getIntegralLocalDataRootPath,
+  findPackagePythonBlockExport,
+  importPackageScriptsForPythonBlock
+} from "./packageService";
+import {
+  getIntegralPackageRootPath,
+  getIntegralGlobalRootPath,
   shortenPathWithTokens
 } from "./pathTokens";
 import { RelationGraphService } from "./relationGraphService";
@@ -1025,6 +1031,89 @@ function registerIpcHandlers(): void {
 
     return getPluginRegistry().installPluginFromArchive(result.filePaths[0]);
   });
+  ipcMain.handle(
+    "packages:importPythonBlock",
+    async (_event, request: ImportPackagePythonBlockRequest) => {
+      const workspaceRootPath = workspaceService.currentRootPath;
+
+      if (!workspaceRootPath) {
+        throw new Error("workspace folder is not open.");
+      }
+
+      const blockType = typeof request?.blockType === "string" ? request.blockType.trim() : "";
+
+      if (blockType.length === 0) {
+        throw new Error("blockType is required.");
+      }
+
+      const candidate = await findPackagePythonBlockExport(workspaceRootPath, blockType);
+
+      if (!candidate) {
+        return {
+          cancelled: false,
+          imported: false,
+          packageId: null
+        };
+      }
+
+      if (path.resolve(candidate.packageRootPath) === path.resolve(candidate.importedRootPath)) {
+        return {
+          cancelled: false,
+          imported: false,
+          packageId: candidate.manifest.id
+        };
+      }
+
+      const existingImport = await fs.stat(candidate.importedRootPath).catch(() => null);
+      let overwrite = false;
+
+      if (existingImport) {
+        const result = mainWindow
+          ? await dialog.showMessageBox(mainWindow, {
+              buttons: ["キャンセル", "上書き"],
+              cancelId: 0,
+              defaultId: 0,
+              detail:
+                `${candidate.manifest.displayName} (${candidate.manifest.id})\n\n` +
+                "workspace の既存 package script import を上書きします。",
+              message: "Package scripts を再 import しますか？",
+              noLink: true,
+              type: "question"
+            })
+          : await dialog.showMessageBox({
+              buttons: ["キャンセル", "上書き"],
+              cancelId: 0,
+              defaultId: 0,
+              detail:
+                `${candidate.manifest.displayName} (${candidate.manifest.id})\n\n` +
+                "workspace の既存 package script import を上書きします。",
+              message: "Package scripts を再 import しますか？",
+              noLink: true,
+              type: "question"
+            });
+
+        if (result.response !== 1) {
+          return {
+            cancelled: true,
+            imported: false,
+            packageId: candidate.manifest.id
+          };
+        }
+
+        overwrite = true;
+      }
+
+      const imported = await importPackageScriptsForPythonBlock(workspaceRootPath, blockType, {
+        overwrite
+      });
+
+      return {
+        cancelled: false,
+        imported: true,
+        packageId: imported.packageId
+      };
+    }
+  );
   ipcMain.handle("plugins:loadRendererDocument", async (_event, pluginId: string) =>
     getPluginRegistry().loadRendererDocument(pluginId)
   );
@@ -1089,7 +1178,7 @@ function registerIpcHandlers(): void {
     workspaceService.copyExternalEntries(request)
   );
   ipcMain.handle("workspace:addPythonScriptToUserStock", async (_event, relativePath: string) => {
-    const rootPath = getIntegralLocalDataRootPath();
+    const rootPath = getIntegralGlobalRootPath();
 
     if (!rootPath) {
       throw new Error("%LocalAppData% を解決できません。");
@@ -1109,7 +1198,7 @@ function registerIpcHandlers(): void {
       throw new Error("ユーザーストックに追加できるのは file だけです。");
     }
 
-    const stockDirectoryPath = path.join(rootPath, "analysis-stock");
+    const stockDirectoryPath = path.join(rootPath, "scripts");
     await fs.mkdir(stockDirectoryPath, { recursive: true });
     const destinationPath = await createUniqueFilePath(
       stockDirectoryPath,
@@ -1270,7 +1359,8 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     await workspaceService.initialize();
     pluginRegistry = new PluginRegistry({
-      installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
+      installRootPath: resolveInstalledPluginRootPath(app.getPath("userData")),
+      packageRootPath: getIntegralPackageRootPath()
     });
     workspaceService.setPluginRegistry(pluginRegistry);
     integralWorkspaceService = new IntegralWorkspaceService(

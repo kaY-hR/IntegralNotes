@@ -61,6 +61,7 @@ import {
   getIntegralNotesGlobalSkillRootPaths,
   shortenPathWithTokens
 } from "./pathTokens";
+import { listExportedPackageSkillRootPaths } from "./packageService";
 import { WorkspaceService } from "./workspaceService";
 
 interface PersistedAiChatSettings {
@@ -2354,11 +2355,15 @@ function formatInlinePythonBlockTranscript(messages: readonly AiChatMessage[]): 
 }
 
 async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string): Promise<string> {
+  const packageSkillRootPaths = await listExportedPackageSkillRootPaths();
   const candidateRoots = [
     path.join(workspaceRootPath, "Notes", ".codex", "skills", "implement-integral-block"),
     path.join(workspaceRootPath, ".codex", "skills", "implement-integral-block"),
     ...getIntegralNotesGlobalSkillRootPaths().map((rootPath) =>
       path.join(rootPath, "implement-integral-block")
+    ),
+    ...packageSkillRootPaths.filter(
+      (rootPath) => path.basename(rootPath) === "implement-integral-block"
     )
   ];
 
@@ -2428,7 +2433,12 @@ async function listWorkspaceAiSkills(
         path.join(workspaceRootPath, "Notes", ".codex", "skills")
       ]
     : [];
-  const skillRootPaths = [
+  const packageSkillRootPaths = await listExportedPackageSkillRootPaths();
+  const skillRootPaths: Array<{
+    kind: "global" | "package" | "project";
+    rootPath: string;
+    skillDirectoryName?: string;
+  }> = [
     ...workspaceSkillRootPaths.map((rootPath) => ({
       kind: "project" as const,
       rootPath
@@ -2436,15 +2446,24 @@ async function listWorkspaceAiSkills(
     ...getIntegralNotesGlobalSkillRootPaths().map((rootPath) => ({
       kind: "global" as const,
       rootPath
+    })),
+    ...packageSkillRootPaths.map((rootPath) => ({
+      kind: "package" as const,
+      rootPath: path.dirname(rootPath),
+      skillDirectoryName: path.basename(rootPath)
     }))
   ];
   const skillsByKey = new Map<string, AiChatSkillSummary>();
 
-  for (const { kind, rootPath: skillRootPath } of skillRootPaths) {
+  for (const { kind, rootPath: skillRootPath, skillDirectoryName } of skillRootPaths) {
     const entries = await fs.readdir(skillRootPath, { withFileTypes: true }).catch(() => []);
 
     for (const entry of entries) {
       if (!entry.isDirectory()) {
+        continue;
+      }
+
+      if (skillDirectoryName && entry.name !== skillDirectoryName) {
         continue;
       }
 

@@ -124,6 +124,7 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const SEARCH_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".packages",
   ".inline-action",
   ".next",
   ".turbo",
@@ -132,7 +133,7 @@ const SEARCH_EXCLUDED_DIRECTORY_NAMES = new Set([
   "node_modules",
   "out"
 ]);
-const SNAPSHOT_HIDDEN_DIRECTORY_NAMES = new Set([".git"]);
+const SNAPSHOT_HIDDEN_DIRECTORY_NAMES = new Set([".git", ".packages"]);
 const DEFAULT_WORKSPACE_SEARCH_MAX_RESULTS = 400;
 
 interface ManagedDataNoteWritePlan {

@@ -12,15 +12,27 @@ export function getIntegralLocalDataRootPath(): string | null {
   return localAppDataPath ? path.join(localAppDataPath, APP_DIRECTORY_NAME) : null;
 }
 
+export function getIntegralGlobalRootPath(): string | null {
+  const localRootPath = getIntegralLocalDataRootPath();
+  return localRootPath ? path.join(localRootPath, "global") : null;
+}
+
+export function getIntegralPackageRootPath(): string | null {
+  const localRootPath = getIntegralLocalDataRootPath();
+  return localRootPath ? path.join(localRootPath, "packages") : null;
+}
+
+export function getIntegralRuntimePluginRootPath(): string | null {
+  const localRootPath = getIntegralLocalDataRootPath();
+  return localRootPath ? path.join(localRootPath, "runtime-plugins") : null;
+}
+
 export function getGlobalAnalysisScriptRootPaths(): string[] {
   const roots: string[] = [];
-  const localRootPath = getIntegralLocalDataRootPath();
+  const globalRootPath = getIntegralGlobalRootPath();
 
-  if (localRootPath) {
-    roots.push(
-      path.join(localRootPath, "analysis-stock"),
-      path.join(localRootPath, "plugins")
-    );
+  if (globalRootPath) {
+    roots.push(path.join(globalRootPath, "scripts"));
   }
 
   return roots;
@@ -28,10 +40,33 @@ export function getGlobalAnalysisScriptRootPaths(): string[] {
 
 export function getIntegralNotesGlobalSkillRootPaths(): string[] {
   const roots: string[] = [];
+  const globalRootPath = getIntegralGlobalRootPath();
+
+  if (globalRootPath) {
+    roots.push(path.join(globalRootPath, "skills"));
+  }
+
+  return roots;
+}
+
+export function getLegacyIntegralExtensionRootPaths(): string[] {
+  const roots: string[] = [];
   const localRootPath = getIntegralLocalDataRootPath();
+  const appDataPath = resolveAppDataPath();
 
   if (localRootPath) {
-    roots.push(path.join(localRootPath, "skills"));
+    roots.push(
+      path.join(localRootPath, "analysis-stock"),
+      path.join(localRootPath, "plugins"),
+      path.join(localRootPath, "skills")
+    );
+  }
+
+  if (appDataPath) {
+    roots.push(
+      path.join(appDataPath, APP_DIRECTORY_NAME, "plugins"),
+      path.join(appDataPath, `${APP_DIRECTORY_NAME}-dev`, "plugins")
+    );
   }
 
   return roots;
