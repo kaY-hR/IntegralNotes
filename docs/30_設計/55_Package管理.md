@@ -197,7 +197,7 @@ note source には workspace relative path をそのまま書く。
 run: .packages/image-analysis-pack/scripts/segment_cells.py:main
 ```
 
-`.packages` は system-managed path として扱い、file tree / managed file tracking の通常表示・自動登録対象から除外する。
+`.packages` は system-managed path として扱い、hidden 表示 OFF の file tree では非表示にする。hidden 表示 ON では表示してよいが、managed file tracking の通常自動登録対象からは除外する。
 
 通常 workspace `.py` scan は `.packages` 配下を除外する。例外として、`.packages/*/integral-package.json` の `exports.pythonBlocks` に載っている callable だけを Python block 候補に出す。
 

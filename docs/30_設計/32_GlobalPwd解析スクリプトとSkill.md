@@ -81,7 +81,7 @@ copy しないもの:
 - `runtime-plugins/`
 - `skills/`
 
-`.packages` は hidden/system-managed path とし、file tree / managed file tracking の通常表示・自動登録対象から除外する。
+`.packages` は hidden/system-managed path とし、hidden 表示 OFF の file tree では非表示にする。hidden 表示 ON では表示してよいが、managed file tracking の通常自動登録対象からは除外する。
 
 ### 別 PC での扱い
 
