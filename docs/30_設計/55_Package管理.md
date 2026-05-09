@@ -71,8 +71,9 @@ plugins/image-analysis-pack/
       SKILL.md
       references/
       scripts/
-      sdk/
       templates/
+  shared/
+    image_compare.py
   scripts/
     segment_cells.py
     utils/
@@ -178,14 +179,17 @@ copy 対象:
 
 - `integral-package.json`
 - `scripts/` subtree 全体
-
-Python block が import する package 内 helper は `scripts/` subtree に置く。
-`skills/` 配下の SDK / helper は Python block import 時には copy されないため、Python block から直接依存しない。
+- `shared/` subtree 全体
 
 copy しないもの:
 
 - `runtime-plugins/`
 - `skills/`
+
+Python block と skill が共通利用する helper は package root の `shared/` に置く。
+package stock 側では skill は `%LocalAppData%/IntegralNotes/packages/<packageId>/shared` を見る。
+workspace import 後の Python block は `.packages/<packageId>/shared` を見る。
+`skills/` 配下の SDK / helper は Python block import 時には copy されないため、Python block から直接依存しない。
 
 note source には workspace relative path をそのまま書く。
 

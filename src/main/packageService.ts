@@ -161,7 +161,9 @@ export async function importPackageScriptsForPythonBlock(
 
   const targetRootPath = candidate.importedRootPath;
   const targetManifestPath = path.join(targetRootPath, INTEGRAL_PACKAGE_MANIFEST_FILENAME);
+  const sourceSharedPath = path.join(candidate.packageRootPath, "shared");
   const sourceScriptsPath = path.join(candidate.packageRootPath, "scripts");
+  const targetSharedPath = path.join(targetRootPath, "shared");
   const targetScriptsPath = path.join(targetRootPath, "scripts");
 
   if (await pathExists(targetRootPath)) {
@@ -179,6 +181,10 @@ export async function importPackageScriptsForPythonBlock(
     await fs.cp(sourceScriptsPath, targetScriptsPath, { force: true, recursive: true });
   } else {
     await fs.mkdir(targetScriptsPath, { recursive: true });
+  }
+
+  if (await pathExists(sourceSharedPath)) {
+    await fs.cp(sourceSharedPath, targetSharedPath, { force: true, recursive: true });
   }
 
   return {

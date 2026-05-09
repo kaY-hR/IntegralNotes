@@ -61,7 +61,7 @@ Segment Cells
 ### import / copy
 
 package script は依存する別 `.py` helper を持つことがあるため、export された `.py` 単体ではなく package の `scripts/` subtree をまとめて copy する。
-Python block が import する helper module は `scripts/` subtree に置く。`skills/` 配下の SDK / helper は copy 対象外なので、Python block から直接 import しない。
+Python block と skill が共通利用する helper module は package root の `shared/` に置く。package stock 側では skill は `%LocalAppData%/IntegralNotes/packages/<packageId>/shared` を見て、workspace import 後の Python block は `.packages/<packageId>/shared` を見る。`skills/` 配下の SDK / helper は copy 対象外なので、Python block から直接 import しない。
 
 copy 先:
 
@@ -70,10 +70,10 @@ Workspace/
   .packages/
     image-analysis-pack/
       integral-package.json
+      shared/
+        image_io.py
       scripts/
         segment_cells.py
-        utils/
-          image_io.py
 ```
 
 copy しないもの:

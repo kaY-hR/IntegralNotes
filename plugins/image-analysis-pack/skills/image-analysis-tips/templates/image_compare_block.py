@@ -5,17 +5,17 @@ from typing import Any
 import sys
 
 
-def _find_workspace_skill_sdk(start: Path) -> Path | None:
+def _find_package_shared(start: Path) -> Path | None:
     for parent in (start.parent, *start.parents):
-        candidate = parent / ".codex" / "skills" / "image-analysis-tips" / "sdk"
-        if candidate.exists():
+        candidate = parent / "shared"
+        if (parent / "integral-package.json").exists() and candidate.exists():
             return candidate
     return None
 
 
-SKILL_SDK_ROOT = _find_workspace_skill_sdk(Path(__file__).resolve())
-if SKILL_SDK_ROOT is not None:
-    sys.path.insert(0, str(SKILL_SDK_ROOT))
+PACKAGE_SHARED_ROOT = _find_package_shared(Path(__file__).resolve())
+if PACKAGE_SHARED_ROOT is not None:
+    sys.path.insert(0, str(PACKAGE_SHARED_ROOT))
 
 from integral import integral_block
 from integral_image_compare import make_layer, require_image_input, require_output_file, write_manifest

@@ -1075,8 +1075,8 @@ function registerIpcHandlers(): void {
               defaultId: 0,
               detail:
                 `${candidate.manifest.displayName} (${candidate.manifest.id})\n\n` +
-                "workspace の既存 package script import を上書きします。",
-              message: "Package scripts を再 import しますか？",
+                "workspace の既存 package import を上書きします。",
+              message: "Package scripts/shared を再 import しますか？",
               noLink: true,
               type: "question"
             })
@@ -1086,8 +1086,8 @@ function registerIpcHandlers(): void {
               defaultId: 0,
               detail:
                 `${candidate.manifest.displayName} (${candidate.manifest.id})\n\n` +
-                "workspace の既存 package script import を上書きします。",
-              message: "Package scripts を再 import しますか？",
+                "workspace の既存 package import を上書きします。",
+              message: "Package scripts/shared を再 import しますか？",
               noLink: true,
               type: "question"
             });

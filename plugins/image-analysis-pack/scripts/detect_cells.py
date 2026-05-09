@@ -15,14 +15,11 @@ def _find_sdk(start: Path) -> Path | None:
     return None
 
 
-def _find_skill_sdk(start: Path) -> Path | None:
+def _find_package_shared(start: Path) -> Path | None:
     for parent in (start.parent, *start.parents):
-        candidate = parent / ".integral-ai-skills" / "image-analysis-tips" / "sdk"
-        if candidate.exists():
+        candidate = parent / "shared"
+        if (parent / "integral-package.json").exists() and candidate.exists():
             return candidate
-        candidate2 = parent / ".codex" / "skills" / "image-analysis-tips" / "sdk"
-        if candidate2.exists():
-            return candidate2
     return None
 
 
@@ -30,9 +27,9 @@ _sdk = _find_sdk(Path(__file__).resolve())
 if _sdk:
     sys.path.insert(0, str(_sdk))
 
-_skill_sdk = _find_skill_sdk(Path(__file__).resolve())
-if _skill_sdk:
-    sys.path.insert(0, str(_skill_sdk))
+_package_shared = _find_package_shared(Path(__file__).resolve())
+if _package_shared:
+    sys.path.insert(0, str(_package_shared))
 
 import numpy as np
 from integral import integral_block

@@ -22,7 +22,7 @@ pairs, read:
 
 Useful local assets:
 
-- `sdk/integral_image_compare.py`: helper module that a Python block can copy or import to write `.icv` manifests.
+- `../../shared/integral_image_compare.py`: package shared helper module for writing `.icv` manifests.
 - `scripts/create_image_compare_manifest.py`: command-line helper for manually creating `.icv` files.
 - `templates/image_compare_block.py`: starter `@integral_block` that emits an `.icv` file.
 

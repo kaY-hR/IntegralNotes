@@ -262,9 +262,17 @@ if not sdk_import_root.exists():
     raise RuntimeError(f"Integral Python SDK import root was not found: {sdk_import_root}")
 
 sys.path.insert(0, str(sdk_import_root))
+package_shared_directory = None
+if script_path.parent.name == "scripts":
+    package_root = script_path.parent.parent
+    package_manifest_path = package_root / "integral-package.json"
+    candidate_shared_directory = package_root / "shared"
+    if package_manifest_path.exists() and candidate_shared_directory.exists():
+        package_shared_directory = str(candidate_shared_directory)
+        sys.path.insert(1, package_shared_directory)
 script_directory = str(script_path.parent)
 if script_directory not in sys.path:
-    sys.path.insert(1, script_directory)
+    sys.path.insert(2 if package_shared_directory else 1, script_directory)
 payload = json.loads(args_path.read_text(encoding="utf-8"))
 
 spec = importlib.util.spec_from_file_location("integral_user_module", script_path)
@@ -2229,9 +2237,7 @@ export class IntegralWorkspaceService {
             content,
             "workspace",
             {
-              imported: await pathExists(
-                path.join(pythonBlock.importedRootPath, ...pythonBlock.scriptPath.split("/"))
-              ),
+              imported: await isPackagePythonBlockImported(pythonBlock),
               packageId: pythonBlock.manifest.id,
               packageVersion: pythonBlock.manifest.version,
               sourcePackagePath: shortenPathWithTokens(pythonBlock.packageRootPath)
@@ -4459,6 +4465,29 @@ async function pathExists(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function isPackagePythonBlockImported(pythonBlock: {
+  importedRootPath: string;
+  packageRootPath: string;
+  scriptPath: string;
+}): Promise<boolean> {
+  const importedScriptPath = path.join(
+    pythonBlock.importedRootPath,
+    ...pythonBlock.scriptPath.split("/")
+  );
+
+  if (!(await pathExists(importedScriptPath))) {
+    return false;
+  }
+
+  const sourceSharedPath = path.join(pythonBlock.packageRootPath, "shared");
+
+  if (!(await pathExists(sourceSharedPath))) {
+    return true;
+  }
+
+  return pathExists(path.join(pythonBlock.importedRootPath, "shared"));
 }
 
 async function resetDirectory(targetPath: string): Promise<void> {
