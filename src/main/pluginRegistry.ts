@@ -15,10 +15,11 @@ import {
   parsePluginManifestText,
   toInstalledPluginDefinition,
   type InstalledPluginDefinition,
+  type InstalledPluginOrigin,
   type PluginHostModule,
   type PluginManifest
 } from "../shared/plugins";
-import { listExportedPackageRuntimePluginRootPaths } from "./packageService";
+import { listExportedPackageRuntimePluginRoots } from "./packageService";
 import { getIntegralRuntimePluginRootPath } from "./pathTokens";
 
 interface PluginRegistryOptions {
@@ -30,6 +31,7 @@ interface ResolvedInstalledPlugin {
   definition: InstalledPluginDefinition;
   hostEntryPath: string | null;
   manifest: PluginManifest;
+  packageId: string | null;
   rendererEntryPath: string | null;
   rootPath: string;
   sidebarViewEntryPaths: Map<string, string>;
@@ -180,6 +182,14 @@ export class PluginRegistry {
 
   async uninstallPlugin(pluginId: string): Promise<UninstallPluginResult> {
     const installedPlugin = await this.findPluginById(pluginId);
+
+    if (installedPlugin?.definition.origin === "package") {
+      const packageSuffix = installedPlugin.definition.packageId
+        ? ` (${installedPlugin.definition.packageId})`
+        : "";
+      throw new Error(`package 由来 plugin は package 単位で管理してください: ${pluginId}${packageSuffix}`);
+    }
+
     const installedPluginPath =
       installedPlugin?.rootPath ?? path.join(this.installRootPath, sanitizePluginDirectoryName(pluginId));
 
@@ -213,8 +223,15 @@ export class PluginRegistry {
   }
 
   private async readPackageRuntimePlugins(): Promise<ResolvedInstalledPlugin[]> {
-    const rootPaths = await listExportedPackageRuntimePluginRootPaths(this.packageRootPath);
-    const plugins = await Promise.all(rootPaths.map((rootPath) => this.readPluginDirectory(rootPath)));
+    const roots = await listExportedPackageRuntimePluginRoots(this.packageRootPath);
+    const plugins = await Promise.all(
+      roots.map((root) =>
+        this.readPluginDirectory(root.rootPath, {
+          origin: "package",
+          packageId: root.packageId
+        })
+      )
+    );
 
     return plugins.filter((plugin): plugin is ResolvedInstalledPlugin => plugin !== null);
   }
@@ -242,7 +259,13 @@ export class PluginRegistry {
     return plugins.filter((plugin): plugin is ResolvedInstalledPlugin => plugin !== null);
   }
 
-  private async readPluginDirectory(pluginRootPath: string): Promise<ResolvedInstalledPlugin | null> {
+  private async readPluginDirectory(
+    pluginRootPath: string,
+    options: {
+      origin?: InstalledPluginOrigin;
+      packageId?: string | null;
+    } = {}
+  ): Promise<ResolvedInstalledPlugin | null> {
     const manifestPath = path.join(pluginRootPath, PLUGIN_MANIFEST_FILENAME);
     let content: string;
 
@@ -262,12 +285,16 @@ export class PluginRegistry {
       return null;
     }
 
+    const origin = options.origin ?? "external";
+    const packageId = options.packageId ?? null;
+
     return {
-      definition: toInstalledPluginDefinition(manifest, "external", pluginRootPath),
+      definition: toInstalledPluginDefinition(manifest, origin, pluginRootPath, packageId),
       hostEntryPath: manifest.host
         ? path.join(pluginRootPath, ...manifest.host.entry.split("/"))
         : null,
       manifest,
+      packageId,
       rendererEntryPath: manifest.renderer
         ? path.join(pluginRootPath, ...manifest.renderer.entry.split("/"))
         : null,
@@ -327,7 +354,12 @@ export class PluginRegistry {
 
       merged.push({
         ...plugin,
-        definition: toInstalledPluginDefinition(manifest, "external", plugin.rootPath),
+        definition: toInstalledPluginDefinition(
+          manifest,
+          plugin.definition.origin,
+          plugin.rootPath,
+          plugin.packageId
+        ),
         manifest
       });
     }

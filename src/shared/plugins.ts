@@ -18,7 +18,7 @@ export const PLUGIN_VIEWER_RESOLVE_WORKSPACE_FILE_URL_RESULT_MESSAGE_TYPE =
   "integral:viewer-resolve-workspace-file-url-result";
 export const PLUGIN_RENDER_MESSAGE_TYPE = PLUGIN_RENDER_SET_BLOCK_MESSAGE_TYPE;
 
-export type InstalledPluginOrigin = "external";
+export type InstalledPluginOrigin = "external" | "package";
 
 export interface PluginActionContribution {
   busyLabel: string;
@@ -96,6 +96,7 @@ export interface InstalledPluginDefinition {
   id: string;
   namespace: string;
   origin: InstalledPluginOrigin;
+  packageId: string | null;
   sidebarViews: InstalledPluginSidebarViewDefinition[];
   sourcePath: string | null;
   version: string;
@@ -112,7 +113,7 @@ export interface PluginRendererModel {
   blockDefinition: PluginBlockContribution;
   plugin: Pick<
     InstalledPluginDefinition,
-    "description" | "displayName" | "id" | "namespace" | "origin" | "version"
+    "description" | "displayName" | "id" | "namespace" | "origin" | "packageId" | "version"
   >;
 }
 
@@ -148,7 +149,7 @@ export interface PluginViewerRendererModel {
   presentation: PluginViewerPresentation;
   plugin: Pick<
     InstalledPluginDefinition,
-    "description" | "displayName" | "id" | "namespace" | "origin" | "version"
+    "description" | "displayName" | "id" | "namespace" | "origin" | "packageId" | "version"
   >;
   viewer: Pick<InstalledPluginViewerDefinition, "description" | "displayName" | "extensions" | "id">;
 }
@@ -184,7 +185,7 @@ export interface PluginViewerResolveWorkspaceFileUrlResultMessage {
 export interface PluginSidebarViewRendererModel {
   plugin: Pick<
     InstalledPluginDefinition,
-    "description" | "displayName" | "id" | "namespace" | "origin" | "version"
+    "description" | "displayName" | "id" | "namespace" | "origin" | "packageId" | "version"
   >;
   sidebarView: Pick<InstalledPluginSidebarViewDefinition, "description" | "icon" | "id" | "title">;
 }
@@ -386,7 +387,8 @@ export function parsePluginManifestText(content: string): PluginManifest | null 
 export function toInstalledPluginDefinition(
   manifest: PluginManifest,
   origin: InstalledPluginOrigin,
-  sourcePath: string | null
+  sourcePath: string | null,
+  packageId: string | null = null
 ): InstalledPluginDefinition {
   return {
     blocks: (manifest.blocks ?? []).map((block) => ({
@@ -402,6 +404,7 @@ export function toInstalledPluginDefinition(
     id: manifest.id,
     namespace: manifest.namespace,
     origin,
+    packageId,
     sidebarViews: (manifest.sidebarViews ?? []).map((sidebarView) => ({
       description: sidebarView.description,
       icon: sidebarView.icon ?? null,

@@ -26,6 +26,11 @@ export interface PackagePythonBlockExport {
   workspaceScriptPath: string;
 }
 
+export interface PackageRuntimePluginRoot {
+  packageId: string;
+  rootPath: string;
+}
+
 const WORKSPACE_PACKAGES_DIRECTORY = ".packages";
 
 export async function readInstalledIntegralPackages(
@@ -60,12 +65,23 @@ export async function listExportedPackageSkillRootPaths(): Promise<string[]> {
 export async function listExportedPackageRuntimePluginRootPaths(
   packageRootPath = getIntegralPackageRootPath()
 ): Promise<string[]> {
+  const roots = await listExportedPackageRuntimePluginRoots(packageRootPath);
+
+  return roots.map((item) => item.rootPath);
+}
+
+export async function listExportedPackageRuntimePluginRoots(
+  packageRootPath = getIntegralPackageRootPath()
+): Promise<PackageRuntimePluginRoot[]> {
   const packages = await readInstalledIntegralPackages(packageRootPath);
-  const roots: string[] = [];
+  const roots: PackageRuntimePluginRoot[] = [];
 
   for (const resolvedPackage of packages) {
     for (const pluginPath of resolvedPackage.manifest.exports.runtimePlugins) {
-      roots.push(path.join(resolvedPackage.rootPath, ...pluginPath.split("/")));
+      roots.push({
+        packageId: resolvedPackage.manifest.id,
+        rootPath: path.join(resolvedPackage.rootPath, ...pluginPath.split("/"))
+      });
     }
   }
 

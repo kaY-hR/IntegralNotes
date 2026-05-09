@@ -5,7 +5,7 @@
   "displayName": "Image Analysis Pack",
   "exports": {
     "skills": ["skills/image-analysis-tips"],
-    "pythonBlocks": [],
+    "pythonBlocks": ["scripts/detect_cells.py:main"],
     "runtimePlugins": ["runtime-plugins/image-compare-viewer"]
   }
 }

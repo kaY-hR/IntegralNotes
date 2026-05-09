@@ -73,6 +73,7 @@ export function SidebarPluginManagerView({
         ) : (
           plugins.map((plugin) => {
             const uninstallPending = pendingAction === `uninstall:${plugin.id}`;
+            const isExternalPlugin = plugin.origin === "external";
 
             return (
               <section className="plugin-card" key={plugin.id}>
@@ -82,6 +83,10 @@ export function SidebarPluginManagerView({
                     <div className="plugin-card__badges">
                       <span className="plugin-card__badge">{plugin.id}</span>
                       <span className="plugin-card__badge">{plugin.version}</span>
+                      <span className="plugin-card__badge">{plugin.origin}</span>
+                      {plugin.packageId ? (
+                        <span className="plugin-card__badge">{plugin.packageId}</span>
+                      ) : null}
                       {plugin.hasRenderer ? <span className="plugin-card__badge">renderer</span> : null}
                       {plugin.hasHost ? <span className="plugin-card__badge">host</span> : null}
                       {plugin.viewers.length > 0 ? (
@@ -97,13 +102,25 @@ export function SidebarPluginManagerView({
 
                   <button
                     className="button button--ghost"
-                    disabled={isBusy}
+                    disabled={isBusy || !isExternalPlugin}
                     onClick={() => {
+                      if (!isExternalPlugin) {
+                        return;
+                      }
                       onUninstall(plugin.id);
                     }}
+                    title={
+                      isExternalPlugin
+                        ? undefined
+                        : "package 由来 plugin は package 単位で管理します。"
+                    }
                     type="button"
                   >
-                    {uninstallPending ? "削除中..." : "Uninstall"}
+                    {isExternalPlugin
+                      ? uninstallPending
+                        ? "削除中..."
+                        : "Uninstall"
+                      : "Managed"}
                   </button>
                 </div>
 
