@@ -24,6 +24,7 @@ import {
   type AiChatToolTraceEntry,
   type InlineActionDefinition,
   type InlineActionReadScope,
+  type MarkdownCommitRange,
   type InlinePythonBlockInsertion,
   type PromptlessContinuationInsertion,
   type CreateAiChatSessionRequest,
@@ -55,6 +56,11 @@ import {
   type IntegralBlockDocument,
   type IntegralBlockTypeDefinition
 } from "../shared/integral";
+import {
+  formatMarkdownValidationIssues,
+  validateMarkdownDocument,
+  type MarkdownValidationIssue
+} from "../shared/markdownValidation";
 import type { AppSettingsService } from "./appSettingsService";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import {
@@ -556,7 +562,16 @@ export class AiChatService {
       extraTools: createInlineActionTools({
         action,
         createPythonBlockDraft: (scriptPath, functionName) =>
-          this.createPythonBlockDraft(scriptPath, functionName)
+          this.createPythonBlockDraft(scriptPath, functionName),
+        validateMarkdownInsertion: (text) =>
+          this.validateInlineMarkdownInsertionCandidate({
+            afterText: request.afterText,
+            beforeText: request.beforeText,
+            documentMarkdown: request.documentMarkdown,
+            insertionText: text,
+            markdownCommitRange: request.markdownCommitRange ?? null,
+            markdownInsertionOffset: request.markdownInsertionOffset ?? null
+          })
       }),
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
@@ -576,6 +591,7 @@ export class AiChatService {
     const insertion = action.canInsertMarkdown
       ? parseInlineMarkdownInsertion(result.diagnostics.toolTrace)
       : null;
+
     const assistantMessage: AiChatMessage = {
       createdAt: new Date().toISOString(),
       diagnostics: result.diagnostics,
@@ -645,7 +661,17 @@ export class AiChatService {
     const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
-      extraTools: createInlineMarkdownInsertionTools(),
+      extraTools: createInlineMarkdownInsertionTools({
+        validateInsertion: (text) =>
+          this.validateInlineMarkdownInsertionCandidate({
+            afterText: request.afterText,
+            beforeText: request.beforeText,
+            documentMarkdown: request.documentMarkdown,
+            insertionText: text,
+            markdownCommitRange: request.markdownCommitRange ?? null,
+            markdownInsertionOffset: request.markdownInsertionOffset ?? null
+          })
+      }),
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
       },
@@ -661,6 +687,7 @@ export class AiChatService {
       useWorkspaceTools: true
     });
     const insertion = parseInlineMarkdownInsertion(result.diagnostics.toolTrace);
+
     const assistantMessage: AiChatMessage = {
       createdAt: new Date().toISOString(),
       diagnostics: result.diagnostics,
@@ -835,7 +862,17 @@ export class AiChatService {
     const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
-      extraTools: createPromptlessContinuationTools(),
+      extraTools: createPromptlessContinuationTools({
+        validateMarkdownInsertion: (text) =>
+          this.validateInlineMarkdownInsertionCandidate({
+            afterText: request.afterText,
+            beforeText: request.beforeText,
+            documentMarkdown: request.documentMarkdown,
+            insertionText: text,
+            markdownCommitRange: request.markdownCommitRange ?? null,
+            markdownInsertionOffset: request.markdownInsertionOffset ?? null
+          })
+      }),
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
       },
@@ -905,6 +942,49 @@ export class AiChatService {
         `${insertion.scriptPath} に @integral_block 直下の def ${insertion.functionName}(...) が見つかりません。`
       );
     }
+  }
+
+  private async validateInlineMarkdownInsertionCandidate({
+    afterText,
+    beforeText,
+    documentMarkdown,
+    insertionText,
+    markdownCommitRange,
+    markdownInsertionOffset
+  }: {
+    afterText: string;
+    beforeText: string;
+    documentMarkdown: string;
+    insertionText: string;
+    markdownCommitRange: MarkdownCommitRange | null;
+    markdownInsertionOffset: number | null;
+  }): Promise<InlineMarkdownInsertionValidationResult> {
+    const candidateMarkdown = createInlineMarkdownInsertionCandidate({
+      afterText,
+      beforeText,
+      documentMarkdown,
+      insertionText,
+      markdownCommitRange,
+      markdownInsertionOffset
+    });
+    const integralWorkspaceService = this.getIntegralWorkspaceService?.() ?? null;
+    const assetCatalog = integralWorkspaceService
+      ? await integralWorkspaceService.listAssetCatalog()
+      : undefined;
+    const validation = validateMarkdownDocument(candidateMarkdown, { assetCatalog });
+
+    if (validation.ok) {
+      return { ok: true };
+    }
+
+    return {
+      issues: validation.issues,
+      message: [
+        "Markdown validation に失敗したため、挿入は反映されませんでした。",
+        formatMarkdownValidationIssues(validation.issues)
+      ].join("\n"),
+      ok: false
+    };
   }
 
   private async readInlineActions(): Promise<InlineActionDefinition[]> {
@@ -1468,10 +1548,16 @@ function emitAiChatStreamEvent(
 }
 
 function buildInlineInsertionInstructions(systemPrompt: string): string {
-  return normalizeAiChatSystemPromptValue(
-    systemPrompt,
-    DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlineInsertion
-  );
+  return [
+    normalizeAiChatSystemPromptValue(
+      systemPrompt,
+      DEFAULT_AI_CHAT_SYSTEM_PROMPTS.inlineInsertion
+    ),
+    "",
+    "Commit validation:",
+    "- insertMarkdownAtCursor validates the full candidate Markdown document before committing.",
+    "- If the tool returns a validation error, revise the Markdown according to the error and call insertMarkdownAtCursor again."
+  ].join("\n");
 }
 
 function buildInlineInsertionPrompt(
@@ -1528,6 +1614,12 @@ function buildInlineActionInstructions(
     action.canCreatePythonBlockDraft
       ? "- For Python analysis blocks, save or identify the .py callable, call createPythonBlockDraft, edit the returned Markdown draft as needed, then commit it with insertMarkdownAtCursor."
       : "- createPythonBlockDraft is not available in this action.",
+    action.canInsertMarkdown
+      ? "- insertMarkdownAtCursor validates the full candidate Markdown document. If it returns a validation error, revise the Markdown and call it again."
+      : "",
+    action.canEditWorkspaceFiles
+      ? "- writeWorkspaceFile also validates Markdown files before saving. If it returns a validation error, revise the Markdown and call it again; do not claim the edit is complete."
+      : "",
     ""
   ].filter((line) => line.length > 0);
   const normalizedUserId = userId.trim();
@@ -1588,7 +1680,23 @@ function buildInlineActionPrompt(
     .join("\n");
 }
 
-function createInlineMarkdownInsertionTools(): ToolSet {
+interface InlineMarkdownInsertionValidationFailure {
+  issues: MarkdownValidationIssue[];
+  message: string;
+  ok: false;
+}
+
+interface InlineMarkdownInsertionValidationSuccess {
+  ok: true;
+}
+
+type InlineMarkdownInsertionValidationResult =
+  | InlineMarkdownInsertionValidationFailure
+  | InlineMarkdownInsertionValidationSuccess;
+
+function createInlineMarkdownInsertionTools(options: {
+  validateInsertion?: (text: string) => Promise<InlineMarkdownInsertionValidationResult>;
+} = {}): ToolSet {
   return {
     insertMarkdownAtCursor: tool({
       description:
@@ -1597,26 +1705,46 @@ function createInlineMarkdownInsertionTools(): ToolSet {
         summary: z.string().optional(),
         text: z.string().min(1)
       }),
-      execute: async ({ summary, text }) => ({
-        summary: typeof summary === "string" ? summary : "",
-        text
-      })
+      execute: async ({ summary, text }) => {
+        const validation = options.validateInsertion
+          ? await options.validateInsertion(text)
+          : { ok: true as const };
+
+        if (!validation.ok) {
+          return {
+            validationIssues: validation.issues,
+            validationMessage: validation.message,
+            validationStatus: "error" as const
+          };
+        }
+
+        return {
+          summary: typeof summary === "string" ? summary : "",
+          text
+        };
+      }
     })
   };
 }
 
 function createInlineActionTools({
   action,
-  createPythonBlockDraft
+  createPythonBlockDraft,
+  validateMarkdownInsertion
 }: {
   action: InlineActionDefinition;
   createPythonBlockDraft: (
     scriptPath: string,
     functionName: string
   ) => Promise<{ blockType: string; markdown: string }>;
+  validateMarkdownInsertion: (text: string) => Promise<InlineMarkdownInsertionValidationResult>;
 }): ToolSet {
   return {
-    ...(action.canInsertMarkdown ? createInlineMarkdownInsertionTools() : {}),
+    ...(action.canInsertMarkdown
+      ? createInlineMarkdownInsertionTools({
+          validateInsertion: validateMarkdownInsertion
+        })
+      : {}),
     ...(action.canCreatePythonBlockDraft
       ? {
           createPythonBlockDraft: tool({
@@ -2154,9 +2282,13 @@ function createInlinePythonBlockTools(): ToolSet {
   };
 }
 
-function createPromptlessContinuationTools(): ToolSet {
+function createPromptlessContinuationTools(options: {
+  validateMarkdownInsertion: (text: string) => Promise<InlineMarkdownInsertionValidationResult>;
+}): ToolSet {
   return {
-    ...createInlineMarkdownInsertionTools(),
+    ...createInlineMarkdownInsertionTools({
+      validateInsertion: options.validateMarkdownInsertion
+    }),
     ...createInlinePythonBlockTools()
   };
 }
@@ -2190,6 +2322,52 @@ function parseInlineMarkdownInsertion(
   }
 }
 
+function createInlineMarkdownInsertionCandidate({
+  afterText,
+  beforeText,
+  documentMarkdown,
+  insertionText,
+  markdownCommitRange,
+  markdownInsertionOffset
+}: {
+  afterText: string;
+  beforeText: string;
+  documentMarkdown: string;
+  insertionText: string;
+  markdownCommitRange: MarkdownCommitRange | null;
+  markdownInsertionOffset: number | null;
+}): string {
+  if (
+    markdownCommitRange &&
+    Number.isInteger(markdownCommitRange.from) &&
+    Number.isInteger(markdownCommitRange.to) &&
+    markdownCommitRange.from >= 0 &&
+    markdownCommitRange.to >= markdownCommitRange.from &&
+    markdownCommitRange.to <= markdownCommitRange.documentMarkdown.length
+  ) {
+    return [
+      markdownCommitRange.documentMarkdown.slice(0, markdownCommitRange.from),
+      insertionText,
+      markdownCommitRange.documentMarkdown.slice(markdownCommitRange.to)
+    ].join("");
+  }
+
+  if (
+    typeof markdownInsertionOffset === "number" &&
+    Number.isInteger(markdownInsertionOffset) &&
+    markdownInsertionOffset >= 0 &&
+    markdownInsertionOffset <= documentMarkdown.length
+  ) {
+    return [
+      documentMarkdown.slice(0, markdownInsertionOffset),
+      insertionText,
+      documentMarkdown.slice(markdownInsertionOffset)
+    ].join("");
+  }
+
+  return `${beforeText}${insertionText}${afterText}`;
+}
+
 function buildPromptlessContinuationInstructions(
   systemPrompt: string,
   skillPrompt: string,
@@ -2215,6 +2393,13 @@ function buildPromptlessContinuationInstructions(
     lines.push("# Python analysis block implementation contract");
     lines.push(skillPrompt.trim());
   }
+
+  lines.push(
+    "",
+    "Commit validation:",
+    "- insertMarkdownAtCursor validates the full candidate Markdown document before committing.",
+    "- If the tool returns a validation error, revise the Markdown according to the error and call insertMarkdownAtCursor again."
+  );
 
   return lines.join("\n");
 }

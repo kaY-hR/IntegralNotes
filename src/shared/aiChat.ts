@@ -274,6 +274,8 @@ export interface SubmitInlineAiInsertionRequest {
   documentMarkdown: string;
   history: AiChatMessage[];
   insertionPosition: number;
+  markdownCommitRange?: MarkdownCommitRange | null;
+  markdownInsertionOffset?: number | null;
   prompt: string;
   requestedSkills?: AiChatSkillInvocation[];
   sessionId?: string | null;
@@ -284,6 +286,12 @@ export interface SubmitInlineAiInsertionRequest {
 export interface InlineAiTextInsertion {
   summary?: string;
   text: string;
+}
+
+export interface MarkdownCommitRange {
+  documentMarkdown: string;
+  from: number;
+  to: number;
 }
 
 export interface SubmitInlineAiInsertionResult {
@@ -302,6 +310,8 @@ export interface SubmitInlineActionRequest {
   documentMarkdown: string;
   history: AiChatMessage[];
   insertionPosition: number;
+  markdownCommitRange?: MarkdownCommitRange | null;
+  markdownInsertionOffset?: number | null;
   prompt: string;
   requestedSkills?: AiChatSkillInvocation[];
   sessionId?: string | null;
@@ -325,6 +335,8 @@ export interface SubmitInlinePythonBlockRequest {
   documentMarkdown: string;
   history: AiChatMessage[];
   insertionPosition: number;
+  markdownCommitRange?: MarkdownCommitRange | null;
+  markdownInsertionOffset?: number | null;
   prompt: string;
   requestedSkills?: AiChatSkillInvocation[];
   sessionId?: string | null;
@@ -355,6 +367,8 @@ export interface SubmitPromptlessContinuationRequest {
   documentMarkdown: string;
   history: AiChatMessage[];
   insertionPosition: number;
+  markdownCommitRange?: MarkdownCommitRange | null;
+  markdownInsertionOffset?: number | null;
   sessionId?: string | null;
   sourceNotePath: string;
   streamId?: string | null;

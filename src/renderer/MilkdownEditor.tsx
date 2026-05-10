@@ -1,5 +1,5 @@
 import { Crepe } from "@milkdown/crepe";
-import { editorViewCtx, parserCtx } from "@milkdown/kit/core";
+import { editorViewCtx, parserCtx, serializerCtx } from "@milkdown/kit/core";
 import { imageSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
 import { Slice, type Node as ProseNode, type ResolvedPos } from "@milkdown/kit/prose/model";
 import type { Selection } from "@milkdown/kit/prose/state";
@@ -32,7 +32,8 @@ import type {
   AiChatSkillSummary,
   AiChatStreamEvent,
   AiChatToolTraceEntry,
-  InlineActionDefinition
+  InlineActionDefinition,
+  MarkdownCommitRange
 } from "../shared/aiChat";
 import {
   findActiveAiSkillTrigger,
@@ -60,6 +61,10 @@ import {
   serializeIntegralBlockContent,
   toIntegralCodeBlock
 } from "./integralBlockRegistry";
+import {
+  formatMarkdownValidationIssues,
+  validateMarkdownDocument
+} from "../shared/markdownValidation";
 import { AiMarkdown } from "./AiMarkdown";
 import { AiSkillChips } from "./AiSkillChips";
 import { AiSkillCompletionList } from "./AiSkillCompletionList";
@@ -147,6 +152,8 @@ interface InlineAiPromptState {
   documentMarkdown: string;
   error: string | null;
   isSubmitting: boolean;
+  markdownCommitRange: MarkdownCommitRange | null;
+  markdownInsertionOffset: number | null;
   messages: AiChatMessage[];
   mode: InlineAiMode;
   prompt: string;
@@ -1194,18 +1201,30 @@ export function MilkdownEditor({
     setLinkCompletion(null);
     setAnalysisCompletion(null);
 
+    const editor = editorRef.current;
+    const markdownBeforeTrigger = editor?.getMarkdown() ?? lastSyncedMarkdownRef.current;
     const transaction = view.state.tr.delete(trigger.replaceFrom, trigger.replaceTo);
     transaction.setSelection(TextSelection.create(transaction.doc, trigger.replaceFrom));
     view.dispatch(transaction.scrollIntoView());
-    const startAutoSave = queueCurrentMarkdownAutoSave("inline-ai-start");
+    const documentMarkdown = editor?.getMarkdown() ?? lastSyncedMarkdownRef.current;
+    const markdownCommitRange = findMarkdownCommitRangeAfterTriggerDeletion(
+      markdownBeforeTrigger,
+      documentMarkdown,
+      trigger.triggerText
+    );
+    const markdownInsertionOffset = markdownCommitRange?.from ?? null;
+    lastSyncedMarkdownRef.current = documentMarkdown;
+    const startAutoSave = queueMarkdownAutoSave(documentMarkdown, "inline-ai-start");
     const nextPrompt: InlineAiPromptState = {
       action,
       afterText: trigger.afterText,
       anchorPos: trigger.replaceFrom,
       beforeText: trigger.beforeText,
-      documentMarkdown: lastSyncedMarkdownRef.current,
+      documentMarkdown,
       error: null,
       isSubmitting: false,
+      markdownCommitRange,
+      markdownInsertionOffset,
       messages: [],
       mode: "inline-action",
       prompt: "",
@@ -1226,6 +1245,7 @@ export function MilkdownEditor({
       anchorPos: trigger.replaceFrom,
       beforeLength: trigger.beforeText.length,
       documentLength: nextPrompt.documentMarkdown.length,
+      markdownInsertionOffset: markdownInsertionOffset ?? undefined,
       marker: trigger.marker,
       promptRequired: action.promptRequired,
       replaceTo: trigger.replaceTo
@@ -1583,6 +1603,8 @@ export function MilkdownEditor({
         documentMarkdown: requestState.documentMarkdown,
         history: requestState.messages,
         insertionPosition: requestState.anchorPos,
+        markdownCommitRange: requestState.markdownCommitRange,
+        markdownInsertionOffset: requestState.markdownInsertionOffset,
         prompt: requestState.prompt,
         requestedSkills,
         sessionId: requestState.sessionId,
@@ -1647,7 +1669,7 @@ export function MilkdownEditor({
         return;
       }
 
-      insertMarkdownAtPosition(
+      await insertMarkdownAtPosition(
         requestState.anchorPos,
         prependInlineAiTranscript(result.insertion.text, buildInlineAiTranscript(nextMessages)),
         {
@@ -1697,7 +1719,7 @@ export function MilkdownEditor({
     position: number,
     markdown: string,
     triggerCleanup?: { autoSaveReason?: string; marker: string; originalAfterText: string }
-  ): void => {
+  ): Promise<void> => {
     const editor = editorRef.current;
 
     if (!editor) {
@@ -1706,7 +1728,7 @@ export function MilkdownEditor({
         position,
         reason: "editorMissing"
       });
-      return;
+      return Promise.resolve();
     }
 
     const startedAt = performance.now();
@@ -1716,7 +1738,11 @@ export function MilkdownEditor({
       position
     });
 
-    try {
+    return (async () => {
+      const assetCatalog = await window.integralNotes
+        .getIntegralAssetCatalog()
+        .catch(() => undefined);
+
       editor.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const from = Math.max(0, Math.min(position, view.state.doc.content.size));
@@ -1751,6 +1777,15 @@ export function MilkdownEditor({
         const dispatchStartedAt = performance.now();
         const insertedSlice = new Slice(parsedDocument.content, 0, 0);
         const transaction = view.state.tr.replaceRange(from, to, insertedSlice);
+        const candidateMarkdown = ctx.get(serializerCtx)(transaction.doc);
+        const validation = validateMarkdownDocument(candidateMarkdown, { assetCatalog });
+
+        if (!validation.ok) {
+          throw new Error(
+            `Markdown validation に失敗したため、AI の挿入は反映されませんでした。\n${formatMarkdownValidationIssues(validation.issues)}`
+          );
+        }
+
         const nextSelectionPosition = Math.min(
           from + insertedSlice.size,
           transaction.doc.content.size
@@ -1773,14 +1808,14 @@ export function MilkdownEditor({
       if (triggerCleanup?.autoSaveReason) {
         queueCurrentMarkdownAutoSave(triggerCleanup.autoSaveReason);
       }
-    } catch (error) {
+    })().catch((error) => {
       logInlineAiDebugEvent("insert-error", {
         markdownLength: markdown.length,
         message: toErrorMessage(error),
         position
       });
       throw error;
-    }
+    });
   };
 
   const queueCurrentMarkdownAutoSave = (reason: string): Promise<void> => {
@@ -2506,6 +2541,60 @@ function computeInlineAiTriggerState(
   } catch {
     return null;
   }
+}
+
+function findMarkdownCommitRangeAfterTriggerDeletion(
+  markdownBeforeTrigger: string,
+  documentMarkdown: string,
+  triggerText: string
+): MarkdownCommitRange | null {
+  if (markdownBeforeTrigger === documentMarkdown) {
+    return null;
+  }
+
+  let prefixLength = 0;
+  const maxPrefixLength = Math.min(markdownBeforeTrigger.length, documentMarkdown.length);
+
+  while (
+    prefixLength < maxPrefixLength &&
+    markdownBeforeTrigger[prefixLength] === documentMarkdown[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  const maxSuffixLength = Math.min(
+    markdownBeforeTrigger.length - prefixLength,
+    documentMarkdown.length - prefixLength
+  );
+
+  while (
+    suffixLength < maxSuffixLength &&
+    markdownBeforeTrigger[markdownBeforeTrigger.length - 1 - suffixLength] ===
+      documentMarkdown[documentMarkdown.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+
+  const removedSource = markdownBeforeTrigger.slice(
+    prefixLength,
+    markdownBeforeTrigger.length - suffixLength
+  );
+
+  if (!removedSource.includes(triggerText)) {
+    return null;
+  }
+
+  const from = prefixLength;
+  const to = markdownBeforeTrigger.length - suffixLength;
+
+  return from >= 0 && to >= from && to <= markdownBeforeTrigger.length
+    ? {
+        documentMarkdown: markdownBeforeTrigger,
+        from,
+        to
+      }
+    : null;
 }
 
 function formatInlineAiMessageRole(message: AiChatMessage): string {

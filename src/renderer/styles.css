@@ -414,6 +414,65 @@ textarea:focus-visible {
   background: var(--app-bg);
 }
 
+.workspace-notice {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 10px 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-1);
+  box-shadow: 0 8px 20px rgba(30, 41, 59, 0.08);
+}
+
+.workspace-notice--error {
+  border-color: #f1b8a8;
+  background: #fff2ef;
+  color: #9a3412;
+}
+
+.workspace-notice__content {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspace-notice__content strong {
+  font-size: 0.78rem;
+}
+
+.workspace-notice__content pre {
+  margin: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.workspace-notice__dismiss {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(154, 52, 18, 0.28);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.68);
+  color: #7c2d12;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.workspace-notice__dismiss:hover,
+.workspace-notice__dismiss:focus-visible {
+  background: #ffffff;
+  color: #5f210d;
+}
+
 .app-menubar {
   grid-column: 1 / -1;
   grid-row: 1;

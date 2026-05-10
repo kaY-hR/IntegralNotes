@@ -185,6 +185,19 @@ app 内部では次の JSON object に正規化する。
 - 再実行したい場合は、Undo で新しい draft に戻すか、ユーザーまたは LLM が新しい block を作る
 - run status と log 要約は hidden metadata ではなく UI state / runtime log で扱う
 
+### 保存時 validation
+
+Markdown note 保存時には、見たまま編集 / text 直接編集のどちらでも note 全文を validate する。
+
+保存 error:
+
+- 同一 note 内で `itg-notes` block の `id` が重複している
+- 同一 note 内で複数 block の `out:` が同じ実行済み managed file / dataset ID を参照している
+
+`out:` の workspace path は実行前の出力予定 path なので、この重複検査の対象外とする。
+
+text 直接編集で block をコピーして使う場合は、コピー側の `id:` 行を削除し、`out:` に入っている実行済み output ID を `null` または新しい出力予定 path に戻す。
+
 ## 5.5. note projection metadata
 
 作業 note や data-note への自動反映は block source には保存しない。  

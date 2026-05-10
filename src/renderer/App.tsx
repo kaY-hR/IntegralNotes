@@ -49,6 +49,10 @@ import {
   type WorkspacePathChange,
   rewriteWorkspaceMarkdownReferences
 } from "../shared/workspaceLinks";
+import {
+  formatMarkdownValidationIssues,
+  validateMarkdownDocument
+} from "../shared/markdownValidation";
 import { ActivityBar, type ActivityBarItem } from "./ActivityBar";
 import { DataRegistrationDialog } from "./DataRegistrationDialog";
 import { ExternalPluginSidebarView } from "./ExternalPluginSidebarView";
@@ -151,6 +155,12 @@ interface HostCommandDialogState {
   status: HostCommandDialogStatus;
   stderr: string;
   stdout: string;
+}
+
+interface WorkspaceNoticeState {
+  kind: "error";
+  message: string;
+  title: string;
 }
 
 interface OpenWorkspaceFileOptions {
@@ -1139,6 +1149,7 @@ export function App(): JSX.Element {
   );
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [statusMessage, setStatusMessage] = useState("ワークスペースを読み込み中...");
+  const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNoticeState | null>(null);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [trackingIssues, setTrackingIssues] = useState<IntegralManagedDataTrackingIssue[]>([]);
   const [trackingDialogDismissed, setTrackingDialogDismissed] = useState(false);
@@ -2661,10 +2672,19 @@ export function App(): JSX.Element {
     });
 
     try {
+      setWorkspaceNotice(null);
       const normalizedContent = normalizeIntegralBlockInputReferencesInMarkdown(
         contentToSave,
         assetCatalog
       );
+      const validation = validateMarkdownDocument(normalizedContent, { assetCatalog });
+
+      if (!validation.ok) {
+        throw new Error(
+          `Markdown validation に失敗したため保存しませんでした。\n${formatMarkdownValidationIssues(validation.issues)}`
+        );
+      }
+
       const savedNote = await window.integralNotes.saveNote(relativePath, normalizedContent);
       let isStillDirty = false;
 
@@ -2696,6 +2716,8 @@ export function App(): JSX.Element {
       syncTabLabel(relativePath, savedNote.name, isStillDirty);
       setStatusMessage(`${savedNote.name} を保存しました`);
     } catch (error) {
+      const errorMessage = toErrorMessage(error);
+
       setOpenTabs((currentTabs) => {
         const currentTab = currentTabs[relativePath];
 
@@ -2711,7 +2733,12 @@ export function App(): JSX.Element {
           }
         };
       });
-      setStatusMessage(toErrorMessage(error));
+      setStatusMessage(errorMessage);
+      setWorkspaceNotice({
+        kind: "error",
+        message: errorMessage,
+        title: "保存できませんでした"
+      });
     }
   };
 
@@ -3619,6 +3646,10 @@ export function App(): JSX.Element {
       content: nextContent
     };
 
+    setWorkspaceNotice((currentNotice) =>
+      currentNotice?.kind === "error" ? null : currentNotice
+    );
+
     setOpenTabs((currentTabs) => ({
       ...currentTabs,
       [relativePath]: nextTab
@@ -4419,6 +4450,26 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="workspace">
+        {workspaceNotice ? (
+          <div
+            className={`workspace-notice workspace-notice--${workspaceNotice.kind}`}
+            role="alert"
+          >
+            <div className="workspace-notice__content">
+              <strong>{workspaceNotice.title}</strong>
+              <pre>{workspaceNotice.message}</pre>
+            </div>
+            <button
+              className="workspace-notice__dismiss"
+              onClick={() => {
+                setWorkspaceNotice(null);
+              }}
+              type="button"
+            >
+              閉じる
+            </button>
+          </div>
+        ) : null}
         <section className="workspace__layout" data-status={statusMessage}>
           <FlexLayout.Layout
             factory={editorFactory}

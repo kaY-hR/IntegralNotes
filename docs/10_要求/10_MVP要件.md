@@ -95,6 +95,10 @@
 - `itg-notes` block では `use:` または `run:` の簡易記法を canonical form とする
 - `run: relative/path.py:function` は内部で `plugin = "general-analysis"` とその callable block-type へ正規化する
 - `outputConfigs` や `out.*.dir/name/latest` のような旧 output 設定 form は持たない
+- Markdown note 保存時には、編集モードに関係なく note 全文を validate する
+- 同一 note 内の `itg-notes` block で `id` が重複する場合は保存 error とする
+- 同一 note 内の複数 `itg-notes` block が同じ実行済み output ID を `out:` に持つ場合は保存 error とする
+- block を text でコピーして使う場合は、コピー側の `id:` を削除し、実行済み output ID を `null` または新しい出力予定 path に戻す
 
 ## 6. Slot 契約
 
@@ -319,3 +323,10 @@
 - chat transcript には purpose / 承認・拒否・編集有無 / 実行 command / exit code / truncated output summary を残す
 - 実行後は成功/失敗/timeout/cancel に関係なく workspace sync 相当を走らせる
 - この機能は実行前確認と workspace 起点の実行を提供するものであり、Python script 内の任意 file access などを完全に sandbox するものではない
+- AI の Markdown commit tool は、挿入後の note 全文を保存時と同じ validator に通す
+- AI の Markdown commit tool は、Markdown source 上の挿入位置と現在の note Markdown から candidate Markdown を作り、validate error を tool result として AI に返す
+- renderer は AI Markdown 挿入の最終反映前にも、実際の editor transaction 後 Markdown を同じ validator に通す。ただしこれは最終防衛線であり、通常の validation error は AI tool result として返す
+- validate error がある場合、AI commit は note に反映せず、validation error を tool result として LLM に返す
+- AI の `writeWorkspaceFile` が `.md` file を保存する場合も同じ validator に通し、validate error がある場合は保存しない
+- AI が validation error を受け取ったまま成功 commit せず終了した場合、UI は通常の完了扱いにせず、popup を閉じずに会話履歴と tool trace を残す
+- Inline Action の terminal tool は、tool call された時点ではなく成功した時点で agent loop を停止する

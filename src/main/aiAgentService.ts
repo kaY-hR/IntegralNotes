@@ -4,7 +4,6 @@ import { createOpenAI } from "@ai-sdk/openai";
 import {
   ToolLoopAgent,
   createGateway,
-  hasToolCall,
   stepCountIs,
   tool,
   type LanguageModel,
@@ -30,6 +29,11 @@ import {
   type InlineActionReadScope
 } from "../shared/aiChat";
 import { normalizeAiSkillNameKey } from "../shared/aiChatSkills";
+import {
+  formatMarkdownValidationIssues,
+  validateMarkdownDocument,
+  type MarkdownValidationIssue
+} from "../shared/markdownValidation";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { getIntegralNotesGlobalSkillRootPaths } from "./pathTokens";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
@@ -131,6 +135,11 @@ export interface AiAgentWorkspaceToolPolicy {
 interface AiAgentReadAccess {
   canRead: (relativePath: string) => boolean;
   description: string;
+}
+
+interface MarkdownWriteValidationFailure {
+  issues: MarkdownValidationIssue[];
+  message: string;
 }
 
 interface AiProviderBuiltInToolInfo {
@@ -286,7 +295,10 @@ export class AiAgentService {
     };
     const stopWhen =
       terminalToolNames && terminalToolNames.length > 0
-        ? [stepCountIs(maxSteps), ...terminalToolNames.map((toolName) => hasToolCall(toolName))]
+        ? [
+            stepCountIs(maxSteps),
+            ...terminalToolNames.map((toolName) => hasSuccessfulToolCall(toolName))
+          ]
         : stepCountIs(maxSteps);
     const agent = new ToolLoopAgent({
       instructions: buildTaskInstructions(
@@ -1239,7 +1251,7 @@ function createPersistentWorkspaceTools(
   if (workspaceToolPolicy.canEditWorkspaceFiles) {
     tools.writeWorkspaceFile = tool({
       description:
-        "Persist UTF-8 text changes to a real workspace file. Use this for actual saves; bash/writeFile is preview-only.",
+        "Persist UTF-8 text changes to a real workspace file. Use this for actual saves; bash/writeFile is preview-only. Markdown files are validated before save; if validation fails, the file is not saved and the validation error is returned.",
       inputSchema: z.object({
         content: z.string(),
         createIfMissing: z.boolean().default(false),
@@ -1257,6 +1269,23 @@ function createPersistentWorkspaceTools(
 
         if (!existed && !createIfMissing) {
           throw new Error(`Target file does not exist: ${relativePath}`);
+        }
+
+        if (path.extname(relativePath).toLowerCase() === ".md") {
+          const validation = await validateWorkspaceMarkdownWrite(
+            content,
+            getIntegralWorkspaceService
+          );
+
+          if (validation) {
+            return {
+              path: relativePath,
+              saved: false,
+              validationIssues: validation.issues,
+              validationMessage: validation.message,
+              validationStatus: "error" as const
+            };
+          }
         }
 
         if (path.extname(relativePath).toLowerCase() === ".md" && existed) {
@@ -1307,6 +1336,39 @@ function createPersistentWorkspaceTools(
   }
 
   return tools;
+}
+
+function hasSuccessfulToolCall(toolName: string): (options: {
+  steps: ReadonlyArray<{
+    readonly toolCalls: ReadonlyArray<{ readonly toolCallId: string; readonly toolName: string }>;
+    readonly toolResults: ReadonlyArray<{
+      readonly output: unknown;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }>;
+  }>;
+}) => boolean {
+  return ({ steps }) => {
+    for (const step of steps) {
+      const resultsByCallId = new Map(
+        step.toolResults.map((result) => [result.toolCallId, result] as const)
+      );
+
+      for (const toolCall of step.toolCalls) {
+        const result = resultsByCallId.get(toolCall.toolCallId);
+
+        if (
+          toolCall.toolName === toolName &&
+          result &&
+          determineToolTraceStatus(toolCall.toolName, result.output) === "success"
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
 }
 
 function toModelMessage(message: AiChatMessage): ModelMessage | null {
@@ -1393,6 +1455,22 @@ function determineToolTraceStatus(
   toolName: string,
   output: unknown
 ): "error" | "success" {
+  if (
+    toolName === "writeWorkspaceFile" &&
+    isRecord(output) &&
+    output.validationStatus === "error"
+  ) {
+    return "error";
+  }
+
+  if (
+    toolName === "insertMarkdownAtCursor" &&
+    isRecord(output) &&
+    output.validationStatus === "error"
+  ) {
+    return "error";
+  }
+
   if (toolName === "runShellCommand" && isRecord(output)) {
     if (output.status === "approved") {
       return typeof output.exitCode === "number" && output.exitCode === 0 ? "success" : "error";
@@ -1572,6 +1650,14 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
   }
 
   if (toolName === "writeWorkspaceFile" && isRecord(output) && typeof output.path === "string") {
+    if (output.validationStatus === "error" && typeof output.validationMessage === "string") {
+      return JSON.stringify({
+        path: output.path,
+        validationMessage: output.validationMessage,
+        validationStatus: "error"
+      });
+    }
+
     const created =
       typeof output.created === "boolean" ? (output.created ? "created" : "updated") : "saved";
 
@@ -1590,6 +1676,18 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
         : "";
 
     return `${output.scriptPath}:${output.functionName}${summary}`;
+  }
+
+  if (
+    toolName === "insertMarkdownAtCursor" &&
+    isRecord(output) &&
+    output.validationStatus === "error" &&
+    typeof output.validationMessage === "string"
+  ) {
+    return JSON.stringify({
+      validationMessage: output.validationMessage,
+      validationStatus: "error"
+    });
   }
 
   if (
@@ -1815,6 +1913,29 @@ function buildFallbackAssistantText(
   }
 
   return lines.join("\n");
+}
+
+async function validateWorkspaceMarkdownWrite(
+  content: string,
+  getIntegralWorkspaceService?: () => IntegralWorkspaceService | null
+): Promise<MarkdownWriteValidationFailure | null> {
+  const integralWorkspaceService = getIntegralWorkspaceService?.() ?? null;
+  const assetCatalog = integralWorkspaceService
+    ? await integralWorkspaceService.listAssetCatalog()
+    : undefined;
+  const validation = validateMarkdownDocument(content, { assetCatalog });
+
+  if (validation.ok) {
+    return null;
+  }
+
+  return {
+    issues: validation.issues,
+    message: [
+      "Markdown validation に失敗したため、writeWorkspaceFile は保存しませんでした。",
+      formatMarkdownValidationIssues(validation.issues)
+    ].join("\n")
+  };
 }
 
 type ImageCropInput = z.infer<typeof IMAGE_CROP_INPUT_SCHEMA>;
