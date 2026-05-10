@@ -3,7 +3,7 @@
 ## 前提
 
 - plugin ID は `general-analysis`
-- block-type は `relative/path.py:function` を基本とし、MVP では `%LocalAppData%/.../path.py:function` 形式の external path も許可する
+- block-type は `relative/path.py:function` を基本とする
 - decorator `params` schema は Python literal の JSON Schema subset
 - 実行時の `params` は decorator schema に沿って正規化した note source の object
 - `inputs` は internal normalized form では `Record<string, managedDataId | null>`
@@ -12,7 +12,10 @@
 ## 1. discovery
 
 app は workspace 内の `.py` を走査し、decorator 付き関数を block 候補として収集する。
-MVP では user/global stock と vendor plugin の入口として、`%LocalAppData%/IntegralNotes/analysis-stock` と `%LocalAppData%/IntegralNotes/plugins` 配下の `.py` も同じ候補一覧へ混ぜる。
+
+global / package 由来 script は直接実行しない。`%LocalAppData%/IntegralNotes/global/scripts` や `%LocalAppData%/IntegralNotes/packages/*/scripts` は stock / template として扱い、実行時 source of truth は workspace 内の `.py` とする。
+
+package 由来 Python block は、package manifest の `exports.pythonBlocks` に載った callable だけを `>` popup の候補に出す。選択時に package stock から workspace `.packages/{packageId}/` へ `integral-package.json` と `scripts/` subtree を copy し、note には `.packages/{packageId}/scripts/foo.py:function` を挿入する。
 
 ### decorator 例
 
@@ -115,6 +118,18 @@ params: {}
 out:
   score: /Data/score_A1B.csv
   report: /Data/report_9Z0.html
+```
+
+package 由来 callable の場合:
+
+```itg-notes
+id: BLK-1F8E2D0A
+run: .packages/image-analysis-pack/scripts/segment_cells.py:main
+in:
+  image: null
+params: {}
+out:
+  overlay: /Data/overlay_A1B.png
 ```
 
 slot が `.idts` を要求する場合、authoring 時の `in:` には `.idts` manifest path を入れてよい。実行前の `out:` には `.idts` file path ではなく output folder path を入れる。
@@ -247,12 +262,12 @@ packaged app:
 
 - `process.resourcesPath/workspace-template/.integral-sdk/python/integral` を template source として保持し、workspace の `.integral-sdk/python/integral/` へ同期する
 
-external/global script と skill の扱いは `docs/30_設計/32_GlobalPwd解析スクリプトとSkill.md` を参照。
+external/global script と skill の扱いは `docs/30_設計/32_GlobalPwd解析スクリプトとSkill.md` と `docs/30_設計/55_Package管理.md` を参照。
 Electron から Python を呼ぶ仕組みの詳細は `docs/30_設計/35_ElectronからPythonを呼ぶ仕組み.md` を参照。
 
 ## 10. source of truth
 
 - source of truth は workspace 上の `.py` file である
-- app は `.py` や helper file を専用ディレクトリへ copy しない
+- package 由来 script は `.packages/{packageId}/scripts/` へ copy した workspace file を source of truth とする
 - rename / move の追従が必要なら、後から workspace path tracking を足す
 - user callable は `scripts/` など通常の workspace file として置き、`from integral import ...` は runner が hidden SDK import root を追加して解決する

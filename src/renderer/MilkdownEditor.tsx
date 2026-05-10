@@ -957,7 +957,7 @@ export function MilkdownEditor({
             suggestions[Math.min(analysisState.selectedIndex, suggestions.length - 1)];
 
           if (selectedSuggestion) {
-            insertIntegralBlock(selectedSuggestion);
+            void insertIntegralBlock(selectedSuggestion);
           }
         }
 
@@ -1952,12 +1952,32 @@ export function MilkdownEditor({
     setLinkCompletion(null);
   };
 
-  const insertIntegralBlock = (definition: IntegralBlockTypeDefinition): void => {
+  const insertIntegralBlock = async (definition: IntegralBlockTypeDefinition): Promise<void> => {
     const editor = editorRef.current;
     const completionState = analysisCompletionRef.current;
 
     if (!editor || !completionState) {
       return;
+    }
+
+    if (definition.pythonPackage && !definition.pythonPackage.imported) {
+      try {
+        const result = await window.integralNotes.importPackagePythonBlock({
+          blockType: definition.blockType
+        });
+
+        if (result.cancelled) {
+          return;
+        }
+
+        if (result.imported) {
+          const catalog = await window.integralNotes.getIntegralAssetCatalog();
+          onIntegralAssetCatalogChanged(catalog);
+        }
+      } catch (error) {
+        onWorkspaceLinkError(error instanceof Error ? error.message : String(error));
+        return;
+      }
     }
 
     const block = createInitialIntegralBlock(definition, {
@@ -2416,7 +2436,7 @@ export function MilkdownEditor({
                 key={`${definition.pluginId}:${definition.blockType}`}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  insertIntegralBlock(definition);
+                  void insertIntegralBlock(definition);
                 }}
                 type="button"
               >

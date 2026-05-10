@@ -5,7 +5,7 @@ import path from "node:path";
 import { PLUGIN_MANIFEST_FILENAME } from "./manifest.js";
 
 export const INTEGRAL_NOTES_PRODUCT_NAME = "IntegralNotes";
-export const INTEGRAL_NOTES_PLUGIN_DIRECTORY = "plugins";
+export const INTEGRAL_NOTES_PLUGIN_DIRECTORY = "runtime-plugins";
 
 export async function installLocalPlugin(options) {
   const pluginRootPath = path.resolve(options.pluginRootPath);
@@ -87,7 +87,7 @@ export function resolveIntegralPluginInstallRootPath(options = {}) {
     return path.resolve(envTargetRoot);
   }
 
-  return path.join(resolveIntegralNotesUserDataPath(options), INTEGRAL_NOTES_PLUGIN_DIRECTORY);
+  return path.join(resolveIntegralNotesLocalDataPath(options), INTEGRAL_NOTES_PLUGIN_DIRECTORY);
 }
 
 export function resolveIntegralNotesUserDataPath(options = {}) {
@@ -118,6 +118,37 @@ export function resolveIntegralNotesUserDataPath(options = {}) {
   const xdgConfigHome =
     readNonEmptyString(env.XDG_CONFIG_HOME) ?? path.join(homeDirectory, ".config");
   return path.join(xdgConfigHome, INTEGRAL_NOTES_PRODUCT_NAME);
+}
+
+export function resolveIntegralNotesLocalDataPath(options = {}) {
+  const explicitLocalDataPath = readNonEmptyString(options.localDataPath);
+  const envLocalDataPath = readNonEmptyString(options.env?.INTEGRALNOTES_LOCAL_DATA_PATH);
+
+  if (explicitLocalDataPath) {
+    return path.resolve(explicitLocalDataPath);
+  }
+
+  if (envLocalDataPath) {
+    return path.resolve(envLocalDataPath);
+  }
+
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const homeDirectory = options.homeDirectory ?? os.homedir();
+
+  if (platform === "win32") {
+    const localAppData =
+      readNonEmptyString(env.LOCALAPPDATA) ?? path.join(homeDirectory, "AppData", "Local");
+    return path.join(localAppData, INTEGRAL_NOTES_PRODUCT_NAME);
+  }
+
+  if (platform === "darwin") {
+    return path.join(homeDirectory, "Library", "Application Support", INTEGRAL_NOTES_PRODUCT_NAME);
+  }
+
+  const xdgDataHome =
+    readNonEmptyString(env.XDG_DATA_HOME) ?? path.join(homeDirectory, ".local", "share");
+  return path.join(xdgDataHome, INTEGRAL_NOTES_PRODUCT_NAME);
 }
 
 export function sanitizePluginDirectoryName(pluginId) {

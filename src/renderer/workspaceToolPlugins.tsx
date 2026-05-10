@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { IntegralAssetCatalog } from "../shared/integral";
 import type { WorkspaceEntry } from "../shared/workspace";
 import { AIChatPanel } from "./AIChatPanel";
+import { ExtensionsManagerView } from "./ExtensionsManagerView";
 import { ProcessChainViewer } from "./ProcessChainViewer";
 import { RelationGraphView } from "./RelationGraphView";
 
@@ -12,6 +13,9 @@ export interface WorkspaceToolPluginRenderContext {
   noteOverrides: Record<string, string>;
   onOpenWorkspaceFile: (relativePath: string) => void;
   onOpenWorkspaceTarget: (target: string) => void;
+  onPluginRuntimeChanged: (message: string) => Promise<void>;
+  onRefreshWorkspace: (message?: string) => Promise<void>;
+  onSetStatusMessage: (message: string) => void;
   selectedEntryPaths: string[];
   workspaceEntries: WorkspaceEntry[];
   workspaceRevision: number;
@@ -67,6 +71,15 @@ function RelationGraphToolIcon(): JSX.Element {
   );
 }
 
+function ExtensionsToolIcon(): JSX.Element {
+  return (
+    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
+      <path d="M6.2 1.5h3.6v2.1h1.55a1.65 1.65 0 0 1 1.65 1.65V6.8h1.5v2.4H13v1.55a1.65 1.65 0 0 1-1.65 1.65H9.8v2.1H6.2v-2.1H4.65A1.65 1.65 0 0 1 3 10.75V9.2H1.5V6.8H3V5.25A1.65 1.65 0 0 1 4.65 3.6H6.2z" />
+      <circle cx="8" cy="8" r="1.45" />
+    </svg>
+  );
+}
+
 const processChainToolPlugin: WorkspaceToolPluginDefinition = {
   activityIcon: <ProcessChainToolIcon />,
   description: "現在の note / file を起点に、関連する block と file の chain を辿って表示します。",
@@ -94,8 +107,18 @@ const relationGraphToolPlugin: WorkspaceToolPluginDefinition = {
   title: "Relation Graph"
 };
 
+const extensionsToolPlugin: WorkspaceToolPluginDefinition = {
+  activityIcon: <ExtensionsToolIcon />,
+  description: "workspace と Global の skill / script / runtime / package を管理します。",
+  id: "builtin:extensions",
+  render: (context) => <ExtensionsManagerView {...context} />,
+  tabTitle: "Extensions",
+  title: "Extensions"
+};
+
 export const workspaceToolPlugins: readonly WorkspaceToolPluginDefinition[] = [
   aiChatToolPlugin,
+  extensionsToolPlugin,
   relationGraphToolPlugin,
   processChainToolPlugin
 ];

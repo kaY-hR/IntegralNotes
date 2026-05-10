@@ -20,7 +20,8 @@ export interface PluginRendererModel {
     displayName: string;
     id: string;
     namespace: string;
-    origin: "external";
+    origin: "external" | "package";
+    packageId: string | null;
     version: string;
   };
 }
@@ -42,7 +43,8 @@ export interface PluginSidebarViewRendererModel {
     displayName: string;
     id: string;
     namespace: string;
-    origin: "external";
+    origin: "external" | "package";
+    packageId: string | null;
     version: string;
   };
   sidebarView: {

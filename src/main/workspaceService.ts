@@ -124,6 +124,7 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const SEARCH_EXCLUDED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".packages",
   ".inline-action",
   ".next",
   ".turbo",
@@ -132,7 +133,7 @@ const SEARCH_EXCLUDED_DIRECTORY_NAMES = new Set([
   "node_modules",
   "out"
 ]);
-const SNAPSHOT_HIDDEN_DIRECTORY_NAMES = new Set([".git"]);
+const SNAPSHOT_ALWAYS_EXCLUDED_DIRECTORY_NAMES = new Set([".git"]);
 const DEFAULT_WORKSPACE_SEARCH_MAX_RESULTS = 400;
 
 interface ManagedDataNoteWritePlan {
@@ -1054,7 +1055,7 @@ export class WorkspaceService {
     const directoryEntries = await fs.readdir(absolutePath, { withFileTypes: true });
 
     const supportedEntries = directoryEntries
-      .filter((entry) => !SNAPSHOT_HIDDEN_DIRECTORY_NAMES.has(entry.name))
+      .filter((entry) => !SNAPSHOT_ALWAYS_EXCLUDED_DIRECTORY_NAMES.has(entry.name))
       .sort((left, right) => {
         if (left.isDirectory() !== right.isDirectory()) {
           return left.isDirectory() ? -1 : 1;

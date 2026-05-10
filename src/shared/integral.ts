@@ -67,6 +67,12 @@ export interface IntegralBlockTypeDefinition {
   pluginDescription: string;
   pluginDisplayName: string;
   pluginId: string;
+  pythonPackage?: {
+    imported: boolean;
+    packageId: string;
+    packageVersion: string;
+    sourcePackagePath: string;
+  };
   source: "builtin" | "external-plugin" | "python-callable";
   title: string;
 }

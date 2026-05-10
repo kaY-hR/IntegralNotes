@@ -211,7 +211,8 @@
 - editor 上で `>` を入力すると Python callable 候補 popup を表示できる
 - 候補一覧では `displayName` を主表示し、`relative/path.py:function` を補助表示する
 - 候補選択時には `run:` を持つ YAML `itg-notes` block を note へ挿入する
-- `.py` file や補助 file を app 側の専用ディレクトリへ copy しない
+- package 由来 callable を選択した場合は、package の `integral-package.json` と `scripts/` subtree を workspace の `.packages/{packageId}/` へ copy してから、`.packages/{packageId}/scripts/foo.py:function` を note へ挿入する
+- `.packages` は system-managed path として file tree / managed file tracking の通常表示・自動登録対象から除外する
 - MVP の scan 契約は `@integral_block(...)` の直後に `def ...(` が続く形とする
 - app は decorator の `params` schema から block 上の param 編集フォームを生成する
 - param 編集フォームは YAML の `params:` を更新する補助 UI であり、source of truth は正規化済みの `itg-notes` YAML と decorator schema の組み合わせとする

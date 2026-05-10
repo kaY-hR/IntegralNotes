@@ -36,6 +36,7 @@ import {
 } from "../shared/markdownValidation";
 import type { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { getIntegralNotesGlobalSkillRootPaths } from "./pathTokens";
+import { listExportedPackageSkillRootPaths } from "./packageService";
 import { WorkspaceVisualRenderService } from "./workspaceVisualRenderService";
 import { WorkspaceService } from "./workspaceService";
 
@@ -762,16 +763,23 @@ async function directoryExists(targetPath: string): Promise<boolean> {
 }
 
 async function prepareAgentSkillsDirectory(workspaceRootPath: string): Promise<string | null> {
+  const packageSkillRootPaths = await listExportedPackageSkillRootPaths();
   const sourceRoots = [
     path.join(workspaceRootPath, ".codex", "skills"),
     path.join(workspaceRootPath, "Notes", ".codex", "skills"),
-    ...getIntegralNotesGlobalSkillRootPaths()
+    ...getIntegralNotesGlobalSkillRootPaths(),
+    ...packageSkillRootPaths
   ];
-  const existingRoots: string[] = [];
+  const existingRoots: Array<{ rootPath: string; skillDirectoryName?: string }> = [];
 
   for (const sourceRoot of sourceRoots) {
     if (await directoryExists(sourceRoot)) {
-      existingRoots.push(sourceRoot);
+      const isPackageSkill = packageSkillRootPaths.includes(sourceRoot);
+      existingRoots.push(
+        isPackageSkill
+          ? { rootPath: path.dirname(sourceRoot), skillDirectoryName: path.basename(sourceRoot) }
+          : { rootPath: sourceRoot }
+      );
     }
   }
 
@@ -791,11 +799,15 @@ async function prepareAgentSkillsDirectory(workspaceRootPath: string): Promise<s
   await fs.rm(targetRoot, { force: true, recursive: true });
   await fs.mkdir(targetRoot, { recursive: true });
 
-  for (const sourceRoot of existingRoots) {
+  for (const { rootPath: sourceRoot, skillDirectoryName } of existingRoots) {
     const entries = await fs.readdir(sourceRoot, { withFileTypes: true }).catch(() => []);
 
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "ja"))) {
       if (!entry.isDirectory()) {
+        continue;
+      }
+
+      if (skillDirectoryName && entry.name !== skillDirectoryName) {
         continue;
       }
 

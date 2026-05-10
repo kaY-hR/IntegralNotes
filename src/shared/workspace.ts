@@ -3,6 +3,15 @@ import type {
   ResolvedPluginViewer
 } from "./plugins";
 import type {
+  ExtensionGlobalItemRequest,
+  ExtensionManagementSnapshot,
+  ExtensionMutationResult,
+  ExtensionOpenItemRequest,
+  ExtensionPackageRequest,
+  ExtensionRuntimeRequest,
+  ExtensionWorkspaceItemRequest
+} from "./extensions";
+import type {
   AppSettings,
   SaveAppSettingsRequest
 } from "./appSettings";
@@ -291,6 +300,16 @@ export interface UninstallPluginResult {
   removed: boolean;
 }
 
+export interface ImportPackagePythonBlockRequest {
+  blockType: string;
+}
+
+export interface ImportPackagePythonBlockResult {
+  cancelled: boolean;
+  imported: boolean;
+  packageId: string | null;
+}
+
 export interface SelectWorkspaceFileRequest {
   extensions?: string[];
   initialRelativePath?: string | null;
@@ -358,6 +377,38 @@ export interface IntegralNotesApi {
   getPluginInstallRootPath: () => Promise<string>;
   listInstalledPlugins: () => Promise<InstalledPluginDefinition[]>;
   installPluginFromZip: () => Promise<InstallPluginFromZipResult | null>;
+  getExtensionManagementSnapshot: () => Promise<ExtensionManagementSnapshot>;
+  openExtensionItem: (request: ExtensionOpenItemRequest) => Promise<void>;
+  installExtensionPackage: () => Promise<ExtensionMutationResult | null>;
+  importGlobalScriptToWorkspace: (
+    request: ExtensionGlobalItemRequest
+  ) => Promise<ExtensionMutationResult>;
+  stockWorkspaceScriptOnGlobal: (
+    request: ExtensionWorkspaceItemRequest
+  ) => Promise<ExtensionMutationResult>;
+  stockWorkspaceSkillOnGlobal: (
+    request: ExtensionWorkspaceItemRequest
+  ) => Promise<ExtensionMutationResult>;
+  deleteWorkspaceExtensionItem: (
+    request: ExtensionWorkspaceItemRequest
+  ) => Promise<ExtensionMutationResult>;
+  deleteGlobalScript: (
+    request: ExtensionGlobalItemRequest
+  ) => Promise<ExtensionMutationResult>;
+  deleteGlobalSkill: (
+    request: ExtensionGlobalItemRequest
+  ) => Promise<ExtensionMutationResult>;
+  importExtensionPackage: (request: ExtensionPackageRequest) => Promise<ExtensionMutationResult>;
+  removeExtensionPackageImport: (
+    request: ExtensionPackageRequest
+  ) => Promise<ExtensionMutationResult>;
+  uninstallExtensionPackage: (request: ExtensionPackageRequest) => Promise<ExtensionMutationResult>;
+  uninstallStandaloneRuntimePlugin: (
+    request: ExtensionRuntimeRequest
+  ) => Promise<ExtensionMutationResult>;
+  importPackagePythonBlock: (
+    request: ImportPackagePythonBlockRequest
+  ) => Promise<ImportPackagePythonBlockResult>;
   loadPluginRendererDocument: (pluginId: string) => Promise<string>;
   loadPluginSidebarViewDocument: (pluginId: string, sidebarViewId: string) => Promise<string>;
   loadPluginViewerDocument: (pluginId: string, viewerId: string) => Promise<string>;

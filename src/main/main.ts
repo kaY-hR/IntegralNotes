@@ -41,12 +41,20 @@ import type {
   RelationGraphPathDistanceRequest
 } from "../shared/relationGraph";
 import type {
+  ExtensionGlobalItemRequest,
+  ExtensionOpenItemRequest,
+  ExtensionPackageRequest,
+  ExtensionRuntimeRequest,
+  ExtensionWorkspaceItemRequest
+} from "../shared/extensions";
+import type {
   CopyEntriesRequest,
   CopyExternalEntriesRequest,
   CreateEntryRequest,
   DeleteEntriesRequest,
   DeleteEntryRequest,
   ExecuteIntegralActionRequest,
+  ImportPackagePythonBlockRequest,
   MoveEntriesRequest,
   RenameEntryRequest,
   RendererLogRequest,
@@ -67,10 +75,16 @@ import { AppSettingsService } from "./appSettingsService";
 import { AiAgentService } from "./aiAgentService";
 import { AiChatService } from "./aiChatService";
 import { AiHostCommandService } from "./aiHostCommandService";
+import { ExtensionManagementService } from "./extensionManagementService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
 import {
-  getIntegralLocalDataRootPath,
+  findPackagePythonBlockExport,
+  importPackageScriptsForPythonBlock
+} from "./packageService";
+import {
+  getIntegralPackageRootPath,
+  getIntegralGlobalRootPath,
   shortenPathWithTokens
 } from "./pathTokens";
 import { RelationGraphService } from "./relationGraphService";
@@ -568,6 +582,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 let pluginRegistry: PluginRegistry | null = null;
+let extensionManagementService: ExtensionManagementService | null = null;
 let integralWorkspaceService: IntegralWorkspaceService | null = null;
 let relationGraphService: RelationGraphService | null = null;
 let closingAfterUnsavedConfirmation = false;
@@ -1025,6 +1040,150 @@ function registerIpcHandlers(): void {
 
     return getPluginRegistry().installPluginFromArchive(result.filePaths[0]);
   });
+  ipcMain.handle("extensions:getManagementSnapshot", async () =>
+    getExtensionManagementService().getSnapshot()
+  );
+  ipcMain.handle(
+    "extensions:openItem",
+    async (_event, request: ExtensionOpenItemRequest) =>
+      getExtensionManagementService().openItem(request)
+  );
+  ipcMain.handle("extensions:installPackage", async () =>
+    getExtensionManagementService().installPackageFromDialog()
+  );
+  ipcMain.handle(
+    "extensions:importGlobalScript",
+    async (_event, request: ExtensionGlobalItemRequest) =>
+      getExtensionManagementService().importGlobalScriptToWorkspace(request)
+  );
+  ipcMain.handle(
+    "extensions:stockWorkspaceScript",
+    async (_event, request: ExtensionWorkspaceItemRequest) =>
+      getExtensionManagementService().stockWorkspaceScriptOnGlobal(request)
+  );
+  ipcMain.handle(
+    "extensions:stockWorkspaceSkill",
+    async (_event, request: ExtensionWorkspaceItemRequest) =>
+      getExtensionManagementService().stockWorkspaceSkillOnGlobal(request)
+  );
+  ipcMain.handle(
+    "extensions:deleteWorkspaceItem",
+    async (_event, request: ExtensionWorkspaceItemRequest) =>
+      getExtensionManagementService().deleteWorkspaceExtensionItem(request)
+  );
+  ipcMain.handle(
+    "extensions:deleteGlobalScript",
+    async (_event, request: ExtensionGlobalItemRequest) =>
+      getExtensionManagementService().deleteGlobalScript(request)
+  );
+  ipcMain.handle(
+    "extensions:deleteGlobalSkill",
+    async (_event, request: ExtensionGlobalItemRequest) =>
+      getExtensionManagementService().deleteGlobalSkill(request)
+  );
+  ipcMain.handle(
+    "extensions:importPackage",
+    async (_event, request: ExtensionPackageRequest) =>
+      getExtensionManagementService().importPackage(request)
+  );
+  ipcMain.handle(
+    "extensions:removePackageImport",
+    async (_event, request: ExtensionPackageRequest) =>
+      getExtensionManagementService().removePackageImport(request)
+  );
+  ipcMain.handle(
+    "extensions:uninstallPackage",
+    async (_event, request: ExtensionPackageRequest) =>
+      getExtensionManagementService().uninstallPackage(request)
+  );
+  ipcMain.handle(
+    "extensions:uninstallStandaloneRuntime",
+    async (_event, request: ExtensionRuntimeRequest) =>
+      getExtensionManagementService().uninstallStandaloneRuntimePlugin(request)
+  );
+  ipcMain.handle(
+    "packages:importPythonBlock",
+    async (_event, request: ImportPackagePythonBlockRequest) => {
+      const workspaceRootPath = workspaceService.currentRootPath;
+
+      if (!workspaceRootPath) {
+        throw new Error("workspace folder is not open.");
+      }
+
+      const blockType = typeof request?.blockType === "string" ? request.blockType.trim() : "";
+
+      if (blockType.length === 0) {
+        throw new Error("blockType is required.");
+      }
+
+      const candidate = await findPackagePythonBlockExport(workspaceRootPath, blockType);
+
+      if (!candidate) {
+        return {
+          cancelled: false,
+          imported: false,
+          packageId: null
+        };
+      }
+
+      if (path.resolve(candidate.packageRootPath) === path.resolve(candidate.importedRootPath)) {
+        return {
+          cancelled: false,
+          imported: false,
+          packageId: candidate.manifest.id
+        };
+      }
+
+      const existingImport = await fs.stat(candidate.importedRootPath).catch(() => null);
+      let overwrite = false;
+
+      if (existingImport) {
+        const result = mainWindow
+          ? await dialog.showMessageBox(mainWindow, {
+              buttons: ["キャンセル", "上書き"],
+              cancelId: 0,
+              defaultId: 0,
+              detail:
+                `${candidate.manifest.displayName} (${candidate.manifest.id})\n\n` +
+                "workspace の既存 package import を上書きします。",
+              message: "Package scripts/shared を再 import しますか？",
+              noLink: true,
+              type: "question"
+            })
+          : await dialog.showMessageBox({
+              buttons: ["キャンセル", "上書き"],
+              cancelId: 0,
+              defaultId: 0,
+              detail:
+                `${candidate.manifest.displayName} (${candidate.manifest.id})\n\n` +
+                "workspace の既存 package import を上書きします。",
+              message: "Package scripts/shared を再 import しますか？",
+              noLink: true,
+              type: "question"
+            });
+
+        if (result.response !== 1) {
+          return {
+            cancelled: true,
+            imported: false,
+            packageId: candidate.manifest.id
+          };
+        }
+
+        overwrite = true;
+      }
+
+      const imported = await importPackageScriptsForPythonBlock(workspaceRootPath, blockType, {
+        overwrite
+      });
+
+      return {
+        cancelled: false,
+        imported: true,
+        packageId: imported.packageId
+      };
+    }
+  );
   ipcMain.handle("plugins:loadRendererDocument", async (_event, pluginId: string) =>
     getPluginRegistry().loadRendererDocument(pluginId)
   );
@@ -1089,7 +1248,7 @@ function registerIpcHandlers(): void {
     workspaceService.copyExternalEntries(request)
   );
   ipcMain.handle("workspace:addPythonScriptToUserStock", async (_event, relativePath: string) => {
-    const rootPath = getIntegralLocalDataRootPath();
+    const rootPath = getIntegralGlobalRootPath();
 
     if (!rootPath) {
       throw new Error("%LocalAppData% を解決できません。");
@@ -1109,7 +1268,7 @@ function registerIpcHandlers(): void {
       throw new Error("ユーザーストックに追加できるのは file だけです。");
     }
 
-    const stockDirectoryPath = path.join(rootPath, "analysis-stock");
+    const stockDirectoryPath = path.join(rootPath, "scripts");
     await fs.mkdir(stockDirectoryPath, { recursive: true });
     const destinationPath = await createUniqueFilePath(
       stockDirectoryPath,
@@ -1236,6 +1395,14 @@ function getPluginRegistry(): PluginRegistry {
   return pluginRegistry;
 }
 
+function getExtensionManagementService(): ExtensionManagementService {
+  if (extensionManagementService === null) {
+    throw new Error("extension management service is not ready.");
+  }
+
+  return extensionManagementService;
+}
+
 function getIntegralWorkspaceService(): IntegralWorkspaceService {
   if (integralWorkspaceService === null) {
     throw new Error("integral workspace service is not ready.");
@@ -1270,7 +1437,13 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     await workspaceService.initialize();
     pluginRegistry = new PluginRegistry({
-      installRootPath: resolveInstalledPluginRootPath(app.getPath("userData"))
+      installRootPath: resolveInstalledPluginRootPath(app.getPath("userData")),
+      packageRootPath: getIntegralPackageRootPath()
+    });
+    extensionManagementService = new ExtensionManagementService({
+      getMainWindow: () => mainWindow,
+      pluginRegistry,
+      workspaceService
     });
     workspaceService.setPluginRegistry(pluginRegistry);
     integralWorkspaceService = new IntegralWorkspaceService(

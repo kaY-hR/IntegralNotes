@@ -102,7 +102,7 @@ Do not use `.idts` output helpers for `.icv`. The runtime passes a file path for
 the `.icv` output, so the block should create the parent directory and write JSON
 to that file.
 
-Use `sdk/integral_image_compare.py` when useful:
+Use package `shared/integral_image_compare.py` when useful:
 
 ```python
 from integral_image_compare import make_layer, write_manifest

@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILL_ROOT / "sdk"))
+PACKAGE_SHARED_ROOT = SKILL_ROOT.parents[1] / "shared"
+sys.path.insert(0, str(PACKAGE_SHARED_ROOT))
 
 from integral_image_compare import make_layer, write_manifest  # noqa: E402
 

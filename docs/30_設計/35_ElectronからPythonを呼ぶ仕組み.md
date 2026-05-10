@@ -121,10 +121,12 @@ runner の責務:
 
 1. `sdkImportRoot` を受け取る
 2. `sdkImportRoot` を `sys.path` の先頭へ追加する
-3. `analysis-args.json` を読む
-4. target script を file path から import する
-5. target function を取得する
-6. `inputs`, `outputs`, `params` keyword arguments で呼び出す
+3. target script が `.packages/<packageId>/scripts` 配下なら `.packages/<packageId>/shared` を `sys.path` へ追加する
+4. target script directory を `sys.path` へ追加する
+5. `analysis-args.json` を読む
+6. target script を file path から import する
+7. target function を取得する
+8. `inputs`, `outputs`, `params` keyword arguments で呼び出す
 
 つまり Electron が Python を「認識する」というより、Electron main process が:
 

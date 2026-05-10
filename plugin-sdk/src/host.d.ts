@@ -10,7 +10,8 @@ export interface PluginHostActionContext {
     displayName: string;
     id: string;
     namespace: string;
-    origin: "external";
+    origin: "external" | "package";
+    packageId: string | null;
     sourcePath: string | null;
     version: string;
   };
