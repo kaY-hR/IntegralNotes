@@ -41,6 +41,13 @@ import type {
   RelationGraphPathDistanceRequest
 } from "../shared/relationGraph";
 import type {
+  ExtensionGlobalItemRequest,
+  ExtensionOpenItemRequest,
+  ExtensionPackageRequest,
+  ExtensionRuntimeRequest,
+  ExtensionWorkspaceItemRequest
+} from "../shared/extensions";
+import type {
   CopyEntriesRequest,
   CopyExternalEntriesRequest,
   CreateEntryRequest,
@@ -68,6 +75,7 @@ import { AppSettingsService } from "./appSettingsService";
 import { AiAgentService } from "./aiAgentService";
 import { AiChatService } from "./aiChatService";
 import { AiHostCommandService } from "./aiHostCommandService";
+import { ExtensionManagementService } from "./extensionManagementService";
 import { IntegralWorkspaceService } from "./integralWorkspaceService";
 import { initializeNetworkProxyFromEnvironment } from "./networkProxy";
 import {
@@ -574,6 +582,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let ipcRegistered = false;
 let pluginRegistry: PluginRegistry | null = null;
+let extensionManagementService: ExtensionManagementService | null = null;
 let integralWorkspaceService: IntegralWorkspaceService | null = null;
 let relationGraphService: RelationGraphService | null = null;
 let closingAfterUnsavedConfirmation = false;
@@ -1031,6 +1040,67 @@ function registerIpcHandlers(): void {
 
     return getPluginRegistry().installPluginFromArchive(result.filePaths[0]);
   });
+  ipcMain.handle("extensions:getManagementSnapshot", async () =>
+    getExtensionManagementService().getSnapshot()
+  );
+  ipcMain.handle(
+    "extensions:openItem",
+    async (_event, request: ExtensionOpenItemRequest) =>
+      getExtensionManagementService().openItem(request)
+  );
+  ipcMain.handle("extensions:installPackage", async () =>
+    getExtensionManagementService().installPackageFromDialog()
+  );
+  ipcMain.handle(
+    "extensions:importGlobalScript",
+    async (_event, request: ExtensionGlobalItemRequest) =>
+      getExtensionManagementService().importGlobalScriptToWorkspace(request)
+  );
+  ipcMain.handle(
+    "extensions:stockWorkspaceScript",
+    async (_event, request: ExtensionWorkspaceItemRequest) =>
+      getExtensionManagementService().stockWorkspaceScriptOnGlobal(request)
+  );
+  ipcMain.handle(
+    "extensions:stockWorkspaceSkill",
+    async (_event, request: ExtensionWorkspaceItemRequest) =>
+      getExtensionManagementService().stockWorkspaceSkillOnGlobal(request)
+  );
+  ipcMain.handle(
+    "extensions:deleteWorkspaceItem",
+    async (_event, request: ExtensionWorkspaceItemRequest) =>
+      getExtensionManagementService().deleteWorkspaceExtensionItem(request)
+  );
+  ipcMain.handle(
+    "extensions:deleteGlobalScript",
+    async (_event, request: ExtensionGlobalItemRequest) =>
+      getExtensionManagementService().deleteGlobalScript(request)
+  );
+  ipcMain.handle(
+    "extensions:deleteGlobalSkill",
+    async (_event, request: ExtensionGlobalItemRequest) =>
+      getExtensionManagementService().deleteGlobalSkill(request)
+  );
+  ipcMain.handle(
+    "extensions:importPackage",
+    async (_event, request: ExtensionPackageRequest) =>
+      getExtensionManagementService().importPackage(request)
+  );
+  ipcMain.handle(
+    "extensions:removePackageImport",
+    async (_event, request: ExtensionPackageRequest) =>
+      getExtensionManagementService().removePackageImport(request)
+  );
+  ipcMain.handle(
+    "extensions:uninstallPackage",
+    async (_event, request: ExtensionPackageRequest) =>
+      getExtensionManagementService().uninstallPackage(request)
+  );
+  ipcMain.handle(
+    "extensions:uninstallStandaloneRuntime",
+    async (_event, request: ExtensionRuntimeRequest) =>
+      getExtensionManagementService().uninstallStandaloneRuntimePlugin(request)
+  );
   ipcMain.handle(
     "packages:importPythonBlock",
     async (_event, request: ImportPackagePythonBlockRequest) => {
@@ -1325,6 +1395,14 @@ function getPluginRegistry(): PluginRegistry {
   return pluginRegistry;
 }
 
+function getExtensionManagementService(): ExtensionManagementService {
+  if (extensionManagementService === null) {
+    throw new Error("extension management service is not ready.");
+  }
+
+  return extensionManagementService;
+}
+
 function getIntegralWorkspaceService(): IntegralWorkspaceService {
   if (integralWorkspaceService === null) {
     throw new Error("integral workspace service is not ready.");
@@ -1361,6 +1439,11 @@ if (!hasSingleInstanceLock) {
     pluginRegistry = new PluginRegistry({
       installRootPath: resolveInstalledPluginRootPath(app.getPath("userData")),
       packageRootPath: getIntegralPackageRootPath()
+    });
+    extensionManagementService = new ExtensionManagementService({
+      getMainWindow: () => mainWindow,
+      pluginRegistry,
+      workspaceService
     });
     workspaceService.setPluginRegistry(pluginRegistry);
     integralWorkspaceService = new IntegralWorkspaceService(

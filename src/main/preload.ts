@@ -66,6 +66,26 @@ const api: IntegralNotesApi = {
   getPluginInstallRootPath: () => ipcRenderer.invoke("plugins:getInstallRootPath"),
   listInstalledPlugins: () => ipcRenderer.invoke("plugins:listInstalled"),
   installPluginFromZip: () => ipcRenderer.invoke("plugins:installFromZip"),
+  getExtensionManagementSnapshot: () => ipcRenderer.invoke("extensions:getManagementSnapshot"),
+  openExtensionItem: (request) => ipcRenderer.invoke("extensions:openItem", request),
+  installExtensionPackage: () => ipcRenderer.invoke("extensions:installPackage"),
+  importGlobalScriptToWorkspace: (request) =>
+    ipcRenderer.invoke("extensions:importGlobalScript", request),
+  stockWorkspaceScriptOnGlobal: (request) =>
+    ipcRenderer.invoke("extensions:stockWorkspaceScript", request),
+  stockWorkspaceSkillOnGlobal: (request) =>
+    ipcRenderer.invoke("extensions:stockWorkspaceSkill", request),
+  deleteWorkspaceExtensionItem: (request) =>
+    ipcRenderer.invoke("extensions:deleteWorkspaceItem", request),
+  deleteGlobalScript: (request) => ipcRenderer.invoke("extensions:deleteGlobalScript", request),
+  deleteGlobalSkill: (request) => ipcRenderer.invoke("extensions:deleteGlobalSkill", request),
+  importExtensionPackage: (request) => ipcRenderer.invoke("extensions:importPackage", request),
+  removeExtensionPackageImport: (request) =>
+    ipcRenderer.invoke("extensions:removePackageImport", request),
+  uninstallExtensionPackage: (request) =>
+    ipcRenderer.invoke("extensions:uninstallPackage", request),
+  uninstallStandaloneRuntimePlugin: (request) =>
+    ipcRenderer.invoke("extensions:uninstallStandaloneRuntime", request),
   importPackagePythonBlock: (request) => ipcRenderer.invoke("packages:importPythonBlock", request),
   loadPluginRendererDocument: (pluginId) => ipcRenderer.invoke("plugins:loadRendererDocument", pluginId),
   loadPluginSidebarViewDocument: (pluginId, sidebarViewId) =>

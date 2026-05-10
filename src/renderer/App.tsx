@@ -32,7 +32,6 @@ import type {
   NoteDocument,
   RenameEntryResult,
   SaveClipboardImageResult,
-  UninstallPluginResult,
   WorkspaceEntry,
   WorkspaceEntryKind,
   WorkspaceFileDocument,
@@ -63,7 +62,6 @@ import { MilkdownEditor } from "./MilkdownEditor";
 import { findWorkspaceToolPlugin, workspaceToolPlugins } from "./workspaceToolPlugins";
 import { RawMarkdownEditor } from "./RawMarkdownEditor";
 import { SearchSidebarView, type SearchSidebarState } from "./SearchSidebarView";
-import { SidebarPluginManagerView } from "./SidebarPluginManagerView";
 import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import {
@@ -162,7 +160,6 @@ interface OpenWorkspaceFileOptions {
 const MAIN_TABSET_ID = "editor-main";
 const BUILTIN_EXPLORER_SIDEBAR_VIEW_ID = "builtin:explorer";
 const BUILTIN_SEARCH_SIDEBAR_VIEW_ID = "builtin:search";
-const BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID = "builtin:plugins";
 const WORKSPACE_TOOL_TAB_ID_PREFIX = "workspace-tool::";
 const NEW_FILE_ICON_URL = new URL("./resources/ファイル追加.png", import.meta.url).href;
 const NEW_FOLDER_ICON_URL = new URL("./resources/フォルダアイコン15.png", import.meta.url).href;
@@ -213,15 +210,6 @@ function ExplorerSidebarIcon(): JSX.Element {
     <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
       <path d="M1.5 3.25h4.1l1.1 1.35h7.8v7.9H1.5z" />
       <path d="M1.5 4.6h13v7.9H1.5z" />
-    </svg>
-  );
-}
-
-function PluginSidebarIcon(): JSX.Element {
-  return (
-    <svg aria-hidden="true" className="activity-bar__icon-svg" viewBox="0 0 16 16">
-      <path d="M6.2 1.5h3.6v2.1h1.55a1.65 1.65 0 0 1 1.65 1.65V6.8h1.5v2.4H13v1.55a1.65 1.65 0 0 1-1.65 1.65H9.8v2.1H6.2v-2.1H4.65A1.65 1.65 0 0 1 3 10.75V9.2H1.5V6.8H3V5.25A1.65 1.65 0 0 1 4.65 3.6H6.2z" />
-      <circle cx="8" cy="8" r="1.45" />
     </svg>
   );
 }
@@ -1162,7 +1150,6 @@ export function App(): JSX.Element {
   const [workspaceSearchPending, setWorkspaceSearchPending] = useState(false);
   const [workspaceReplacePending, setWorkspaceReplacePending] = useState(false);
   const [workspaceSearchError, setWorkspaceSearchError] = useState<string | null>(null);
-  const [pluginDialogPendingAction, setPluginDialogPendingAction] = useState<string | null>(null);
   const [dataRegistrationDialogOpen, setDataRegistrationDialogOpen] = useState(false);
   const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const [aiSettingsDialogOpen, setAiSettingsDialogOpen] = useState(false);
@@ -1171,7 +1158,6 @@ export function App(): JSX.Element {
   const [appSettingsPending, setAppSettingsPending] = useState(false);
   const [hostCommandDialog, setHostCommandDialog] = useState<HostCommandDialogState | null>(null);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPluginDefinition[]>([]);
-  const [pluginInstallRootPath, setPluginInstallRootPath] = useState("");
   const [pluginCatalogRevision, setPluginCatalogRevision] = useState(0);
   const [model] = useState(() => createLayoutModel());
   const openTabsRef = useRef(openTabs);
@@ -1847,13 +1833,9 @@ export function App(): JSX.Element {
 
   const refreshInstalledPluginState = async (nextStatusMessage?: string): Promise<void> => {
     try {
-      const [plugins, installRootPath] = await Promise.all([
-        window.integralNotes.listInstalledPlugins(),
-        window.integralNotes.getPluginInstallRootPath()
-      ]);
+      const plugins = await window.integralNotes.listInstalledPlugins();
 
       setInstalledPlugins(plugins);
-      setPluginInstallRootPath(installRootPath);
 
       if (nextStatusMessage) {
         setStatusMessage(nextStatusMessage);
@@ -1880,9 +1862,8 @@ export function App(): JSX.Element {
     setActiveSidebarViewId(viewId);
   };
 
-  const openPluginManager = (): void => {
-    selectSidebarView(BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID);
-    void refreshInstalledPluginState();
+  const openExtensionsManager = (): void => {
+    openWorkspaceToolPlugin("builtin:extensions");
   };
 
   const openWorkspaceToolPlugin = (toolId: string): void => {
@@ -2073,54 +2054,6 @@ export function App(): JSX.Element {
       await refreshWorkspace(`${result.managedFiles.length} 件のフォルダを登録しました。`);
     } catch (error) {
       setStatusMessage(toErrorMessage(error));
-    }
-  };
-
-  const installPluginFromZip = async (): Promise<void> => {
-    setPluginDialogPendingAction("install");
-
-    try {
-      const result = await window.integralNotes.installPluginFromZip();
-
-      if (!result) {
-        setStatusMessage("plugin zip の選択をキャンセルしました。");
-        return;
-      }
-
-      await synchronizePluginRuntime(
-        `${result.plugin.displayName} ${result.plugin.version} をインストールしました`
-      );
-    } catch (error) {
-      setStatusMessage(toErrorMessage(error));
-    } finally {
-      setPluginDialogPendingAction(null);
-    }
-  };
-
-  const refreshPluginsFromDialog = async (): Promise<void> => {
-    setPluginDialogPendingAction("refresh");
-
-    try {
-      await synchronizePluginRuntime("plugin 一覧を更新しました。");
-    } finally {
-      setPluginDialogPendingAction(null);
-    }
-  };
-
-  const uninstallPlugin = async (pluginId: string): Promise<void> => {
-    setPluginDialogPendingAction(`uninstall:${pluginId}`);
-
-    try {
-      const result: UninstallPluginResult = await window.integralNotes.uninstallPlugin(pluginId);
-      const nextStatusMessage = result.removed
-        ? `${pluginId} をアンインストールしました`
-        : `${pluginId} は既に見つかりません`;
-
-      await synchronizePluginRuntime(nextStatusMessage);
-    } catch (error) {
-      setStatusMessage(toErrorMessage(error));
-    } finally {
-      setPluginDialogPendingAction(null);
     }
   };
 
@@ -3760,6 +3693,9 @@ export function App(): JSX.Element {
             openUnsupportedExternally: true
           });
         },
+        onPluginRuntimeChanged: synchronizePluginRuntime,
+        onRefreshWorkspace: refreshWorkspace,
+        onSetStatusMessage: setStatusMessage,
         selectedEntryPaths: Array.from(selectedEntryPaths).sort((left, right) =>
           left.localeCompare(right)
         ),
@@ -4152,23 +4088,6 @@ export function App(): JSX.Element {
     </div>
   );
 
-  const renderPluginManagerSidebarView = (): JSX.Element => (
-    <SidebarPluginManagerView
-      installRootPath={pluginInstallRootPath}
-      onInstall={() => {
-        void installPluginFromZip();
-      }}
-      onRefresh={() => {
-        void refreshPluginsFromDialog();
-      }}
-      onUninstall={(pluginId) => {
-        void uninstallPlugin(pluginId);
-      }}
-      pendingAction={pluginDialogPendingAction}
-      plugins={installedPlugins}
-    />
-  );
-
   const renderSearchSidebarView = (): JSX.Element => (
     <SearchSidebarView
       errorMessage={workspaceSearchError}
@@ -4201,12 +4120,6 @@ export function App(): JSX.Element {
       id: BUILTIN_SEARCH_SIDEBAR_VIEW_ID,
       render: renderSearchSidebarView,
       title: "Search"
-    },
-    {
-      activityIcon: <PluginSidebarIcon />,
-      id: BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID,
-      render: renderPluginManagerSidebarView,
-      title: "Plugins"
     },
     ...installedPlugins.flatMap((plugin) =>
       plugin.sidebarViews.map((sidebarView) => ({
@@ -4305,8 +4218,8 @@ export function App(): JSX.Element {
         {
           commands: [
             {
-              label: "Plugins",
-              onSelect: openPluginManager
+              label: "Extensions",
+              onSelect: openExtensionsManager
             }
           ]
         }
@@ -4402,10 +4315,6 @@ export function App(): JSX.Element {
           }
 
           selectSidebarView(viewId);
-
-          if (viewId === BUILTIN_PLUGIN_MANAGER_SIDEBAR_VIEW_ID) {
-            void refreshInstalledPluginState();
-          }
         }}
       />
 

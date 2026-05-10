@@ -133,7 +133,7 @@ package install 時に runtime plugin だけを `runtime-plugins/` へ materiali
 - package 内 private helper を保ったまま公開 surface だけを `exports` で制御できる
 - `package folder を root とする tree 型` の方針と一致する
 
-package 由来 runtime plugin は Plugin Manager 上では `package` origin として表示する。
+package 由来 runtime plugin は拡張機能管理タブ上では package child として表示する。
 単体 runtime plugin の `Uninstall` 操作では削除せず、package install / uninstall の単位で管理する。
 
 ## skill

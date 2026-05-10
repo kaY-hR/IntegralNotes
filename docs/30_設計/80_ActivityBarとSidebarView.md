@@ -35,7 +35,6 @@ Sidebar Host の中に表示される実体。
 
 - Explorer
 - Search
-- Plugins
 - 装置 plugin 独自 navigator
 
 ## MVP 構成
@@ -44,12 +43,12 @@ Sidebar Host の中に表示される実体。
 
 - `builtin:explorer`
 - `builtin:search`
-- `builtin:plugins`
 
 ### workspace-tool plugin items
 
 - `builtin:ai-chat`
 - `builtin:process-chain-viewer`
+- `builtin:extensions`
 - main workspace 側に tab を開く built-in / optional item 群
 
 ### external views
@@ -87,13 +86,13 @@ type SidebarViewDefinition = {
 ここへ
 
 - built-in Explorer
-- built-in Plugins
 - installed external plugin の `sidebarViews`
 
 を mergeした `sidebar item` 群と、別途
 
 - provenance pane
 - AI Chat
+- Extensions
 
 のような `main tab opener item` 群を Activity Bar に載せてよい。
 
@@ -112,8 +111,11 @@ process chain viewer は sidebar view ではなく、optional な internal works
 
 ## built-in view の扱い
 
-Explorer も Plugins も特別扱いせず、built-in sidebar view として registry に載せる。  
-これにより、UI shell は「どの view でも同じ」にできる。
+Explorer と Search は特別扱いせず、built-in sidebar view として registry に載せる。  
+これにより、sidebar UI shell は「どの view でも同じ」にできる。
+
+Extensions は sidebar view ではなく、main workspace tab を開く built-in workspace-tool item とする。  
+拡張機能管理タブの詳細は `docs/30_設計/56_拡張機能管理タブ.md` を参照。
 
 ## external plugin view の扱い
 
@@ -192,7 +194,8 @@ workspace 操作や richer action bridge は後続で足す。
 
 - `App.tsx` は `ActivityBar + Sidebar Host + Workspace` の shell を持つ
 - Explorer は built-in sidebar view
-- Plugin Manager も built-in sidebar view
+- Search は built-in sidebar view
+- Extensions は built-in workspace-tool item として main workspace tab を開く
 - dialog としての Plugin Manager は廃止してよい
 
 ## 非目標
