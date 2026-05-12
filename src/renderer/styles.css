@@ -1714,6 +1714,29 @@ textarea:focus-visible {
   background: #ffffff;
 }
 
+.editor-surface .milkdown .editor-standard-image-block {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.editor-surface .milkdown .editor-standard-image-block.selected {
+  outline: 2px solid rgba(15, 108, 189, 0.28);
+  outline-offset: 2px;
+}
+
+.editor-surface .milkdown .editor-standard-image-block__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.editor-surface .milkdown .editor-standard-image-block__caption {
+  color: #5a6d7e;
+  font-size: 0.78rem;
+}
+
 .editor-surface .milkdown .editor-workspace-embed__status {
   display: flex;
   align-items: center;
@@ -2104,7 +2127,7 @@ textarea:focus-visible {
 
 .integral-plugin-frame-shell--loading {
   display: grid;
-  min-height: 360px;
+  min-height: 300px;
   place-items: center;
   color: #5e6e7f;
   font-size: 0.82rem;
@@ -2113,8 +2136,8 @@ textarea:focus-visible {
 .integral-plugin-frame {
   display: block;
   width: 100%;
-  min-height: 360px;
-  height: 560px;
+  min-height: 300px;
+  height: 430px;
   border: 0;
   background: transparent;
 }

@@ -39,7 +39,7 @@
       }
 
       body {
-        padding: 12px;
+        padding: 0;
       }
 
       button,
@@ -64,8 +64,8 @@
       .card {
         display: grid;
         gap: 0;
-        min-height: 100%;
-        border: 1px solid var(--vscode-border);
+        min-height: 0;
+        border: 0;
         border-radius: 0;
         background: var(--vscode-panel);
         box-shadow: none;
@@ -135,55 +135,45 @@
 
       .note-shell {
         display: grid;
-        min-height: 100%;
+        min-height: 0;
         background: #ffffff;
       }
 
       .note-doc {
         display: grid;
-        gap: 14px;
-        padding: 22px 24px 26px;
+        align-content: start;
+        gap: 8px;
+        padding: 8px 12px 10px;
       }
 
       .note-doc__figure {
         display: grid;
-        gap: 8px;
+        align-content: start;
+        gap: 6px;
         justify-items: start;
       }
 
       .note-doc__figure-header {
         display: flex;
         align-items: center;
+        justify-content: flex-end;
         gap: 8px;
         width: min(100%, 520px);
-      }
-
-      .note-doc__figure-label {
-        color: #0078d4;
-        font-size: 11px;
-        font-weight: 600;
-      }
-
-      .note-doc__figure-accent {
-        flex: 1 1 auto;
-        height: 2px;
-        background: #59b7ff;
       }
 
       .note-doc__figure-frame {
         width: min(100%, 520px);
       }
 
-      .note-doc__result {
-        display: grid;
-        gap: 4px;
+      .run-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        width: 100%;
       }
 
-      .note-doc__result p {
-        margin: 0;
-        color: #2d2d2d;
-        font-size: 12px;
-        line-height: 1.6;
+      .run-actions .button {
+        min-width: 136px;
       }
 
       .pills {
@@ -515,8 +505,7 @@
       }
 
       .simple-figure {
-        display: grid;
-        place-items: center;
+        display: block;
         min-height: 0;
         margin: 0;
         padding: 0;
@@ -525,7 +514,34 @@
         background: #ffffff;
       }
 
+      .simple-gradient-editor {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        grid-template-rows: auto 42px;
+        grid-template-areas:
+          "y-axis graph"
+          ". x-axis";
+        align-items: stretch;
+        width: 100%;
+        background: #ffffff;
+      }
+
+      .simple-axis {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .simple-axis--y {
+        grid-area: y-axis;
+      }
+
+      .simple-axis--x {
+        grid-area: x-axis;
+      }
+
       .simple-image {
+        grid-area: graph;
         display: block;
         width: 100%;
         height: auto;
@@ -533,6 +549,72 @@
         border-radius: 0;
         box-shadow: none;
         background: #ffffff;
+      }
+
+      .gradient-label {
+        position: absolute;
+        display: grid;
+        gap: 3px;
+        width: 58px;
+        color: #1f1f1f;
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .gradient-label span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      .gradient-label input {
+        width: 100%;
+        padding: 4px 6px;
+        border: 1px solid #bdbdbd;
+        border-radius: 2px;
+        background: #ffffff;
+        color: #1f1f1f;
+        font-size: 11px;
+        line-height: 1.2;
+      }
+
+      .gradient-label--initial-conc {
+        right: 8px;
+        top: 74.5%;
+        transform: translateY(-50%);
+      }
+
+      .gradient-label--final-conc {
+        right: 8px;
+        top: 31%;
+        transform: translateY(-50%);
+      }
+
+      .gradient-label--initial-hold {
+        left: 17.5%;
+        top: 7px;
+        transform: translateX(-50%);
+      }
+
+      .gradient-label--gradient-time {
+        left: 42%;
+        top: 7px;
+        transform: translateX(-50%);
+      }
+
+      .gradient-label--final-switch-time {
+        left: 64%;
+        top: 7px;
+        transform: translateX(-50%);
+      }
+
+      .gradient-label--analysis-end-time {
+        left: 82%;
+        top: 7px;
+        transform: translateX(-50%);
       }
 
       .simple-summary {
@@ -549,15 +631,6 @@
         border-right: 1px solid var(--vscode-border);
         border-bottom: 1px solid var(--vscode-border);
         background: var(--vscode-panel);
-        color: var(--vscode-muted);
-        font-size: 11px;
-        font-weight: 500;
-      }
-
-      .mode-note {
-        padding: 10px 14px;
-        border-top: 1px solid var(--vscode-border);
-        background: var(--vscode-accent-soft);
         color: var(--vscode-muted);
         font-size: 11px;
         font-weight: 500;
@@ -735,43 +808,6 @@
         margin-top: 3px;
       }
 
-      .suggest-card {
-        width: min(100%, 200px);
-        padding: 10px 12px;
-        border: 1px solid #a8a8a8;
-        border-radius: 16px;
-        background: #ffffff;
-        color: #2d2d2d;
-        text-align: left;
-      }
-
-      .suggest-card:hover {
-        background: #f8fbff;
-      }
-
-      .suggest-card__eyebrow {
-        display: block;
-        margin-bottom: 4px;
-        color: #444444;
-        font-size: 11px;
-        font-weight: 500;
-      }
-
-      .suggest-card__title {
-        display: block;
-        color: #222222;
-        font-size: 14px;
-        font-weight: 500;
-        line-height: 1.4;
-      }
-
-      .suggest-card__caption {
-        display: block;
-        margin-top: 2px;
-        color: #6f6f6f;
-        font-size: 11px;
-      }
-
       @media (max-width: 860px) {
         body {
           padding: 0;
@@ -808,18 +844,6 @@
           border-bottom: 1px solid var(--vscode-border);
         }
 
-        .note-doc {
-          padding: 16px;
-        }
-
-        .note-doc__figure-header,
-        .note-doc__figure-frame,
-        .chart-toolbar,
-        .editor-header {
-          flex-direction: column;
-          align-items: stretch;
-        }
-
         .heading-actions,
         .pills {
           justify-content: flex-start;
@@ -838,11 +862,14 @@
       const ACTION_STATE_MESSAGE_TYPE = "integral:action-state";
       const SET_BLOCK_MESSAGE_TYPE = "integral:set-block";
       const UPDATE_PARAMS_MESSAGE_TYPE = "integral:update-params";
-      const DEFAULT_VIEW_MODE = "simple";
+      const DEFAULT_INITIAL_CONC = 5;
+      const DEFAULT_FINAL_CONC = 95;
+      const DEFAULT_INITIAL_HOLD_TIME = 2;
+      const DEFAULT_GRADIENT_TIME = 8;
+      const DEFAULT_POST_GRADIENT_TIME = 2;
 
       let currentModel = null;
       let currentActionState = createIdleActionState();
-      let currentViewMode = DEFAULT_VIEW_MODE;
 
       window.addEventListener("message", (event) => {
         if (!event.data) {
@@ -863,7 +890,6 @@
 
       function renderCurrentModel() {
         if (!currentModel) {
-          currentViewMode = DEFAULT_VIEW_MODE;
           root.innerHTML = '<div class="empty">Shimadzu LC renderer is ready.</div>';
           return;
         }
@@ -872,124 +898,31 @@
         const params = isRecord(block.params) ? { ...block.params } : {};
         const points = readGradientPoints(params["time-prog"]);
         const analysisTime = readNumber(params["analysis-time"]) ?? inferAnalysisTime(points);
-        const viewMode = currentViewMode === "detail" ? "detail" : DEFAULT_VIEW_MODE;
-        const segments = buildSegments(points, analysisTime);
-        const polyline = buildPolyline(points, analysisTime);
-        const startConc = points[0]?.conc ?? null;
-        const endConc = points.length > 0 ? Math.max(...points.map((point) => point.conc)) : null;
+        const gradientSettings = deriveStaticGradientSettings(points, analysisTime);
 
         root.innerHTML = `
           <div class="note-shell">
             <div class="note-doc">
               <div class="note-doc__figure">
                 <div class="note-doc__figure-header">
-                  <span class="note-doc__figure-label">グラジエント</span>
-                  <span class="note-doc__figure-accent"></span>
-                  ${renderModeSwitchMarkup(viewMode, points, analysisTime)}
+                  ${renderActionButtonsMarkup()}
                 </div>
                 <div class="note-doc__figure-frame">
-                  ${
-                    viewMode === "detail"
-                      ? renderDetailPanelMarkup({
-                          endConc,
-                          polyline,
-                          segments,
-                          startConc
-                        })
-                      : renderSimplePanelMarkup({
-                          analysisTime,
-                          points,
-                          segments
-                        })
-                  }
+                  ${renderSimplePanelMarkup({
+                    gradientSettings
+                  })}
                 </div>
               </div>
 
-              ${
-                viewMode === "detail"
-                  ? renderEditorMarkup(points)
-                  : `
-                    <div class="mode-note">
-                      シンプルモードは報告書向けの表示です。値の編集は詳細モードへ切り替えて行います。
-                    </div>
-                  `
-              }
-
-              <div class="note-doc__result">
-                <p><strong>結果確認:</strong></p>
-                <p>ロットAとBのクロマトグラムを比較</p>
-              </div>
-
-              ${renderSuggestionCardMarkup()}
               ${renderActionStatusMarkup()}
             </div>
           </div>
         `;
 
-        bindInteractions(params, points, analysisTime, viewMode);
+        bindInteractions(params, gradientSettings);
       }
 
-      function renderSidebarMarkup({ analysisTime, points, viewMode }) {
-        return `
-          <div class="sidebar">
-            ${
-              viewMode === "detail"
-                ? `
-                  <div class="field-card">
-                    <label class="field-label" for="analysis-time-input">Analysis Time</label>
-                    <input
-                      class="field-input"
-                      data-role="analysis-time"
-                      id="analysis-time-input"
-                      min="0"
-                      step="0.1"
-                      type="number"
-                      value="${formatInputValue(analysisTime)}"
-                    />
-                    <div class="field-suffix">minutes</div>
-                  </div>
-                `
-                : `
-                  <div class="field-card">
-                    <span class="field-label">Display</span>
-                    <strong>Simple Mode</strong>
-                    <div class="field-suffix">
-                      渡した <code>gradient.png</code> を使った画像ベースの簡易表示です。
-                    </div>
-                  </div>
-                `
-            }
-
-            <div class="metrics">
-              <div class="metric">
-                <span class="field-label">Analysis Time</span>
-                <strong>${formatDisplayNumber(analysisTime, "min")}</strong>
-              </div>
-              <div class="metric">
-                <span class="field-label">Points</span>
-                <strong>${escapeHtml(String(points.length))}</strong>
-              </div>
-            </div>
-          </div>
-        `;
-      }
-
-      function renderModeSwitchMarkup(viewMode, points, analysisTime) {
-        return `
-          <div class="mode-switch" title="${escapeHtml(
-            `${points.length} points / ${formatDisplayNumber(analysisTime, "min")}`
-          )}">
-            <button class="mode-button${viewMode === "detail" ? " is-active" : ""}" data-view-mode="detail" type="button">
-              詳細
-            </button>
-            <button class="mode-button${viewMode === "simple" ? " is-active" : ""}" data-view-mode="simple" type="button">
-              シンプル
-            </button>
-          </div>
-        `;
-      }
-
-      function renderSuggestionCardMarkup() {
+      function renderActionButtonsMarkup() {
         const actions = readPluginActions();
 
         if (actions.length === 0) {
@@ -997,7 +930,7 @@
         }
 
         return `
-          <div>
+          <div class="run-actions">
             ${actions
               .map((action) => {
                 const isRunning =
@@ -1006,15 +939,13 @@
 
                 return `
                   <button
-                    class="suggest-card"
+                    class="button button--accent"
                     data-action="request-plugin-action"
                     data-action-id="${escapeHtmlAttribute(action.id)}"
                     type="button"
                     ${currentActionState.status === "running" ? "disabled" : ""}
                   >
-                    <span class="suggest-card__eyebrow">suggest</span>
-                    <span class="suggest-card__title">${escapeHtml(label)}</span>
-                    <span class="suggest-card__caption">plugin host へ現在条件を渡して実行</span>
+                    ${escapeHtml(label)}
                   </button>
                 `;
               })
@@ -1056,159 +987,92 @@
         `;
       }
 
-      function renderDetailPanelMarkup({ endConc, polyline, segments, startConc }) {
-        return `
-          <div class="panel-shell">
-            <div class="panel-sidebar">
-              <div class="panel-title">詳細モード</div>
-              <div class="panel-helper">
-                time-prog と濃度を編集し、preview と JSON を同期します。
-              </div>
-
-              <div class="axis-field">
-                <span class="axis-caption">End B.Conc</span>
-                <input
-                  data-role="end-conc"
-                  min="0"
-                  step="0.1"
-                  type="number"
-                  value="${formatInputValue(endConc)}"
-                />
-              </div>
-
-              <div class="axis-field">
-                <span class="axis-caption">Start B.Conc</span>
-                <input
-                  data-role="start-conc"
-                  min="0"
-                  step="0.1"
-                  type="number"
-                  value="${formatInputValue(startConc)}"
-                />
-              </div>
-            </div>
-
-            <div class="graph-area">
-              <div class="graph-axis-top">
-                <span>${escapeHtml(formatSegmentValue(endConc ?? 95))}</span>
-                <span>B.Conc</span>
-                <span>${escapeHtml(formatSegmentValue(startConc ?? 0))}</span>
-              </div>
-              <div class="graph-grid"></div>
-              <img alt="" class="graph-template" src="../gradient.png" />
-              <svg class="graph-line" preserveAspectRatio="none" viewBox="0 0 100 100">
-                <polyline points="${polyline}"></polyline>
-              </svg>
-              <div class="graph-axis-bottom">
-                ${segments
-                  .map(
-                    (segment) => `<span>${escapeHtml(formatSegmentValue(segment.duration))}</span>`
-                  )
-                  .join("")}
-              </div>
-            </div>
-          </div>
-
-          <div class="segment-strip">
-            ${segments
-              .map(
-                (segment) => `
-                  <div class="segment">
-                    <span class="field-label">${escapeHtml(segment.label)}</span>
-                    <strong>${escapeHtml(formatSegmentValue(segment.duration))}</strong>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-        `;
-      }
-
-      function renderSimplePanelMarkup({ analysisTime, points, segments }) {
+      function renderSimplePanelMarkup({ gradientSettings }) {
         return `
           <div class="simple-shell">
             <div class="simple-frame">
               <figure class="simple-figure">
-                <img alt="Gradient simple preview" class="simple-image" src="../gradient.png" />
+                <div class="simple-gradient-editor">
+                  <div class="simple-axis simple-axis--y">
+                    ${renderGradientAxisInputMarkup({
+                      className: "gradient-label--initial-conc",
+                      key: "initialConc",
+                      label: "Initial B.Conc",
+                      max: 100,
+                      min: 0,
+                      suffix: "%",
+                      value: gradientSettings.initialConc
+                    })}
+                    ${renderGradientAxisInputMarkup({
+                      className: "gradient-label--final-conc",
+                      key: "finalConc",
+                      label: "Final B.Conc",
+                      max: 100,
+                      min: 0,
+                      suffix: "%",
+                      value: gradientSettings.finalConc
+                    })}
+                  </div>
+                  <img alt="Gradient simple preview" class="simple-image" src="../gradient.png" />
+                  <div class="simple-axis simple-axis--x">
+                    ${renderGradientAxisInputMarkup({
+                      className: "gradient-label--initial-hold",
+                      key: "initialHoldTime",
+                      label: "Initial hold",
+                      min: 0,
+                      suffix: "min",
+                      value: gradientSettings.initialHoldTime
+                    })}
+                    ${renderGradientAxisInputMarkup({
+                      className: "gradient-label--gradient-time",
+                      key: "gradientTime",
+                      label: "Gradient time",
+                      min: 0,
+                      suffix: "min",
+                      value: gradientSettings.gradientTime
+                    })}
+                    ${renderGradientAxisInputMarkup({
+                      className: "gradient-label--final-switch-time",
+                      key: "finalSwitchTime",
+                      label: "Final switch time",
+                      min: 0,
+                      suffix: "min",
+                      value: gradientSettings.finalSwitchTime
+                    })}
+                    ${renderGradientAxisInputMarkup({
+                      className: "gradient-label--analysis-end-time",
+                      key: "analysisEndTime",
+                      label: "Analysis end time",
+                      min: 0,
+                      suffix: "min",
+                      value: gradientSettings.analysisEndTime
+                    })}
+                  </div>
+                </div>
               </figure>
             </div>
           </div>
         `;
       }
 
-      function renderEditorMarkup(points) {
+      function renderGradientAxisInputMarkup({ className, key, label, max, min, suffix, value }) {
         return `
-          <div class="editor">
-            <div class="editor-header">
-              <p>time-prog を編集すると、Preview と Markdown の両方に反映されます。</p>
-              <div class="editor-actions">
-                <button class="button button--accent" data-action="add-point" type="button">Add Point</button>
-              </div>
-            </div>
-
-            <div class="table-shell">
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th class="table-index">Step</th>
-                    <th>Time (min)</th>
-                    <th>B.Conc (%)</th>
-                    <th class="table-action">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${
-                    points.length === 0
-                      ? `
-                        <tr>
-                          <td class="table-index">-</td>
-                          <td colspan="3">time-prog が未設定です。Add Point から初期化できます。</td>
-                        </tr>
-                      `
-                      : points
-                          .map(
-                            (point, index) => `
-                              <tr>
-                                <td class="table-index">#${index + 1}</td>
-                                <td>
-                                  <input
-                                    data-point-index="${index}"
-                                    data-point-key="time"
-                                    min="0"
-                                    step="0.1"
-                                    type="number"
-                                    value="${formatInputValue(point.time)}"
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    data-point-index="${index}"
-                                    data-point-key="Conc"
-                                    min="0"
-                                    max="100"
-                                    step="0.1"
-                                    type="number"
-                                    value="${formatInputValue(point.conc)}"
-                                  />
-                                </td>
-                                <td class="table-action">
-                                  <button class="icon-button" data-action="remove-point" data-point-index="${index}" type="button">
-                                    Remove
-                                  </button>
-                                </td>
-                              </tr>
-                            `
-                          )
-                          .join("")
-                  }
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <label class="gradient-label ${escapeHtmlAttribute(className)}">
+            <span>${escapeHtml(label)}</span>
+            <input
+              aria-label="${escapeHtmlAttribute(`${label} ${suffix}`)}"
+              data-gradient-setting="${escapeHtmlAttribute(key)}"
+              ${max === undefined ? "" : `max="${escapeHtmlAttribute(max)}"`}
+              ${min === undefined ? "" : `min="${escapeHtmlAttribute(min)}"`}
+              step="0.1"
+              type="number"
+              value="${formatInputValue(value)}"
+            />
+          </label>
         `;
       }
 
-      function bindInteractions(params, points, analysisTime, viewMode) {
+      function bindInteractions(params, gradientSettings) {
         root.querySelectorAll('[data-action="request-plugin-action"]').forEach((button) => {
           button.addEventListener("click", () => {
             const actionId = button.getAttribute("data-action-id");
@@ -1233,140 +1097,72 @@
           });
         });
 
-        root.querySelectorAll("[data-view-mode]").forEach((button) => {
-          button.addEventListener("click", () => {
-            const nextViewMode =
-              button.getAttribute("data-view-mode") === "detail" ? "detail" : DEFAULT_VIEW_MODE;
-
-            if (nextViewMode === currentViewMode) {
-              return;
-            }
-
-            currentViewMode = nextViewMode;
-            renderCurrentModel();
-          });
-        });
-
-        if (viewMode !== "detail") {
-          return;
-        }
-
-        const analysisInput = root.querySelector('[data-role="analysis-time"]');
-        const startConcInput = root.querySelector('[data-role="start-conc"]');
-        const endConcInput = root.querySelector('[data-role="end-conc"]');
-        const addPointButton = root.querySelector('[data-action="add-point"]');
-
-        if (analysisInput) {
-          analysisInput.addEventListener("change", () => {
-            const nextAnalysisTime = readNumber(analysisInput.value);
-
-            if (nextAnalysisTime === null) {
-              renderCurrentModel();
-              return;
-            }
-
-            commitParams(params, points, nextAnalysisTime);
-          });
-        }
-
-        if (startConcInput) {
-          startConcInput.addEventListener("change", () => {
-            const nextConc = readNumber(startConcInput.value);
-
-            if (nextConc === null || points.length === 0) {
-              renderCurrentModel();
-              return;
-            }
-
-            const nextPoints = points.map((point, index) =>
-              index === 0 ? { ...point, conc: clamp(nextConc, 0, 100) } : point
-            );
-            commitParams(params, nextPoints, analysisTime);
-          });
-        }
-
-        if (endConcInput) {
-          endConcInput.addEventListener("change", () => {
-            const nextConc = readNumber(endConcInput.value);
-
-            if (nextConc === null || points.length === 0) {
-              renderCurrentModel();
-              return;
-            }
-
-            const peakIndex = findPeakPointIndex(points);
-            const nextPoints = points.map((point, index) =>
-              index === peakIndex ? { ...point, conc: clamp(nextConc, 0, 100) } : point
-            );
-            commitParams(params, nextPoints, analysisTime);
-          });
-        }
-
-        if (addPointButton) {
-          addPointButton.addEventListener("click", () => {
-            const nextPoints = createNextPoint(points, analysisTime);
-            const nextAnalysisTime = Math.max(
-              analysisTime,
-              nextPoints.at(-1)?.time ?? analysisTime
-            );
-            commitParams(params, nextPoints, nextAnalysisTime);
-          });
-        }
-
-        root.querySelectorAll("[data-point-key]").forEach((input) => {
+        root.querySelectorAll("[data-gradient-setting]").forEach((input) => {
           input.addEventListener("change", () => {
-            const pointIndex = Number(input.getAttribute("data-point-index"));
-            const pointKey = input.getAttribute("data-point-key");
+            const key = input.getAttribute("data-gradient-setting");
             const nextValue = readNumber(input.value);
 
-            if (!Number.isInteger(pointIndex) || nextValue === null || !pointKey) {
+            if (nextValue === null || !key) {
               renderCurrentModel();
               return;
             }
 
-            const nextPoints = points.map((point, index) => {
-              if (index !== pointIndex) {
-                return point;
-              }
-
-              if (pointKey === "time") {
-                return {
-                  ...point,
-                  time: Math.max(nextValue, 0)
-                };
-              }
-
-              return {
-                ...point,
-                conc: clamp(nextValue, 0, 100)
-              };
-            });
-
-            const normalizedPoints = sortPoints(nextPoints);
-            const nextAnalysisTime = Math.max(
-              analysisTime,
-              normalizedPoints.at(-1)?.time ?? analysisTime
-            );
-            commitParams(params, normalizedPoints, nextAnalysisTime);
+            commitStaticGradientSetting(params, gradientSettings, key, nextValue);
           });
         });
+      }
 
-        root.querySelectorAll('[data-action="remove-point"]').forEach((button) => {
-          button.addEventListener("click", () => {
-            const pointIndex = Number(button.getAttribute("data-point-index"));
+      function commitStaticGradientSetting(previousParams, settings, key, value) {
+        const nextSettings = { ...settings };
 
-            if (!Number.isInteger(pointIndex)) {
-              return;
+        switch (key) {
+          case "initialConc":
+            nextSettings.initialConc = clamp(value, 0, 100);
+            break;
+          case "finalConc":
+            nextSettings.finalConc = clamp(value, 0, 100);
+            break;
+          case "initialHoldTime":
+            nextSettings.initialHoldTime = Math.max(value, 0);
+            break;
+          case "gradientTime":
+            nextSettings.gradientTime = Math.max(value, 0);
+            break;
+          case "finalSwitchTime":
+            nextSettings.finalSwitchTime = Math.max(value, nextSettings.initialHoldTime);
+            nextSettings.gradientTime = Math.max(
+              nextSettings.finalSwitchTime - nextSettings.initialHoldTime,
+              0
+            );
+            break;
+          case "analysisEndTime":
+            nextSettings.analysisEndTime = Math.max(value, 0);
+            break;
+          default:
+            renderCurrentModel();
+            return;
+        }
+
+        const nextEndTime = nextSettings.initialHoldTime + nextSettings.gradientTime;
+        const nextAnalysisTime = Math.max(nextEndTime, nextSettings.analysisEndTime);
+        commitParams(
+          previousParams,
+          [
+            {
+              conc: nextSettings.initialConc,
+              time: 0
+            },
+            {
+              conc: nextSettings.initialConc,
+              time: nextSettings.initialHoldTime
+            },
+            {
+              conc: nextSettings.finalConc,
+              time: nextEndTime
             }
-
-            const nextPoints = points.filter((_, index) => index !== pointIndex);
-            const nextAnalysisTime = Math.max(
-              nextPoints.at(-1)?.time ?? 0,
-              nextPoints.length === 0 ? 0 : analysisTime
-            );
-            commitParams(params, nextPoints, nextAnalysisTime);
-          });
-        });
+          ],
+          nextAnalysisTime
+        );
       }
 
       function commitParams(previousParams, points, analysisTime) {
@@ -1402,75 +1198,49 @@
         );
       }
 
-      function buildSegments(points, analysisTime) {
-        const durations = [];
-
+      function deriveStaticGradientSettings(points, analysisTime) {
         if (points.length === 0) {
-          durations.push(0, 0, 0, analysisTime);
-        } else {
-          durations.push(points[0].time);
-
-          for (let index = 1; index < points.length; index += 1) {
-            durations.push(points[index].time - points[index - 1].time);
-          }
+          const endTime = DEFAULT_INITIAL_HOLD_TIME + DEFAULT_GRADIENT_TIME;
+          return {
+            analysisEndTime: Math.max(analysisTime, endTime + DEFAULT_POST_GRADIENT_TIME),
+            finalConc: DEFAULT_FINAL_CONC,
+            finalSwitchTime: endTime,
+            gradientTime: DEFAULT_GRADIENT_TIME,
+            initialConc: DEFAULT_INITIAL_CONC,
+            initialHoldTime: DEFAULT_INITIAL_HOLD_TIME
+          };
         }
 
-        while (durations.length < 4) {
-          durations.push(0);
-        }
+        const initialConc = points[0]?.conc ?? DEFAULT_INITIAL_CONC;
+        const peakIndex = findPeakPointIndex(points);
+        const peakPoint = points[peakIndex] ?? points.at(-1);
+        const finalConc = peakPoint?.conc ?? DEFAULT_FINAL_CONC;
+        const initialHoldTime = inferInitialHoldTime(points, initialConc);
+        const gradientEndTime = Math.max(peakPoint?.time ?? initialHoldTime, initialHoldTime);
+        const gradientTime = Math.max(gradientEndTime - initialHoldTime, 0);
+        const minimumAnalysisTime = initialHoldTime + gradientTime;
+        const analysisEndTime = Math.max(analysisTime, minimumAnalysisTime);
 
-        if (durations.length > 4) {
-          const head = durations.slice(0, 3);
-          const tail = durations.slice(3).reduce((sum, value) => sum + value, 0);
-          durations.length = 0;
-          durations.push(...head, tail);
-        }
-
-        const accountedTime = durations.reduce((sum, value) => sum + value, 0);
-
-        if (analysisTime > accountedTime) {
-          durations[durations.length - 1] += analysisTime - accountedTime;
-        }
-
-        return [
-          { duration: Math.max(durations[0], 0), label: "Start Hold" },
-          { duration: Math.max(durations[1], 0), label: "Ramp" },
-          { duration: Math.max(durations[2], 0), label: "Plateau" },
-          { duration: Math.max(durations[3], 0), label: "Re-equil" }
-        ];
+        return {
+          analysisEndTime,
+          finalConc,
+          finalSwitchTime: gradientEndTime,
+          gradientTime,
+          initialConc,
+          initialHoldTime
+        };
       }
 
-      function buildPolyline(points, analysisTime) {
-        const safeTime = Math.max(analysisTime, points.at(-1)?.time ?? 1, 1);
-        const normalizedPoints =
-          points.length === 0
-            ? [
-                { conc: 5, time: 0 },
-                { conc: 5, time: safeTime }
-              ]
-            : points;
-
-        return normalizedPoints
-          .map((point) => {
-            const x = 6 + (clamp(point.time, 0, safeTime) / safeTime) * 88;
-            const y = 92 - (clamp(point.conc, 0, 100) / 100) * 78;
-            return `${roundNumber(x)},${roundNumber(y)}`;
-          })
-          .join(" ");
-      }
-
-      function createNextPoint(points, analysisTime) {
-        if (points.length === 0) {
-          return [
-            { conc: 5, time: 0 },
-            { conc: 95, time: Math.max(analysisTime * 0.6, 5) },
-            { conc: 5, time: Math.max(analysisTime, 8) }
-          ];
+      function inferInitialHoldTime(points, initialConc) {
+        if (points.length >= 2 && nearlyEqual(points[0].time, 0) && nearlyEqual(points[1].conc, initialConc)) {
+          return Math.max(points[1].time, 0);
         }
 
-        const lastPoint = points.at(-1);
-        const nextTime = roundNumber((lastPoint?.time ?? 0) + 1);
-        return [...points, { conc: lastPoint?.conc ?? 5, time: nextTime }];
+        if (points.length >= 1 && nearlyEqual(points[0].conc, initialConc)) {
+          return Math.max(points[0].time, 0);
+        }
+
+        return DEFAULT_INITIAL_HOLD_TIME;
       }
 
       function findPeakPointIndex(points) {
@@ -1677,6 +1447,10 @@
 
       function clamp(value, min, max) {
         return Math.min(Math.max(value, min), max);
+      }
+
+      function nearlyEqual(left, right) {
+        return Math.abs(left - right) < 0.0001;
       }
 
       function isRecord(value) {

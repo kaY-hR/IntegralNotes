@@ -1,6 +1,10 @@
 import { Crepe } from "@milkdown/crepe";
-import { editorViewCtx, parserCtx, serializerCtx } from "@milkdown/kit/core";
-import { imageSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
+import { commandsCtx, editorViewCtx, parserCtx, serializerCtx } from "@milkdown/kit/core";
+import {
+  clearTextInCurrentBlockCommand,
+  imageSchema,
+  linkSchema
+} from "@milkdown/kit/preset/commonmark";
 import { Slice, type Node as ProseNode, type ResolvedPos } from "@milkdown/kit/prose/model";
 import type { Selection } from "@milkdown/kit/prose/state";
 import {
@@ -106,6 +110,8 @@ const INTEGRAL_LOG_BLOCK_LANGUAGE = "integral-log";
 const INTEGRAL_EXECUTION_LOG_LANGUAGE_PATTERN = `${INTEGRAL_ERROR_BLOCK_LANGUAGE}|${INTEGRAL_LOG_BLOCK_LANGUAGE}`;
 const INTEGRAL_EXECUTION_LOG_EMBED_DIRECTORY = "integral-block-logs";
 const INTEGRAL_EXECUTION_LOG_EMBED_PATTERN = `!\\[\\]\\([^\\r\\n)]*${INTEGRAL_EXECUTION_LOG_EMBED_DIRECTORY}/[^\\r\\n)]*\\.log(?:#integral-embed-height=\\d+)?\\)`;
+const INTEGRAL_BLOCK_MENU_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v3H9v3h7v3H9v4h9v3H6z" fill="currentColor"/></svg>';
 const INTEGRAL_BLOCK_WITH_OPTIONAL_EXECUTION_LOG_PATTERN = new RegExp(
   `(\`\`\`itg-notes\\r?\\n([\\s\\S]*?)\\r?\\n\`\`\`)(?:(?:\\r?\\n){2}(?:(\`{3,})(?:${INTEGRAL_EXECUTION_LOG_LANGUAGE_PATTERN})\\r?\\n[\\s\\S]*?\\r?\\n\\3|${INTEGRAL_EXECUTION_LOG_EMBED_PATTERN}))?`,
   "gu"
@@ -672,6 +678,45 @@ export function MilkdownEditor({
 
       editor = new Crepe({
         featureConfigs: {
+          [Crepe.Feature.BlockEdit]: {
+            buildMenu: (builder) => {
+              const definitions = getAvailableIntegralBlockTypes().filter(
+                isRuntimeIntegralBlockDefinition
+              );
+
+              if (definitions.length === 0) {
+                return;
+              }
+
+              const integralGroup = builder.addGroup("runtime-blocks", "Runtime Blocks");
+
+              definitions.forEach((definition) => {
+                integralGroup.addItem(
+                  `integral:${definition.pluginId}:${definition.blockType}`,
+                  {
+                    icon: INTEGRAL_BLOCK_MENU_ICON,
+                    label: `${definition.title} (${definition.pluginDisplayName})`,
+                    onRun: (ctx) => {
+                      const block = createInitialIntegralBlock(definition, {
+                        outputRoot: analysisResultDirectoryRef.current
+                      });
+                      const blockMarkdown = toIntegralCodeBlock(
+                        serializeIntegralBlockContent(block)
+                      );
+                      const commands = ctx.get(commandsCtx);
+
+                      commands.call(clearTextInCurrentBlockCommand.key);
+                      insert(blockMarkdown)(ctx);
+
+                      window.setTimeout(() => {
+                        focusInsertedIntegralBlockField(block.id ?? "");
+                      }, 0);
+                    }
+                  }
+                );
+              });
+            }
+          },
           [Crepe.Feature.ImageBlock]: {
             onUpload: handleImageUpload,
             proxyDomURL: proxyImageUrl
@@ -737,6 +782,7 @@ export function MilkdownEditor({
         sourceNotePath: relativePath
       });
       installWorkspaceEmbedFeature(editor, {
+        proxyImageUrl,
         uploadImage: handleImageUpload
       });
 
@@ -3025,6 +3071,10 @@ function getVisibleIntegralBlockSuggestions(
     });
 
   return ranked.map((entry) => entry.definition);
+}
+
+function isRuntimeIntegralBlockDefinition(definition: IntegralBlockTypeDefinition): boolean {
+  return definition.source === "external-plugin";
 }
 
 function getVisibleInlineActionSuggestions(

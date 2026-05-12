@@ -3330,6 +3330,7 @@ function buildShimadzuBlockType(
     },
     inputSlots: [
       {
+        extensions: [".lcm"],
         name: "method"
       }
     ],
