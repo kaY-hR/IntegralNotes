@@ -73,7 +73,7 @@ def main(argv: list[str]) -> int:
 
 
 def validate_file(path: Path) -> tuple[list[Issue], int]:
-    issues: list[Issue] = []
+    issues = validate_script_path_location(path)
 
     try:
         source = path.read_text(encoding="utf-8")
@@ -126,6 +126,30 @@ def validate_file(path: Path) -> tuple[list[Issue], int]:
         issues.append(Issue("error", path, 1, 1, "no top-level @integral_block(...) function found."))
 
     return issues, block_count
+
+
+def validate_script_path_location(path: Path) -> list[Issue]:
+    for part in path.parts:
+        if not part or part in {".", ".."}:
+            continue
+
+        if part.startswith("."):
+            return [
+                Issue(
+                    "error",
+                    path,
+                    1,
+                    1,
+                    (
+                        "analysis block scripts must be in a visible workspace path; "
+                        f"hidden/system path segment found: {part!r}. "
+                        "Use scripts/ai_blocks/ or another visible folder instead of .packages, "
+                        ".integral-sdk, .store, .codex, .claude, or .inline-action."
+                    ),
+                )
+            ]
+
+    return []
 
 
 def find_integral_block_decorator(node: ast.FunctionDef) -> ast.Call | None:

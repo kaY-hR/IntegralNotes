@@ -54,6 +54,7 @@ import {
 import { CollapseToggleButton } from "./CollapseToggleButton";
 import { ExternalPluginBlockRenderer } from "./ExternalPluginBlockRenderer";
 import { requestOpenManagedDataNote } from "./workspaceOpenEvents";
+import { setIntegralPluginRuntimeCatalog } from "./integralPluginRuntime";
 import {
   INTEGRAL_BLOCK_LANGUAGE,
   createInitialIntegralBlock,
@@ -629,6 +630,7 @@ function IntegralBlockPanel({
     void window.integralNotes
       .getIntegralAssetCatalog()
       .then((catalog) => {
+        setIntegralPluginRuntimeCatalog(catalog);
         setAssetCatalog(catalog);
       })
       .catch(() => {});
@@ -888,6 +890,13 @@ function IntegralBlockPanel({
     nextPicker: Omit<SlotFieldPickerState, "selectedIndex">
   ): void => {
     setInlineError(null);
+    void window.integralNotes
+      .getIntegralAssetCatalog()
+      .then((catalog) => {
+        setIntegralPluginRuntimeCatalog(catalog);
+        setAssetCatalog(catalog);
+      })
+      .catch(() => {});
     setSlotFieldPicker((current) => {
       if (
         current &&

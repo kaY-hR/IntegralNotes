@@ -4,6 +4,8 @@ Use this reference when writing or revising the Python file behind an `@integral
 
 Use `../../../.integral-sdk/python/integral/__init__.py` as the SDK source of truth. Do not assume demo scripts are present in every workspace template.
 
+New or amended block scripts must live in visible workspace paths. Use `scripts/ai_blocks/...` or another visible folder, not hidden/system folders such as `.packages`, `.integral-sdk`, `.store`, `.inline-action`, `.codex`, or `.claude`. If you start from a package script under `.packages`, copy or adapt it into a visible script path and insert the visible copy.
+
 ## Runtime Contract
 
 Implement the callable as:
@@ -26,6 +28,8 @@ Interpret the arguments like this:
 - `params`: a value object normalized from the decorator `params` schema, or `None`
 
 Write files to the assigned paths. Do not return in-memory objects to the app.
+
+If one logical input slot needs multiple files or directories, model that slot as a `.idts` dataset input. Declare the slot with `extensions=[".idts"]` and use SDK dataset helpers instead of passing ad hoc path lists through params.
 
 ## Decorator Params Pattern
 

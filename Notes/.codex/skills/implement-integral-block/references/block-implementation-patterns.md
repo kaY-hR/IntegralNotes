@@ -14,6 +14,8 @@ python .codex/skills/implement-integral-block/scripts/validate_integral_block.py
 
 The validator does not import or execute the block. It checks whether the source is shaped so IntegralNotes discovery can populate `in`, `out`, and `params` YAML.
 
+The script itself must live in a visible workspace path. Use `scripts/ai_blocks/...` or another visible folder for new or amended blocks. Do not save generated analysis block scripts under hidden/system folders such as `.packages`, `.integral-sdk`, `.store`, `.inline-action`, `.codex`, or `.claude`. If you start from a package script under `.packages`, copy or adapt it into a visible script path and insert the visible copy.
+
 Implement the callable as:
 
 ```python
@@ -34,6 +36,8 @@ Interpret the arguments like this:
 - `params`: a value object normalized from the decorator `params` schema, or `None`
 
 Write files to the assigned paths. Do not return in-memory objects to the app.
+
+If one logical input slot needs multiple files or directories, model that slot as a `.idts` dataset input. Declare the slot with `extensions=[".idts"]` and use SDK dataset helpers instead of passing ad hoc path lists through params.
 
 ## Decorator Params Pattern
 

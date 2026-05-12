@@ -135,6 +135,8 @@ out:
 slot が `.idts` を要求する場合、authoring 時の `in:` には `.idts` manifest path を入れてよい。実行前の `out:` には `.idts` file path ではなく output folder path を入れる。
 保存または実行前に、`in:` は managed data ID へ正規化する。
 
+1 つの論理 input slot に複数 file / directory を渡したい場合は、params に path list を持たせるのではなく `.idts` dataset input として設計する。script は `extensions=[".idts"]` を宣言し、SDK helper で member files または readable directory を得る。
+
 ## 4. input 割当
 
 各 input slot には次を指定できる。

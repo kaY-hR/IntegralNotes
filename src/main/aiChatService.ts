@@ -766,7 +766,10 @@ export class AiChatService {
     const stream = createAiAgentStreamCallbacks(request.streamId ?? null, options);
     const result = await this.generateTaskWithAgentRuntime({
       context: request.context,
-      extraTools: createInlinePythonBlockTools(),
+      extraTools: createInlinePythonBlockTools({
+        validateInsertion: (scriptPath, functionName) =>
+          this.validateInlinePythonBlockInsertionCandidate(scriptPath, functionName)
+      }),
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
       },
@@ -872,7 +875,9 @@ export class AiChatService {
             insertionText: text,
             markdownCommitRange: request.markdownCommitRange ?? null,
             markdownInsertionOffset: request.markdownInsertionOffset ?? null
-          })
+          }),
+        validatePythonBlockInsertion: (scriptPath, functionName) =>
+          this.validateInlinePythonBlockInsertionCandidate(scriptPath, functionName)
       }),
       hostCommand: {
         shellExecutablePath: settings.shellExecutablePath ?? null
@@ -929,6 +934,12 @@ export class AiChatService {
   private async validateInlinePythonBlockInsertion(
     insertion: InlinePythonBlockInsertion
   ): Promise<void> {
+    const locationError = validateGeneratedScriptPathLocation(insertion.scriptPath);
+
+    if (locationError) {
+      throw new Error(locationError);
+    }
+
     const absoluteScriptPath = this.workspaceService.getAbsolutePath(insertion.scriptPath);
     const stats = await fs.stat(absoluteScriptPath).catch(() => null);
 
@@ -942,6 +953,21 @@ export class AiChatService {
       throw new Error(
         `${insertion.scriptPath} に @integral_block 直下の def ${insertion.functionName}(...) が見つかりません。`
       );
+    }
+  }
+
+  private async validateInlinePythonBlockInsertionCandidate(
+    scriptPath: string,
+    functionName: string
+  ): Promise<InlinePythonBlockInsertionValidationResult> {
+    try {
+      await this.validateInlinePythonBlockInsertion({ functionName, scriptPath });
+      return { ok: true };
+    } catch (error) {
+      return {
+        message: toToolValidationMessage(error),
+        ok: false
+      };
     }
   }
 
@@ -1615,6 +1641,9 @@ function buildInlineActionInstructions(
     action.canCreatePythonBlockDraft
       ? "- For Python analysis blocks, save or identify the .py callable, call createPythonBlockDraft, edit the returned Markdown draft as needed, then commit it with insertMarkdownAtCursor."
       : "- createPythonBlockDraft is not available in this action.",
+    action.canCreatePythonBlockDraft
+      ? "- New or amended Python analysis scripts must be in visible workspace paths, normally scripts/ai_blocks/. Do not create or insert generated block scripts under hidden/system folders such as .packages, .integral-sdk, .store, .inline-action, .codex, or .claude. If starting from a package script, copy or adapt it into a visible script path."
+      : "",
     action.canInsertMarkdown
       ? "- insertMarkdownAtCursor validates the full candidate Markdown document. If it returns a validation error, revise the Markdown and call it again."
       : "",
@@ -1695,6 +1724,19 @@ type InlineMarkdownInsertionValidationResult =
   | InlineMarkdownInsertionValidationFailure
   | InlineMarkdownInsertionValidationSuccess;
 
+interface InlinePythonBlockInsertionValidationFailure {
+  message: string;
+  ok: false;
+}
+
+interface InlinePythonBlockInsertionValidationSuccess {
+  ok: true;
+}
+
+type InlinePythonBlockInsertionValidationResult =
+  | InlinePythonBlockInsertionValidationFailure
+  | InlinePythonBlockInsertionValidationSuccess;
+
 function createInlineMarkdownInsertionTools(options: {
   validateInsertion?: (text: string) => Promise<InlineMarkdownInsertionValidationResult>;
 } = {}): ToolSet {
@@ -1755,8 +1797,18 @@ function createInlineActionTools({
               functionName: z.string().min(1),
               scriptPath: z.string().min(1)
             }),
-            execute: async ({ functionName, scriptPath }) =>
-              createPythonBlockDraft(scriptPath, functionName)
+            execute: async ({ functionName, scriptPath }) => {
+              try {
+                return await createPythonBlockDraft(scriptPath, functionName);
+              } catch (error) {
+                return {
+                  functionName,
+                  scriptPath,
+                  validationMessage: toToolValidationMessage(error),
+                  validationStatus: "error" as const
+                };
+              }
+            }
           })
         }
       : {})
@@ -1852,6 +1904,9 @@ const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
     systemPrompt: [
       "You are creating a new Python analysis block for IntegralNotes.",
       "Prefer creating a Python file when implementation is needed, then create a Python block draft and insert the final Markdown.",
+      "Save new analysis block scripts in visible workspace paths, normally scripts/ai_blocks/. Do not create or insert generated block scripts under hidden/system folders such as .packages, .integral-sdk, .store, .inline-action, .codex, or .claude.",
+      "If you use a package-provided script under .packages as a reference, copy or adapt it into a visible script path and insert the visible copy.",
+      "If one logical input slot needs multiple files or directories, model it as a .idts dataset input by declaring extensions=[\".idts\"] and using the SDK dataset helpers.",
       "Write inputs and outputs slot objects as literal Python dictionaries; do not use dict(...), variables, helper functions, or class instances for slot definitions.",
       "The final commit must be Markdown insertion at the cursor."
     ].join("\n")
@@ -1872,6 +1927,9 @@ const FALLBACK_INLINE_ACTIONS: readonly InlineActionDefinition[] = [
       "You are amending an existing Python analysis block for IntegralNotes.",
       "Identify the existing block, script path, and function from the current note context or the user's instruction.",
       "Modify the existing workspace Python file when needed, then create a Python block draft and insert the amended final Markdown.",
+      "Save new or amended analysis block scripts in visible workspace paths, normally scripts/ai_blocks/. Do not create, modify, or insert generated block scripts under hidden/system folders such as .packages, .integral-sdk, .store, .inline-action, .codex, or .claude.",
+      "If the existing block points to a package script under .packages and behavior must change, copy or adapt it into a visible script path and insert the visible copy instead of editing the package import.",
+      "If one logical input slot needs multiple files or directories, model it as a .idts dataset input by declaring extensions=[\".idts\"] and using the SDK dataset helpers.",
       "Write inputs and outputs slot objects as literal Python dictionaries; do not use dict(...), variables, helper functions, or class instances for slot definitions.",
       "The final commit must be Markdown insertion at the cursor."
     ].join("\n")
@@ -2264,7 +2322,12 @@ function createIntegralBlockId(): string {
     .toUpperCase()}`;
 }
 
-function createInlinePythonBlockTools(): ToolSet {
+function createInlinePythonBlockTools(options: {
+  validateInsertion?: (
+    scriptPath: string,
+    functionName: string
+  ) => Promise<InlinePythonBlockInsertionValidationResult>;
+} = {}): ToolSet {
   return {
     insertPythonBlock: tool({
       description:
@@ -2274,23 +2337,61 @@ function createInlinePythonBlockTools(): ToolSet {
         scriptPath: z.string().min(1),
         summary: z.string().optional()
       }),
-      execute: async ({ functionName, scriptPath, summary }) => ({
-        functionName,
-        scriptPath,
-        summary: typeof summary === "string" ? summary : ""
-      })
+      execute: async ({ functionName, scriptPath, summary }) => {
+        let normalizedFunctionName: string;
+        let normalizedScriptPath: string;
+
+        try {
+          normalizedScriptPath = normalizeGeneratedScriptPath(scriptPath);
+          normalizedFunctionName = normalizeGeneratedFunctionName(functionName);
+        } catch (error) {
+          return {
+            functionName,
+            scriptPath,
+            summary: typeof summary === "string" ? summary : "",
+            validationMessage: toToolValidationMessage(error),
+            validationStatus: "error" as const
+          };
+        }
+
+        const validation = options.validateInsertion
+          ? await options.validateInsertion(normalizedScriptPath, normalizedFunctionName)
+          : { ok: true as const };
+
+        if (!validation.ok) {
+          return {
+            functionName: normalizedFunctionName,
+            scriptPath: normalizedScriptPath,
+            summary: typeof summary === "string" ? summary : "",
+            validationMessage: validation.message,
+            validationStatus: "error" as const
+          };
+        }
+
+        return {
+          functionName: normalizedFunctionName,
+          scriptPath: normalizedScriptPath,
+          summary: typeof summary === "string" ? summary : ""
+        };
+      }
     })
   };
 }
 
 function createPromptlessContinuationTools(options: {
   validateMarkdownInsertion: (text: string) => Promise<InlineMarkdownInsertionValidationResult>;
+  validatePythonBlockInsertion: (
+    scriptPath: string,
+    functionName: string
+  ) => Promise<InlinePythonBlockInsertionValidationResult>;
 }): ToolSet {
   return {
     ...createInlineMarkdownInsertionTools({
       validateInsertion: options.validateMarkdownInsertion
     }),
-    ...createInlinePythonBlockTools()
+    ...createInlinePythonBlockTools({
+      validateInsertion: options.validatePythonBlockInsertion
+    })
   };
 }
 
@@ -2387,6 +2488,8 @@ function buildPromptlessContinuationInstructions(
     normalizedUserId.length > 0
       ? `Configured IntegralNotes user ID: ${normalizedUserId}. For new datatype names, prefer the ${normalizedUserId}/... namespace.`
       : "No IntegralNotes user ID is configured. For new datatype names, use concise descriptive names and prefer a namespace if the user provides one.",
+    "Python analysis block scripts must be saved in visible workspace paths, normally scripts/ai_blocks/. Do not save or insert generated scripts under hidden/system directories such as .packages, .integral-sdk, .store, .inline-action, .codex, or .claude.",
+    "If a package script under .packages is useful, copy or adapt it into a visible script path and insert the visible copy.",
     ""
   );
 
@@ -2399,7 +2502,8 @@ function buildPromptlessContinuationInstructions(
     "",
     "Commit validation:",
     "- insertMarkdownAtCursor validates the full candidate Markdown document before committing.",
-    "- If the tool returns a validation error, revise the Markdown according to the error and call insertMarkdownAtCursor again."
+    "- insertPythonBlock validates that the target Python script is saved in a visible workspace path and exposes the requested @integral_block callable.",
+    "- If a commit tool returns a validation error, revise the Markdown or Python script path according to the error and call the commit tool again."
   );
 
   return lines.join("\n");
@@ -2493,6 +2597,8 @@ function buildInlinePythonBlockInstructions(
     normalizedUserId.length > 0
       ? `Configured IntegralNotes user ID: ${normalizedUserId}. For new datatype names, prefer the ${normalizedUserId}/... namespace.`
       : "No IntegralNotes user ID is configured. For new datatype names, use concise descriptive names and prefer a namespace if the user provides one.",
+    "Python analysis block scripts must be saved in visible workspace paths, normally scripts/ai_blocks/. Do not save or insert generated scripts under hidden/system directories such as .packages, .integral-sdk, .store, .inline-action, .codex, or .claude.",
+    "If a package script under .packages is useful, copy or adapt it into a visible script path and insert the visible copy.",
     ""
   );
 
@@ -2579,6 +2685,8 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
   return [
     "Use from integral import integral_block.",
     "The integral SDK lives under the hidden .integral-sdk/python/ import root and is system-managed. Do not create or modify files under .integral-sdk when implementing a block.",
+    "New or amended analysis block scripts must live in visible workspace paths, normally scripts/ai_blocks/. Do not create or insert generated block scripts under hidden/system folders such as .packages, .integral-sdk, .store, .inline-action, .codex, or .claude.",
+    "If using a package-provided script under .packages as a reference, copy or adapt it into a visible script path and insert that visible copy.",
     "The decorator supports display_name, description, inputs, outputs, and params.",
     "Slot objects support name, extension/extensions, datatype, auto_insert_to_work_note, share_note_with_input, and embed_to_shared_note.",
     "Write inputs and outputs slot objects as literal Python dictionaries like {\"name\": \"report\", \"extension\": \".html\"}; do not use dict(...), variables, helper functions, or class instances for slot definitions because discovery must statically read them.",
@@ -2588,6 +2696,7 @@ async function readImplementIntegralBlockSkillPrompt(workspaceRootPath: string):
     "Define user-editable parameters with params={...}, using a Python literal JSON Schema subset.",
     "The supported params schema is root type object with properties whose type is string, number, integer, or boolean. Supported UI metadata: title, description, default, enum, minimum, maximum.",
     "Decorator params is the source of truth. Do not rely on undeclared YAML params; schema-external params are removed by the app.",
+    "If one logical input slot needs multiple files or directories, model it as a .idts dataset input by declaring extensions=[\".idts\"] and using the SDK dataset helpers.",
     "For an input slot that should accept a .idts dataset, always declare extensions=[\".idts\"] in addition to any datatype. .idts is a bundle representation, not the datatype itself, and the input picker uses extensions for dataset candidates.",
     "At runtime, .idts input slots receive the .idts manifest file path. Use integral.resolve_dataset_files(inputs[slotName]) to iterate member files, or integral.resolve_dataset_input(inputs[slotName]) when a readable materialized directory is needed. Do not parse .store metadata directly in block scripts.",
     "Do not group files with different roles or user intent into one .idts output just for convenience.",
@@ -2770,7 +2879,31 @@ function normalizeGeneratedScriptPath(scriptPath: string): string {
     throw new Error(`AI が返した script path が不正です: ${scriptPath}`);
   }
 
+  const locationError = validateGeneratedScriptPathLocation(relativePath);
+
+  if (locationError) {
+    throw new Error(locationError);
+  }
+
   return relativePath;
+}
+
+function validateGeneratedScriptPathLocation(relativePath: string): string | null {
+  const hiddenSegment = relativePath
+    .split("/")
+    .filter(Boolean)
+    .find((segment) => segment.startsWith("."));
+
+  if (!hiddenSegment) {
+    return null;
+  }
+
+  return [
+    "Python analysis block scripts must be saved in a visible workspace path.",
+    `${relativePath} is under hidden/system path segment ${JSON.stringify(hiddenSegment)}.`,
+    "Use scripts/ai_blocks/ or another visible folder instead of .packages, .integral-sdk, .store, .inline-action, .codex, or .claude.",
+    "If the implementation started from a package script, copy or adapt it into a visible script path and insert that visible copy."
+  ].join(" ");
 }
 
 function normalizeGeneratedFunctionName(functionName: string): string {
@@ -2791,6 +2924,22 @@ function containsDiscoverableIntegralCallable(source: string, functionName: stri
   );
 
   return expression.test(source);
+}
+
+function toToolValidationMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function truncateInlineContext(value: string, side: "head" | "tail"): string {

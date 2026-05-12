@@ -25,6 +25,8 @@ Do not rely on repository-level product docs, architecture docs, development his
 
 - Start from the SDK surface area, not from product positioning.
 - Treat `.integral-sdk/python/` as a hidden, system-managed SDK import root. Inspect it for the contract, but do not create or modify files under `.integral-sdk` when implementing a block.
+- Place new or amended analysis block scripts in visible workspace paths, normally `scripts/ai_blocks/...`. Do not create or modify generated block scripts under hidden/system folders such as `.packages`, `.integral-sdk`, `.store`, `.inline-action`, `.codex`, or `.claude`.
+- If you use a package-provided script under `.packages` as a reference, copy or adapt it into a visible workspace script path and insert that visible script. Package imports are stock/private; new files under `.packages` are not discoverable through the normal Python block insertion flow.
 - Before creating a new script, inspect existing workspace scripts such as `scripts/**/*.py`; if a suitable `@integral_block` callable already exists, prefer reusing or minimally updating it.
 - Explain blocks in terms of the Python file the user is writing: decorator fields, slot names, path validation, and emitted files.
 - Treat slot I/O as path-based.
@@ -49,6 +51,7 @@ Do not rely on repository-level product docs, architecture docs, development his
 - Use `options = params or {}` for optional params.
 - Write stable UTF-8 output files at the assigned output path or inside the assigned bundle directory.
 - Use slot `datatype` as the semantic I/O compatibility label between analysis blocks. Prefer namespaced values such as `{user-id}/peak-table` when the app prompt provides a user ID.
+- If one logical input slot needs multiple files or directories, model it as a `.idts` dataset input by declaring `extensions=[".idts"]` and using the SDK dataset helpers.
 - If an input slot should accept a `.idts` dataset, always declare `extensions=[".idts"]` in addition to any `datatype`. `.idts` is the bundle representation, and the input picker uses extensions to find dataset candidates.
 - For `.idts` inputs, do not parse `.store/.integral` metadata directly in block scripts. Use the shipped SDK helpers instead.
 - Do not group files with different roles or user intent into one `.idts` output just for convenience.
@@ -71,6 +74,7 @@ Before finishing, verify:
 - run the static validator when Python is available:
   - from an IntegralNotes workspace root: `python .codex/skills/implement-integral-block/scripts/validate_integral_block.py scripts/path/to/block.py`
   - from this repository root while editing the template: `python Notes/.codex/skills/implement-integral-block/scripts/validate_integral_block.py Notes/scripts/path/to/block.py`
+- the script path has no component starting with `.`
 - the decorator uses only fields supported by the shipped `integral` module
 - each slot object is a literal `{...}` mapping, not `dict(...)`
 - decorator `params`, if present, uses the supported object schema shape

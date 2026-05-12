@@ -1483,6 +1483,22 @@ function determineToolTraceStatus(
     return "error";
   }
 
+  if (
+    toolName === "insertPythonBlock" &&
+    isRecord(output) &&
+    output.validationStatus === "error"
+  ) {
+    return "error";
+  }
+
+  if (
+    toolName === "createPythonBlockDraft" &&
+    isRecord(output) &&
+    output.validationStatus === "error"
+  ) {
+    return "error";
+  }
+
   if (toolName === "runShellCommand" && isRecord(output)) {
     if (output.status === "approved") {
       return typeof output.exitCode === "number" && output.exitCode === 0 ? "success" : "error";
@@ -1679,6 +1695,20 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
   if (
     toolName === "insertPythonBlock" &&
     isRecord(output) &&
+    output.validationStatus === "error" &&
+    typeof output.validationMessage === "string"
+  ) {
+    return JSON.stringify({
+      functionName: typeof output.functionName === "string" ? output.functionName : "",
+      scriptPath: typeof output.scriptPath === "string" ? output.scriptPath : "",
+      validationMessage: output.validationMessage,
+      validationStatus: "error"
+    });
+  }
+
+  if (
+    toolName === "insertPythonBlock" &&
+    isRecord(output) &&
     typeof output.scriptPath === "string" &&
     typeof output.functionName === "string"
   ) {
@@ -1710,6 +1740,20 @@ function summarizeToolOutput(toolName: string, output: unknown): string {
     return JSON.stringify({
       summary: typeof output.summary === "string" ? output.summary : "",
       text: output.text
+    });
+  }
+
+  if (
+    toolName === "createPythonBlockDraft" &&
+    isRecord(output) &&
+    output.validationStatus === "error" &&
+    typeof output.validationMessage === "string"
+  ) {
+    return JSON.stringify({
+      functionName: typeof output.functionName === "string" ? output.functionName : "",
+      scriptPath: typeof output.scriptPath === "string" ? output.scriptPath : "",
+      validationMessage: output.validationMessage,
+      validationStatus: "error"
     });
   }
 
