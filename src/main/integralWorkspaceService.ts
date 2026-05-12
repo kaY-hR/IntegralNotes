@@ -773,6 +773,7 @@ export class IntegralWorkspaceService {
         startedAt: now,
         status: "success",
         summary: "表示 block は実行不要です。",
+        updatedReferenceFiles: [],
         workNoteMarkdownToAppend: null
       };
     }
@@ -1165,6 +1166,7 @@ export class IntegralWorkspaceService {
         summary: executionLogMarkdownTarget
           ? `${definition.title} の実行に失敗しました。ログを保存しました。`
           : `${definition.title} の実行に失敗しました。`,
+        updatedReferenceFiles: [],
         workNoteMarkdownToAppend: null
       };
     }
@@ -1219,20 +1221,21 @@ export class IntegralWorkspaceService {
       )
     );
 
-    if (sourceNotePath && sourceBlock.id) {
-      await this.appendProjectedOutputsToDataNotes(
-        sourceNotePath,
-        sourceBlock.id,
-        definition.outputSlots,
-        resolvedBlock.inputs,
-        Object.fromEntries(
-          definition.outputSlots.map((slot) => [
-            slot.name,
-            outputMarkdownTargetMap.get(slot.name) ?? null
-          ])
-        )
-      );
-    }
+    const updatedReferenceFiles =
+      sourceNotePath && sourceBlock.id
+        ? await this.appendProjectedOutputsToDataNotes(
+            sourceNotePath,
+            sourceBlock.id,
+            definition.outputSlots,
+            resolvedBlock.inputs,
+            Object.fromEntries(
+              definition.outputSlots.map((slot) => [
+                slot.name,
+                outputMarkdownTargetMap.get(slot.name) ?? null
+              ])
+            )
+          )
+        : [];
     await this.workspaceService.syncManagedDataNotes();
 
     return {
@@ -1256,6 +1259,7 @@ export class IntegralWorkspaceService {
       summary: executionLogMarkdownTarget
         ? `${definition.title} を実行しました。ログを保存しました。`
         : `${definition.title} を実行しました。`,
+      updatedReferenceFiles,
       workNoteMarkdownToAppend
     };
   }
@@ -1376,6 +1380,7 @@ export class IntegralWorkspaceService {
       startedAt: result.startedAt,
       status: "success",
       summary: result.summary,
+      updatedReferenceFiles: [],
       workNoteMarkdownToAppend: null
     };
   }
@@ -1386,8 +1391,9 @@ export class IntegralWorkspaceService {
     outputSlots: readonly IntegralSlotDefinition[],
     resolvedInputs: Readonly<Record<string, string | null>>,
     outputReferences: Readonly<Record<string, string | null>>
-  ): Promise<void> {
+  ): Promise<string[]> {
     const projectionTargets = new Map<string, Set<string>>();
+    const updatedReferenceFiles: string[] = [];
 
     for (const outputSlot of outputSlots) {
       const outputReference = outputReferences[outputSlot.name] ?? null;
@@ -1429,7 +1435,10 @@ export class IntegralWorkspaceService {
       }
 
       await this.appendMarkdownToNote(noteRelativePath, markdownToAppend);
+      updatedReferenceFiles.push(noteRelativePath);
     }
+
+    return updatedReferenceFiles;
   }
 
   private resolveProjectedInputSlotNames(outputSlot: IntegralSlotDefinition): string[] {

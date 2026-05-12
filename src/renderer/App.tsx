@@ -3826,6 +3826,12 @@ export function App(): JSX.Element {
             });
           }}
           onRequestSave={(markdown) => saveNote(relativePath, markdown)}
+          onWorkspaceFilesUpdated={(relativePaths, statusMessage) => {
+            void reloadWorkspaceTabsFromDisk(relativePaths);
+            if (statusMessage) {
+              setStatusMessage(statusMessage);
+            }
+          }}
           onWorkspaceSnapshotChanged={(snapshot, statusMessage) => {
             applyWorkspaceSnapshot(snapshot, {
               statusMessage: statusMessage ?? "画像を workspace に保存しました"

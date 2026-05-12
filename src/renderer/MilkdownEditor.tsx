@@ -81,6 +81,7 @@ interface MilkdownEditorProps {
   onIntegralAssetCatalogChanged: (catalog: IntegralAssetCatalog) => void;
   onOpenWorkspaceFile: (target: string) => void;
   onRequestSave?: (markdown: string, reason?: string) => Promise<void> | void;
+  onWorkspaceFilesUpdated?: (relativePaths: string[], statusMessage?: string) => void;
   onWorkspaceSnapshotChanged: (snapshot: WorkspaceSnapshot, statusMessage?: string) => void;
   onWorkspaceLinkError: (message: string) => void;
   relativePath: string;
@@ -209,6 +210,7 @@ export function MilkdownEditor({
   onIntegralAssetCatalogChanged,
   onOpenWorkspaceFile,
   onRequestSave,
+  onWorkspaceFilesUpdated,
   onWorkspaceSnapshotChanged,
   onWorkspaceLinkError,
   relativePath,
@@ -227,6 +229,7 @@ export function MilkdownEditor({
   const onIntegralAssetCatalogChangedRef = useRef(onIntegralAssetCatalogChanged);
   const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
   const onRequestSaveRef = useRef(onRequestSave);
+  const onWorkspaceFilesUpdatedRef = useRef(onWorkspaceFilesUpdated);
   const onWorkspaceSnapshotChangedRef = useRef(onWorkspaceSnapshotChanged);
   const onWorkspaceLinkErrorRef = useRef(onWorkspaceLinkError);
   const autoSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -286,6 +289,10 @@ export function MilkdownEditor({
   useEffect(() => {
     onRequestSaveRef.current = onRequestSave;
   }, [onRequestSave]);
+
+  useEffect(() => {
+    onWorkspaceFilesUpdatedRef.current = onWorkspaceFilesUpdated;
+  }, [onWorkspaceFilesUpdated]);
 
   useEffect(() => {
     onWorkspaceSnapshotChangedRef.current = onWorkspaceSnapshotChanged;
@@ -705,6 +712,13 @@ export function MilkdownEditor({
           lastSyncedMarkdownRef.current = nextMarkdown;
           onChangeRef.current(nextMarkdown);
           queueMarkdownAutoSave(nextMarkdown, "integral-block-run");
+
+          if (result.updatedReferenceFiles.length > 0) {
+            onWorkspaceFilesUpdatedRef.current?.(
+              result.updatedReferenceFiles,
+              "共有 data-note を更新しました"
+            );
+          }
         },
         onUndoBlockResult: ({ nextBlockSource, previousBlockSource, result }) => {
           const nextMarkdown = applyIntegralUndoResultToMarkdown(

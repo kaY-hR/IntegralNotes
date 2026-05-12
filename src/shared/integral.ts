@@ -196,6 +196,7 @@ export interface ExecuteIntegralBlockResult {
   startedAt: string;
   status: "error" | "success";
   summary: string;
+  updatedReferenceFiles: string[];
   workNoteMarkdownToAppend: string | null;
 }
 
