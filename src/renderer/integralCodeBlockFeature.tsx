@@ -1593,10 +1593,6 @@ function IntegralBlockPanel({
             title={blockDefinition.title}
           />
 
-          {!isCollapsed && blockDefinition.description ? (
-            <p className="integral-json-preview__description">{blockDefinition.description}</p>
-          ) : null}
-
           {isCollapsed ? null : (
             <ExternalPluginBlockRenderer
               block={parsed.block}

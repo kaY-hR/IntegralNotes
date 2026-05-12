@@ -3339,6 +3339,7 @@ function buildShimadzuBlockType(
     },
     inputSlots: [
       {
+        extensions: [".lcm"],
         name: "method"
       }
     ],
@@ -3352,7 +3353,7 @@ function buildShimadzuBlockType(
     pluginDisplayName: plugin.displayName,
     pluginId: SHIMADZU_PLUGIN_ID,
     source: "external-plugin",
-    title: "Run Sequence"
+    title: "LC Linear Gradient"
   };
 }
 

@@ -8,11 +8,7 @@ import type {
 
 import { Crepe } from "@milkdown/crepe";
 
-import {
-  imageBlockSchema,
-  imageBlockView as standardImageBlockView
-} from "@milkdown/kit/component/image-block";
-import { inlineImageView } from "@milkdown/kit/component/image-inline";
+import { imageBlockSchema } from "@milkdown/kit/component/image-block";
 import { imageSchema } from "@milkdown/kit/preset/commonmark";
 import { $view } from "@milkdown/kit/utils";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
@@ -36,6 +32,7 @@ import { ReadonlyMarkdownPreview } from "./ReadonlyMarkdownPreview";
 type WorkspaceEmbedMode = "block" | "inline";
 
 interface WorkspaceEmbedFeatureOptions {
+  proxyImageUrl?: (url: string) => Promise<string> | string;
   uploadImage: (file: File) => Promise<string>;
 }
 
@@ -176,7 +173,7 @@ class WorkspaceEmbedBridgeNodeView implements NodeView {
       return new WorkspaceEmbedNodeView(this.mode, node, this.view, this.getPos, this.options);
     }
 
-    return getStandardImageNodeViewConstructor(this.mode)(node, this.view, this.getPos);
+    return new StandardImageNodeView(this.mode, node, this.options);
   }
 
   private cleanupLegacyImageEmbedMetadata(): void {
@@ -211,6 +208,93 @@ class WorkspaceEmbedBridgeNodeView implements NodeView {
 
       this.view.dispatch(this.view.state.tr.setNodeAttribute(position, "src", nextSource));
     });
+  }
+}
+
+class StandardImageNodeView implements NodeView {
+  readonly dom: HTMLElement;
+
+  private readonly captionElement: HTMLElement | null;
+  private readonly imageElement: HTMLImageElement;
+  private sourceToken = 0;
+
+  constructor(
+    private readonly mode: WorkspaceEmbedMode,
+    public node: ProseNode,
+    private readonly options: WorkspaceEmbedFeatureOptions
+  ) {
+    this.imageElement = document.createElement("img");
+
+    if (mode === "inline") {
+      this.dom = this.imageElement;
+      this.captionElement = null;
+    } else {
+      this.dom = document.createElement("div");
+      this.dom.className = "editor-standard-image-block";
+      this.imageElement.className = "editor-standard-image-block__image";
+      this.captionElement = document.createElement("div");
+      this.captionElement.className = "editor-standard-image-block__caption";
+      this.dom.append(this.imageElement, this.captionElement);
+    }
+
+    this.render();
+  }
+
+  update(node: ProseNode): boolean {
+    if (node.type !== this.node.type) {
+      return false;
+    }
+
+    this.node = node;
+    this.render();
+    return true;
+  }
+
+  selectNode(): void {
+    if (this.mode === "block") {
+      this.dom.classList.add("selected");
+    }
+  }
+
+  deselectNode(): void {
+    if (this.mode === "block") {
+      this.dom.classList.remove("selected");
+    }
+  }
+
+  ignoreMutation(_mutation: ViewMutationRecord): boolean {
+    return true;
+  }
+
+  private render(): void {
+    const source = readWorkspaceEmbedSource(this.node);
+    const token = this.sourceToken + 1;
+    this.sourceToken = token;
+    this.imageElement.alt = readStandardImageAlt(this.node);
+
+    const proxiedSource = this.options.proxyImageUrl?.(source) ?? source;
+
+    if (typeof proxiedSource === "string") {
+      this.imageElement.src = proxiedSource;
+    } else {
+      void proxiedSource
+        .then((resolvedSource) => {
+          if (this.sourceToken === token) {
+            this.imageElement.src = resolvedSource;
+          }
+        })
+        .catch(() => {
+          if (this.sourceToken === token) {
+            this.imageElement.src = source;
+          }
+        });
+    }
+
+    if (this.captionElement) {
+      const caption = readStandardImageCaption(this.node);
+      this.captionElement.textContent = caption;
+      this.captionElement.hidden = caption.length === 0;
+    }
   }
 }
 
@@ -863,6 +947,14 @@ function readWorkspaceEmbedSource(node: ProseNode): string {
   return `${node.attrs.src ?? ""}`;
 }
 
+function readStandardImageAlt(node: ProseNode): string {
+  return `${node.attrs.alt ?? node.attrs.caption ?? ""}`;
+}
+
+function readStandardImageCaption(node: ProseNode): string {
+  return `${node.attrs.caption ?? node.attrs.title ?? ""}`;
+}
+
 function shouldRenderWorkspaceEmbed(source: string): boolean {
   const relativePath = resolveWorkspaceMarkdownTarget(source.trim());
 
@@ -871,18 +963,6 @@ function shouldRenderWorkspaceEmbed(source: string): boolean {
   }
 
   return !STANDARD_IMAGE_EXTENSIONS.has(getLowercaseExtension(relativePath));
-}
-
-function getStandardImageNodeViewConstructor(mode: WorkspaceEmbedMode): NodeViewConstructor {
-  const viewPlugin = (
-    mode === "inline" ? inlineImageView : standardImageBlockView
-  ) as ViewPluginWithConstructor;
-
-  if (typeof viewPlugin.view !== "function") {
-    throw new Error(`Milkdown ${mode} image view is not initialized.`);
-  }
-
-  return viewPlugin.view;
 }
 
 function getLowercaseExtension(relativePath: string): string {
@@ -1002,10 +1082,6 @@ const STANDARD_IMAGE_EXTENSIONS = new Set([
   ".tiff",
   ".webp"
 ]);
-
-type ViewPluginWithConstructor = {
-  view?: NodeViewConstructor;
-};
 
 function escapeHtml(value: string): string {
   return value

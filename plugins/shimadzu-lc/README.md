@@ -10,7 +10,7 @@ LC 系 block を提供する sample external plugin source です。
   - `host/index.cjs`
 
 現在は `run-sequence` を提供します。
-renderer は `詳細` / `シンプル` を切り替えられる sample で、`シンプル` は `gradient.png` をそのまま使う画像ベース表示、`詳細` は `analysis-time` と `time-prog` を GUI 編集できます。`装置操作を実行` も renderer 内ボタンから `integral:request-action` 経由で起動します。
+renderer は `gradient.png` を使ったシンプル表示のみです。初期濃度・グラジエント終濃度・初期濃度維持時間・グラジエント時間・最終濃度切替時刻・分析終了時刻を画像左側/下側の軸ラベル input として編集できます。`method` input は `.lcm` を読み込み対象にします。`装置操作を実行` は renderer 上部のボタンから `integral:request-action` 経由で起動します。
 
 ローカル install:
 
