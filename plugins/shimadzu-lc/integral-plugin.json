@@ -16,7 +16,7 @@
   "blocks": [
     {
       "type": "run-sequence",
-      "title": "Run Sequence",
+      "title": "LC Linear Gradient",
       "description": "勾配プログラムを編集し、LC シーケンスを実行する。",
       "actions": [
         {

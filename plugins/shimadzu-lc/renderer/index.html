@@ -516,8 +516,8 @@
 
       .simple-gradient-editor {
         display: grid;
-        grid-template-columns: 76px minmax(0, 1fr);
-        grid-template-rows: auto 42px;
+        grid-template-columns: 86px minmax(0, 1fr);
+        grid-template-rows: auto 62px;
         grid-template-areas:
           "y-axis graph"
           ". x-axis";
@@ -540,6 +540,27 @@
         grid-area: x-axis;
       }
 
+      .simple-axis-title {
+        position: absolute;
+        color: #555f67;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        pointer-events: none;
+      }
+
+      .simple-axis-title--y {
+        left: 7px;
+        top: 50%;
+        transform: translateY(-50%) rotate(180deg);
+        writing-mode: vertical-rl;
+      }
+
+      .simple-axis-title--x {
+        right: 6px;
+        bottom: 3px;
+      }
+
       .simple-image {
         grid-area: graph;
         display: block;
@@ -554,20 +575,26 @@
       .gradient-label {
         position: absolute;
         display: grid;
-        gap: 3px;
+        gap: 2px;
         width: 58px;
         color: #1f1f1f;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 600;
       }
 
-      .gradient-label span {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
+      .simple-axis--x .gradient-label {
+        width: 82px;
+      }
+
+      .gradient-label__text {
+        display: block;
+        min-height: 20px;
+        color: #4d5963;
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1.12;
+        text-align: center;
+        overflow-wrap: anywhere;
       }
 
       .gradient-label input {
@@ -584,36 +611,36 @@
       .gradient-label--initial-conc {
         right: 8px;
         top: 74.5%;
-        transform: translateY(-50%);
+        transform: translateY(calc(-50% - 11px));
       }
 
       .gradient-label--final-conc {
         right: 8px;
         top: 31%;
-        transform: translateY(-50%);
+        transform: translateY(calc(-50% - 11px));
       }
 
       .gradient-label--initial-hold {
         left: 17.5%;
-        top: 7px;
+        top: 5px;
         transform: translateX(-50%);
       }
 
       .gradient-label--gradient-time {
-        left: 42%;
-        top: 7px;
+        left: 41%;
+        top: 5px;
         transform: translateX(-50%);
       }
 
       .gradient-label--final-switch-time {
         left: 64%;
-        top: 7px;
+        top: 5px;
         transform: translateX(-50%);
       }
 
       .gradient-label--analysis-end-time {
-        left: 82%;
-        top: 7px;
+        left: 88%;
+        top: 5px;
         transform: translateX(-50%);
       }
 
@@ -994,10 +1021,11 @@
               <figure class="simple-figure">
                 <div class="simple-gradient-editor">
                   <div class="simple-axis simple-axis--y">
+                    <div class="simple-axis-title simple-axis-title--y">B.Conc</div>
                     ${renderGradientAxisInputMarkup({
                       className: "gradient-label--initial-conc",
                       key: "initialConc",
-                      label: "Initial B.Conc",
+                      label: "初期濃度",
                       max: 100,
                       min: 0,
                       suffix: "%",
@@ -1006,7 +1034,7 @@
                     ${renderGradientAxisInputMarkup({
                       className: "gradient-label--final-conc",
                       key: "finalConc",
-                      label: "Final B.Conc",
+                      label: "最終濃度",
                       max: 100,
                       min: 0,
                       suffix: "%",
@@ -1015,10 +1043,11 @@
                   </div>
                   <img alt="Gradient simple preview" class="simple-image" src="../gradient.png" />
                   <div class="simple-axis simple-axis--x">
+                    <div class="simple-axis-title simple-axis-title--x">Time</div>
                     ${renderGradientAxisInputMarkup({
                       className: "gradient-label--initial-hold",
                       key: "initialHoldTime",
-                      label: "Initial hold",
+                      label: "グラジエント開始時刻",
                       min: 0,
                       suffix: "min",
                       value: gradientSettings.initialHoldTime
@@ -1026,7 +1055,7 @@
                     ${renderGradientAxisInputMarkup({
                       className: "gradient-label--gradient-time",
                       key: "gradientTime",
-                      label: "Gradient time",
+                      label: "グラジエント時間",
                       min: 0,
                       suffix: "min",
                       value: gradientSettings.gradientTime
@@ -1034,7 +1063,7 @@
                     ${renderGradientAxisInputMarkup({
                       className: "gradient-label--final-switch-time",
                       key: "finalSwitchTime",
-                      label: "Final switch time",
+                      label: "最終濃度切替時刻",
                       min: 0,
                       suffix: "min",
                       value: gradientSettings.finalSwitchTime
@@ -1042,7 +1071,7 @@
                     ${renderGradientAxisInputMarkup({
                       className: "gradient-label--analysis-end-time",
                       key: "analysisEndTime",
-                      label: "Analysis end time",
+                      label: "分析終了時刻",
                       min: 0,
                       suffix: "min",
                       value: gradientSettings.analysisEndTime
@@ -1058,7 +1087,7 @@
       function renderGradientAxisInputMarkup({ className, key, label, max, min, suffix, value }) {
         return `
           <label class="gradient-label ${escapeHtmlAttribute(className)}">
-            <span>${escapeHtml(label)}</span>
+            <span class="gradient-label__text">${escapeHtml(label)}</span>
             <input
               aria-label="${escapeHtmlAttribute(`${label} ${suffix}`)}"
               data-gradient-setting="${escapeHtmlAttribute(key)}"
